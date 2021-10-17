@@ -1,5 +1,6 @@
 ---
 
+learn: 70
 multicast: 224.0.0.1:9999
 rhi:
   as_number: 65000
