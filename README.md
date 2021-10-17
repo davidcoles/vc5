@@ -22,7 +22,7 @@ Run the vc5.sh shell script with arguments of your IP address and network interf
 
 If this doesn't bomb out then you should have a load balancer up and running, although by default it will wait for around one minute to learn from other instances via multicast before healthchecking backends and advertising routes. You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exists (use Ctrl-C).
 
-If you don't have a routed environment then you can test with a client machine on the same VLAN. Either add a static route on the client machine pointing to the load balancer, or run Bird/Quagga on client and add the client's IP address to the BGP section of the YAML config.
+If you don't have a routed environment then you can test with a client machine on the same VLAN. Either add a static route on the client machine pointing to the load balancer, or run BIRD/Quagga on client and add the client's IP address to the BGP section of the YAML config.
 
 Sample bird.conf snippet:
 
@@ -46,7 +46,7 @@ protocol bgp loadbalancers {
 }
 ```
 
-If you enable ECMP on your router/client ("merge paths on;" in Bird's kernel protocol) then you can load balance traffic to multiple load balancers. VC5 uses multicast to share a flow state table so peers will learn about each other's connections and take over in the case of one load balancer going down.
+If you enable ECMP on your router/client ("merge paths on;" in BIRD's kernel protocol) then you can load balance traffic to multiple load balancers. VC5 uses multicast to share a flow state table so peers will learn about each other's connections and take over in the case of one load balancer going down.
 
 To use native driver mode in XDP a slighly more involved network setup is needed at this stage. Run your physical interface in a bridge (see sample netplan config in bridge.yaml) and add the -b flag to vc5.sh as so:
 
