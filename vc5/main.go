@@ -101,7 +101,9 @@ func main() {
 
 	ips := make(map[IP4]chan vipstatus)
 
-	time.Sleep(70 * time.Second)
+	if config.Learn > 0 {
+		time.Sleep(time.Duration(config.Learn) * time.Second)
+	}
 
 	fmt.Println(config.Peers)
 	b := bgp4rhi.Manager(c.ipaddr, config.RHI.Peers)

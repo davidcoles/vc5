@@ -1,6 +1,6 @@
 # VC5
 
-A distributed Layer 2 Direct Server Return (L2DSR) Load Balancer for Linux using XDP/eBPF
+A distributed Layer 2 Direct Server Return (L2DSR) load balancer for Linux using XDP/eBPF
 
 This is very much a proof of concept at this stage!
 
@@ -46,7 +46,7 @@ protocol bgp loadbalancers {
 }
 ```
 
-If you enable ECMP then you can load balance traffic to multiple load balancers. VC5 uses milticast to share a flow state table so peers will learn about each other's connections and take over in the case of one load balancer going down.
+If you enable ECMP on your router/client ("merge paths on;" in Bird's kernel protocol) then you can load balance traffic to multiple load balancers. VC5 uses multicast to share a flow state table so peers will learn about each other's connections and take over in the case of one load balancer going down.
 
 To use native driver mode in XDP a slighly more involved network setup is needed at this stage. Run your physical interface in a bridge (see sample netplan config in bridge.yaml) and add the -b flag to vc5.sh as so:
 
@@ -56,9 +56,9 @@ To use native driver mode in XDP a slighly more involved network setup is needed
 
 This has mostly been tested using Icecast backend servers with clients pulling a mix of low and high bitrate streams (48kbps - 192kbps).
 
-It seems that a VMWare guest (4 core, 8GB) using the XDP generic driver will comfortably support up to 100K concurrent clients, 380Mbps/700Kpps through the load balancer and 8Gbps of traffic from the backends directly to the clients.
+It seems that a VMWare guest (4 core, 8GB) using the XDP generic driver will comfortably support 100K concurrent clients, 380Mbps/700Kpps through the load balancer and 8Gbps of traffic from the backends directly to the clients.
 
-A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical-cores and an Intel 10Gbps NIC (ixgbe driver) in native mode will support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic back to clients. This was at a load of ~25% on the CPU - clearly it can do significantly more than this, but resources for running more client and backend servers were not available at the time.
+A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical cores and an Intel 10Gbps NIC (ixgbe driver) in native mode will support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic back to clients. This was at a load of ~25% on the CPU - clearly it can do significantly more than this, but resources for running more client and backend servers were not available at the time.
 
 ## TODOs
 

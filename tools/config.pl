@@ -34,7 +34,7 @@ getopts('h', \my %opts);
     $rhi->{'as_number'} =  $rhi->{'as_number'}+0;
 
     #my $json = { 'peers' => $peers, 'services' => $services, 'multicast' => $conf->{'multicast'} };
-    my $json = { 'services' => $services, 'multicast' => $conf->{'multicast'}, 'rhi' => $rhi };
+    my $json = { 'learn' => $conf->{'learn'}+0, 'services' => $services, 'multicast' => $conf->{'multicast'}, 'rhi' => $rhi };
     
     print to_json($json, {pretty=>1}),"\n";
 }
