@@ -1,0 +1,46 @@
+---
+
+multicast: 224.0.0.1:9999
+rhi:
+  as_number: 65000
+  peers:
+    - 10.10.100.3
+    - 10.10.100.4
+
+services:
+
+  - name: nginx
+    desc: web server
+    addr: 192.168.101.1
+    port:
+      - 80
+      - 443
+    real: nginx
+    checks:
+      - name: http check
+        type: http
+        port: 80
+        path: /alive
+      - name: https check
+        type: https
+        port: 443
+        path: /alive
+     
+  - name: iperf
+    desc: bandwidth test
+    addr: 192.168.101.2
+    port: 5001
+    real: iperf
+    need: 1
+    checks:
+      - name: tcp check
+        type: tcp
+
+reals:
+  nginx:
+    - 10.10.100.10
+    - 10.10.100.11
+  iperf:
+    - 10.10.100.12
+    - 10.10.100.13
+
