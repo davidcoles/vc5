@@ -2,7 +2,7 @@
 
 A distributed Layer 2 Direct Server Return (L2DSR) load balancer for Linux using XDP/eBPF
 
-This is very much a proof of concept at this stage!
+This is very much a proof of concept at this stage - most everything is incomplete and poorly defined!
 
 ## Quickstart
 
@@ -71,3 +71,38 @@ A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical cores and an 
 * VLAN support
 * GRE/DSCP L3 support
 
+## Configuration
+
+### Route Health Injection
+
+The rhi section contains the AS number to use and a list of
+peers. Currently, the BGP4 implementation does not listen on
+port 179. The IP address specified on the command line will be used as
+the router ID. If the peer has a router ID higher than this IP then
+according to the RFC the connection should be abandoned, so this may
+not work in all situations. I'm unsure if using passive option in BIRD
+helps with this or not; YMMV. This will be addressed soon.
+
+RHI will only advertise a service's IP address if all services on all ports using that IP address pass healthchecks. All healthchecks listed for a port (http/https/tcp) must pass if specified.
+
+
+### Services
+
+A service consist of 
+
+* name - a string, the name of the service
+* desc - a string, a description of the service
+* addr - an VIP address, or list of VIP addresses, for the service
+* port - an integer or list of integers, that the service consist of
+* real - a name, or list of names, that references groups of real IP address in the "reals" section
+* need - number of real servers that need to be available for the service to be declared healthy (default: 1)
+* checks - a list of checks that must all pass for the service to be declared healthy.
+
+### Checks
+
+A check consists of
+
+* name - a string describing the check
+* type - http, https or tcp
+* port - the port that the check will be run against, optional if there is only one port listed in the service
+* path - the path to run http or https checks against, not needed for tcp
