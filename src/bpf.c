@@ -352,82 +352,6 @@ static inline __u16 sdbm(unsigned char *ptr, __u8 len) {
 }
 
 
-#define GRE 0
-static __always_inline int gre_push(struct xdp_md *ctx, __be32 saddr, __be32 daddr)
-{
-    void *data_end = (void *)(long)ctx->data_end;
-    void *data     = (void *)(long)ctx->data;
-
-    struct ethhdr *eth = data;
-    struct iphdr *ip = data + sizeof(struct ethhdr);
-    
-    if (data + sizeof(struct ethhdr) + sizeof(struct iphdr) > data_end) {
-	return -1;
-    }
-    
-    
-    struct ethhdr eth_cpy;
-    struct iphdr ip_cpy;
-    __be32 gre = bpf_htonl(0x800);
-    
-    /* First copy the original Ethernet header */
-    __builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
-    __builtin_memcpy(&ip_cpy, ip, sizeof(ip_cpy));    
-
-    int adj = sizeof(struct iphdr) + 4;
-
-    ip_cpy.saddr = saddr;
-    ip_cpy.daddr = daddr;
-    ip_cpy.tot_len = bpf_htons(adj + bpf_ntohs(ip_cpy.tot_len));
-    ip_cpy.protocol = 47; //GRE
-
-    //ip_cpy.tos = 0x3;
-    
-    ip_cpy.check = 0;
-    ip_cpy.check = checksum((unsigned short *) &ip_cpy, sizeof(ip_cpy));
-    
-    /* Then add space in front of the packet */
-    if (bpf_xdp_adjust_head(ctx, 0 - adj))
-	return -1;
-    
-    /* Need to re-evaluate data_end and data after head adjustment, and
-     * bounds check, even though we know there is enough space (as we
-     * increased it).
-     */
-    data_end = (void *)(long)ctx->data_end;
-    data = (void *)(long)ctx->data;
-    eth = data;
-    ip = data + sizeof(*eth);
-    __be32 *g = data + sizeof(*eth) + sizeof(*ip);
-    
-    if ((data + sizeof(struct ethhdr) + sizeof(struct iphdr) + 4) > data_end)
-	return -1;
-
-    /* Copy back Ethernet header in the right place, populate VLAN tag with
-     * ID and proto, and set outer Ethernet header to VLAN type.
-     */
-
-    __builtin_memcpy(eth, &eth_cpy, sizeof(*eth));
-    __builtin_memcpy(ip, &ip_cpy, sizeof(*ip));
-    __builtin_memcpy(g, &gre, sizeof(*g));
-    
-    return 0;
-    
-
-    
-    /*
-      vlh = (void *)(eth + 1);
-      
-      if (vlh + 1 > data_end)
-      return -1;
-      
-      vlh->h_vlan_TCI = bpf_htons(vlid);
-      vlh->h_vlan_encapsulated_proto = eth->h_proto;
-      
-      eth->h_proto = bpf_htons(ETH_P_8021Q);
-    */
-    return 0;
-}
 
 unsigned char nulmac[6] = {0,0,0,0,0,0};
 
@@ -447,15 +371,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
     void *data     = (void *)(long)ctx->data;
     int rx_bytes = data_end - data;
 
-    if(GRE && phyaddr == 0) {
-	struct interface *phyif = bpf_map_lookup_elem(&interfaces, &index0);
-  
-	if (!phyif) {
-	    return XDP_PASS;
-	}
-	phyaddr = phyif->ipaddr;
-    }
-    
     struct counter *statsp = bpf_map_lookup_elem(&stats, &index0);
     if (!statsp) {
 	return XDP_PASS;
@@ -626,8 +541,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       statsp->fp_count++;
       statsp->fp_time += (bpf_ktime_get_ns()-start);
 
-      if(GRE) gre_push(ctx, phyaddr, fs->rip);
-      
       return XDP_TX;      
   }
   
@@ -709,8 +622,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       statsp->fp_count++;
       statsp->fp_time += (bpf_ktime_get_ns()-start);
 
-      if(GRE) gre_push(ctx, phyaddr, s.rip);
-      
       return XDP_TX;
   }
 

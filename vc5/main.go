@@ -267,8 +267,8 @@ func spinner() func() string {
 
 func pulser() func() string {
 	var n int
-	s := []string{" .\b\b", " o\b\b", " O\b\b", " o\b\b"}
-	//s := []string{" O\b\b", " H\b\b", " Y\b\b", " E\b\b", " A\b\b", " H\b\b"}
+	//s := []string{" .\b\b", " o\b\b", " O\b\b", " o\b\b"}
+	s := []string{" O\b\b", " H\b\b", " Y\b\b", " E\b\b", " A\b\b", " H\b\b"}
 	return func() string {
 		n++
 		return s[n%len(s)]
