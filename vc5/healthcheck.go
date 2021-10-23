@@ -77,7 +77,7 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 	updates := make(chan update, 100)
 	countersc := make(chan counters, 100)
 
-	var live macrips
+	var live macripvids
 	var nalive uint
 	var up bool
 
@@ -128,11 +128,11 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 		default:
 		}
 
-		var new macrips
+		var new macripvids
 
 		for r, m := range mac {
 			if bup[r] && cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
-				new = append(new, [10]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3]})
+				new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], 0, 0})
 			}
 		}
 
@@ -140,7 +140,7 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 
 		was := up
 
-		if !cmpmacrips(live, new) {
+		if !cmpmacripvids(live, new) {
 			live = new
 
 			if service.Need > 0 {
@@ -152,7 +152,7 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 			if up {
 				c.SetBackends(vip, port, live)
 			} else {
-				c.SetBackends(vip, port, macrips{})
+				c.SetBackends(vip, port, macripvids{})
 			}
 
 			// send update - mark vip up/down etc

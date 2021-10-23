@@ -75,7 +75,7 @@ struct flow {
 
 struct flow_state {
     __u8 hwaddr[6];
-    __u16 pad;
+    __be16 vlan;
     __u64 time;
     __be32 rip;
     __u32 era;
@@ -106,7 +106,9 @@ struct vip_rip_port {
 };
 
 struct backend {
-    __u8 hwaddr[65536][10];
+    //__u8 hwaddr[65536][10];
+    // MAC + IPv4 + VLANID
+    __u8 hwaddr[65536][12];
 };
 
 struct interface {
@@ -417,6 +419,22 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
 
   eth_proto = eth_hdr->h_proto;
 
+
+  struct vlan_hdr {
+      __be16 h_tci;
+      __be16 h_proto;
+  };
+  
+  struct vlan_hdr *tag = NULL;
+  if (eth_proto == bpf_ntohs(ETH_P_8021Q)) {
+      if(data + nh_off + sizeof(struct vlan_hdr) > data_end) {
+	  return XDP_DROP;
+      }
+      tag = data + nh_off;
+      eth_proto = tag->h_proto;
+      data += sizeof(struct vlan_hdr);
+  }
+    
   if (eth_proto != bpf_ntohs(ETH_P_IP)) {
       return XDP_PASS;
   }
@@ -504,6 +522,11 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       //memcpy(eth_hdr->h_source, eth_hdr->h_dest, 6);
       //memcpy(eth_hdr->h_dest, fs->hwaddr, 6);
 
+      if(tag != NULL) {
+	  tag->h_tci = fs->vlan;
+	  //tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (fs->vlan & bpf_htons(0x0fff));	  
+      }
+      
       struct vip_rip_port vrp;
       vrp.vip = ipv4->daddr;
       vrp.rip = fs->rip;
@@ -566,23 +589,30 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       __u16 n = sdbm((unsigned char*) &t, sizeof(t));
       struct mac *m = (struct mac *) b->hwaddr[n];
       __be32 *rip = (__be32 *) (b->hwaddr[n] + 6);
+      __be16 *vlan = (__be16 *) (b->hwaddr[n] + 10);
       
       if (!maccmp((unsigned char *)m, nulmac)) {
 	  return XDP_DROP;
       }
-      
+
+      // rewrite ethernet header
       maccpy(eth_hdr->h_source, eth_hdr->h_dest);
       maccpy(eth_hdr->h_dest, (unsigned char *) m);
+
+      // if tagged with a vlan, update it
+      if(tag != NULL) {
+	  tag->h_tci = *vlan;
+	  //tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (*vlan & bpf_htons(0x0fff));
+      }
 
       struct flow f;
       f.src = ipv4->saddr;
       f.dst = ipv4->daddr;
       f.sport = tcp->source;
       f.dport = tcp->dest;
-      //f.pad = 0;
-
+      
       struct flow_state s;
-      s.pad = 0;
+      s.vlan = *vlan;
       s.era = era_now;
       s.rip = *rip;
       s.time = wallclock_now;

@@ -284,7 +284,8 @@ func New(visible, iface1, iface2 string, hwaddr [6]byte, native bool) *Control {
 
 	var t_ tuple
 	c.interfaces = c.find_map("interfaces", 4, 16)
-	c.service_backend = c.find_map("service_backend", 8, 65536*10)
+	//c.service_backend = c.find_map("service_backend", 8, 65536*10)
+	c.service_backend = c.find_map("service_backend", 8, 65536*12)
 	c.queue_map = c.find_map("queue_map", 0, int(unsafe.Sizeof(t_)))
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 8)
@@ -350,48 +351,14 @@ func (c *Control) SetRip(rip IP4) {
 	go ping(rip)
 }
 
-//func (c *Control) SetBackend(vip IP4, port uint16, hwaddr []MAC) {
-func (c *Control) SetBackend(vip IP4, port uint16, rips []IP4) {
-	var macrip [][10]byte
-
-	for _, rip := range rips {
-		if mac := c.ReadMAC(rip); mac != nil {
-			m := *mac
-			mr := [10]byte{m[0], m[1], m[2], m[3], m[4], m[5], rip[0], rip[1], rip[2], rip[3]}
-			macrip = append(macrip, mr)
-		} else {
-			fmt.Println(rip, "not found")
-		}
-	}
+func (c *Control) SetBackends(vip IP4, port uint16, be [][12]byte) {
 
 	var s service
 	s.vip = vip
 	s.port[0] = byte((port >> 8) & 0xff)
 	s.port[1] = byte(port & 0xff)
 
-	backends, _ := Rendezvous2(macrip)
-
-	xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&backends), xdp.BPF_ANY)
-
-	/*
-		var be [MAX_CPU][65536][10]byte
-
-		for i, _ := range be {
-			be[i] = backends
-		}
-
-		xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&be), xdp.BPF_ANY)
-	*/
-}
-
-func (c *Control) SetBackends(vip IP4, port uint16, be [][10]byte) {
-
-	var s service
-	s.vip = vip
-	s.port[0] = byte((port >> 8) & 0xff)
-	s.port[1] = byte(port & 0xff)
-
-	backends, stats := Rendezvous2(be)
+	backends, stats := Rendezvous3(be)
 
 	fmt.Println(stats)
 
