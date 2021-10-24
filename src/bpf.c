@@ -123,11 +123,20 @@ struct clocks {
     __u64 time;
 };
 
-  struct vlan_hdr {
-      __be16 h_tci;
-      __be16 h_proto;
-  };
-  
+struct vlan_hdr {
+    __be16 h_tci;
+    __be16 h_proto;
+};
+
+
+struct vip_rip_src_if {
+    __be32 vip;
+    __be32 rip;
+    __be32 src;
+    __u32 ifindex;
+    unsigned char hwaddr[6];
+    unsigned char pad[2];
+};
 
 /**********************************************************************/
 /* MAPS */
@@ -222,7 +231,7 @@ struct bpf_map_def SEC("maps") mac_to_rip = {
 struct bpf_map_def SEC("maps") nat_to_vip_rip = {
         .type = BPF_MAP_TYPE_HASH,
         .key_size = 4,
-        .value_size = 8,
+        .value_size = sizeof(struct vip_rip_src_if),
         .max_entries = 1024,
         .map_flags = 0,
 };
@@ -658,11 +667,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
 
 
 
-  struct interface *phyif = bpf_map_lookup_elem(&interfaces, &index0);
+  //struct interface *phyif = bpf_map_lookup_elem(&interfaces, &index0);
   struct interface *virif = bpf_map_lookup_elem(&interfaces, &index1);
   
-  if (!phyif || !virif || !maccmp(phyif->hwaddr, nulmac) || !maccmp(virif->hwaddr, nulmac)) {
-	return XDP_PASS;
+  //if (!phyif || !virif || !maccmp(phyif->hwaddr, nulmac) || !maccmp(virif->hwaddr, nulmac)) {
+  if (!virif || !maccmp(virif->hwaddr, nulmac)) {
+      return XDP_PASS;
   }
 
   //nat_stuff:
@@ -716,22 +726,21 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       }
   }
       
-  
-  struct viprip *vr = bpf_map_lookup_elem(&nat_to_vip_rip, &(ipv4->daddr));
+  struct vip_rip_src_if *vr = bpf_map_lookup_elem(&nat_to_vip_rip, &(ipv4->daddr));
+  //struct viprip *vr = bpf_map_lookup_elem(&nat_to_vip_rip, &(ipv4->daddr));
   if (vr) {
       unsigned char *m = bpf_map_lookup_elem(&rip_to_mac, &(vr->rip));
       
       if (!m || !maccmp((unsigned char *)m, nulmac)) {
           return XDP_DROP;
        }
-      //if (!m || (m[0] == 0 && m[1] == 0 && m[2] == 0 && m[3] == 0 && m[4] == 0 && m[5] == 0)) {
-      //  return XDP_DROP;
-      //}
       
-      ipv4->saddr = phyif->ipaddr;
+      //ipv4->saddr = phyif->ipaddr;
+      ipv4->saddr = vr->src;
       ipv4->daddr = vr->vip;
       maccpy(eth_hdr->h_dest, m);
-      maccpy(eth_hdr->h_source,  phyif->hwaddr);
+      //maccpy(eth_hdr->h_source,  phyif->hwaddr);
+      maccpy(eth_hdr->h_source,  vr->hwaddr);
       
       struct tuple f;
       f.src = ipv4->saddr;
@@ -749,7 +758,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       tcp->check = 0;
       tcp->check = caltcpcsum(ipv4, tcp, data_end);
       
-      return bpf_redirect(phyif->ifindex, 0);
+      //return bpf_redirect(phyif->ifindex, 0);
+      return bpf_redirect(vr->ifindex, 0);
   }
 
   

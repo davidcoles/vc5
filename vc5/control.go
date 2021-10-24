@@ -73,7 +73,9 @@ type Control struct {
 	pps     uint64
 	raw     raw_counters
 
-	ipaddr IP4
+	ipaddr  IP4
+	hwaddr  MAC
+	ifindex uint32
 }
 
 type rhi struct {
@@ -94,6 +96,15 @@ type tuple struct {
 	dport    uint16
 	protocol byte
 	padding  [3]byte
+}
+
+type vip_rip_src_if struct {
+	vip     IP4
+	rip     IP4
+	src     IP4
+	ifindex uint32
+	hwaddr  MAC
+	padding [2]byte
 }
 
 func (c *counters) AddRaw(r raw_counters) {
@@ -288,7 +299,7 @@ func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Con
 	c.service_backend = c.find_map("service_backend", 8, 65536*12)
 	c.queue_map = c.find_map("queue_map", 0, int(unsafe.Sizeof(t_)))
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
-	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 8)
+	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
 
 	c.clocks = c.find_map("clocks", 4, 16)
@@ -308,6 +319,9 @@ func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Con
 	phy.ifindex = uint32(p.Index)
 	phy.ipaddr = ipaddr
 	copy(phy.hwaddr[:], p.HardwareAddr[:])
+
+	c.ifindex = phy.ifindex
+	c.hwaddr = phy.hwaddr
 
 	var vir interfaces
 	vir.ifindex = uint32(v.Index)
@@ -332,13 +346,25 @@ func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Con
 //nat->vip/rip
 //vip/rip->nat
 
-func (c *Control) SetNatVipRip(nat, vip, rip IP4) {
-	type viprip struct {
-		vip IP4
-		rip IP4
+func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string) {
+
+	ifindex := c.ifindex
+	ipaddr := c.ipaddr
+	hwaddr := c.hwaddr
+
+	if iface != "" {
+		i, err := net.InterfaceByName(iface)
+
+		if err != nil {
+			panic(iface + " not found")
+		}
+
+		ifindex = uint32(i.Index)
+		ipaddr = src
+		copy(hwaddr[:], i.HardwareAddr[:])
 	}
 
-	vr := viprip{vip: vip, rip: rip}
+	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr}
 
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)

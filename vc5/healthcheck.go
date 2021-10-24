@@ -83,8 +83,12 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 	var up bool
 
 	for _, r := range backends {
+		var iface string
+		if r.VLan != 0 {
+			iface = fmt.Sprintf("vlan%d", r.VLan)
+		}
 		c.SetRip(r.Rip)
-		c.SetNatVipRip(r.Nat, vip, r.Rip)
+		c.SetNatVipRip(r.Nat, vip, r.Rip, r.Src, iface)
 		vlan[r.Rip] = r.VLan
 	}
 

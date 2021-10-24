@@ -69,6 +69,7 @@ type Real struct {
 	Tcp   []TcpCheck  `json:"tcp"`
 	Nat   IP4
 	VLan  uint16
+	Src   IP4
 }
 
 type Service struct {
@@ -126,17 +127,21 @@ func fix_vlan(config *Config) {
 		for r, R := range s.Rip {
 
 			for k, v := range config.VLans {
-				_, n, e := net.ParseCIDR(k)
+				i, n, e := net.ParseCIDR(k)
 				if e == nil {
-					i := net.ParseIP(R.Rip.String())
-					if n.Contains(i) {
+					//i := net.ParseIP(R.Rip.String())
+					if n.Contains(net.ParseIP(R.Rip.String())) {
 						s.Rip[r].VLan = v
+						p, _ := parseIP(i.String())
+						s.Rip[r].Src[0] = p[0]
+						s.Rip[r].Src[1] = p[1]
+						s.Rip[r].Src[2] = p[2]
+						s.Rip[r].Src[3] = p[3]
 					}
 				}
 			}
 		}
 	}
-
 }
 
 func fix_nat(config *Config) {
