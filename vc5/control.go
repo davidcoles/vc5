@@ -251,7 +251,7 @@ func (c *Control) global_stats() {
 	}
 }
 
-func New(visible, iface1, iface2 string, hwaddr [6]byte, native bool) *Control {
+func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Control {
 	ulimit()
 
 	ipaddr, ok := parseIP(visible)
@@ -271,7 +271,7 @@ func New(visible, iface1, iface2 string, hwaddr [6]byte, native bool) *Control {
 		prog = "xdp_main_drv"
 	}
 
-	x, e := xdp.LoadBpfFile(iface1, iface2, bpf.BPF_bpf, prog, native)
+	x, e := xdp.LoadBpfFile(veth, bpf.BPF_bpf, prog, native, peth...)
 
 	if e != nil {
 		log.Fatal(e)
@@ -301,8 +301,8 @@ func New(visible, iface1, iface2 string, hwaddr [6]byte, native bool) *Control {
 	var zero uint32 = 0
 	var one uint32 = 1
 
-	p, _ := net.InterfaceByName(iface1)
-	v, _ := net.InterfaceByName(iface2)
+	p, _ := net.InterfaceByName(peth[0])
+	v, _ := net.InterfaceByName(veth)
 
 	var phy interfaces
 	phy.ifindex = uint32(p.Index)

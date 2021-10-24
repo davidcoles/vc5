@@ -27,16 +27,21 @@ ethtool -K vc5_2 tx off >/dev/null
 EOF
 
 ip4=$1
-nic=$2
+shift
 
-ip link set dev $nic xdpgeneric off >/dev/null 2>&1 || true
-ip link set dev $nic xdpdrv     off >/dev/null 2>&1 || true
-
+for nic in $@; do
+    ip link set dev $nic xdpgeneric off >/dev/null 2>&1 || true
+    ip link set dev $nic xdpdrv     off >/dev/null 2>&1 || true
+    ethtool -K $nic rxvlan off >/dev/null 2>&1 || true
+done
+ 
 cleanup() {
     ip link del vc5_1 || true
     ip netns del vc5 || true
-    ip link set dev $nic xdpgeneric off >/dev/null 2>&1 || true
-    ip link set dev $nic xdpdrv     off >/dev/null 2>&1 || true
+    for nic in $@; do
+	ip link set dev $nic xdpgeneric off >/dev/null 2>&1 || true
+	ip link set dev $nic xdpdrv     off >/dev/null 2>&1 || true
+    done
 }
 
 trap cleanup INT
@@ -49,9 +54,9 @@ fi
 
 if [ "$bridge" != ""  ]; then
     brctl addif "$bridge" vc5_1
-    $VC5 -n vc5.json vc5 vc5_1 $hwaddr $ip4 $nic || true
+    $VC5 -n vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
 else
-    $VC5 vc5.json vc5 vc5_1 $hwaddr $ip4 $nic || true
+    $VC5 vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
 fi
 
 cleanup

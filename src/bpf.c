@@ -123,6 +123,12 @@ struct clocks {
     __u64 time;
 };
 
+  struct vlan_hdr {
+      __be16 h_tci;
+      __be16 h_proto;
+  };
+  
+
 /**********************************************************************/
 /* MAPS */
 /**********************************************************************/
@@ -420,11 +426,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
   eth_proto = eth_hdr->h_proto;
 
 
-  struct vlan_hdr {
-      __be16 h_tci;
-      __be16 h_proto;
-  };
-  
   struct vlan_hdr *tag = NULL;
   if (eth_proto == bpf_ntohs(ETH_P_8021Q)) {
       if(data + nh_off + sizeof(struct vlan_hdr) > data_end) {
@@ -523,8 +524,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       //memcpy(eth_hdr->h_dest, fs->hwaddr, 6);
 
       if(tag != NULL) {
-	  tag->h_tci = fs->vlan;
-	  //tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (fs->vlan & bpf_htons(0x0fff));	  
+	  //tag->h_tci = fs->vlan;
+	  tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (fs->vlan & bpf_htons(0x0fff));	  
       }
       
       struct vip_rip_port vrp;
@@ -601,8 +602,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
 
       // if tagged with a vlan, update it
       if(tag != NULL) {
-	  tag->h_tci = *vlan;
-	  //tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (*vlan & bpf_htons(0x0fff));
+	  //tag->h_tci = *vlan;
+	  tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (*vlan & bpf_htons(0x0fff));
       }
 
       struct flow f;

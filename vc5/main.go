@@ -62,7 +62,7 @@ func main() {
 	veth := args[2]
 	mac := args[3]
 	ipv4 := args[4]
-	peth := args[5]
+	peth := args[5:]
 
 	var hwaddr [6]byte
 
@@ -73,6 +73,7 @@ func main() {
 	}
 
 	config, err := LoadConfigFile(conffile)
+	//return
 
 	if err != nil {
 		panic(err)
@@ -89,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	c := New(ipv4, peth, veth, hwaddr, *native)
+	c := New(ipv4, veth, hwaddr, *native, peth...)
 
 	if config.Multicast != "" {
 		go multicast_recv(c, c.ipaddr[3], config.Multicast)

@@ -10,7 +10,7 @@ It would be recommended to start out using a fresh virtual machine.
 
 First we need a development environment capable of building libbpf and Go binaries. On Ubuntu 20.04 this can be achieved with:
 
-  `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang libyaml-perl libjson-perl`
+  `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang libyaml-perl libjson-perl ethtool bridge-utils`
 
 Copy the config.yaml file to vc5.yaml and edit appropriately for your routers/services/backends.
 

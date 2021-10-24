@@ -73,6 +73,7 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 	bup := make(map[IP4]bool)
 	mac := make(map[IP4]MAC)
 	ctr := make(map[IP4]counters)
+	vlan := make(map[IP4]uint16)
 
 	updates := make(chan update, 100)
 	countersc := make(chan counters, 100)
@@ -84,6 +85,7 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 	for _, r := range backends {
 		c.SetRip(r.Rip)
 		c.SetNatVipRip(r.Nat, vip, r.Rip)
+		vlan[r.Rip] = r.VLan
 	}
 
 	c.SetBackends(vip, port, live)
@@ -131,8 +133,11 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 		var new macripvids
 
 		for r, m := range mac {
+			v := vlan[r]
+			h := uint8(v >> 8)
+			l := uint8(v & 0xff)
 			if bup[r] && cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
-				new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], 0, 0})
+				new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], h, l})
 			}
 		}
 

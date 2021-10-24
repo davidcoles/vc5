@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -67,6 +68,7 @@ type Real struct {
 	Https []HttpCheck `json:"https"`
 	Tcp   []TcpCheck  `json:"tcp"`
 	Nat   IP4
+	VLan  uint16
 }
 
 type Service struct {
@@ -79,11 +81,12 @@ type Service struct {
 }
 
 type Config struct {
-	Multicast string    `json:"multicast"`
-	Learn     uint16    `json:"learn"`
-	Services  []Service `json:"services"`
-	Peers     []string  `json:"peers"`
-	RHI       RHI       `json:"rhi"`
+	Multicast string            `json:"multicast"`
+	Learn     uint16            `json:"learn"`
+	Services  []Service         `json:"services"`
+	Peers     []string          `json:"peers"`
+	RHI       RHI               `json:"rhi"`
+	VLans     map[string]uint16 `json:"vlans"`
 }
 
 type RHI struct {
@@ -113,8 +116,27 @@ func LoadConfigFile(file string) (*Config, error) {
 	jf.Close()
 
 	fix_nat(&config)
+	fix_vlan(&config)
 
 	return &config, nil
+}
+
+func fix_vlan(config *Config) {
+	for _, s := range config.Services {
+		for r, R := range s.Rip {
+
+			for k, v := range config.VLans {
+				_, n, e := net.ParseCIDR(k)
+				if e == nil {
+					i := net.ParseIP(R.Rip.String())
+					if n.Contains(i) {
+						s.Rip[r].VLan = v
+					}
+				}
+			}
+		}
+	}
+
 }
 
 func fix_nat(config *Config) {

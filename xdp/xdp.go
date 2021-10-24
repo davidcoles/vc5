@@ -85,7 +85,7 @@ func boolint(b bool) int {
 	return 0
 }
 
-func LoadBpfFile(iface, iface2 string, bindata []byte, program string, native bool) (*XDP_, error) {
+func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth ...string) (*XDP_, error) {
 	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
 	if err != nil {
 		return nil, err
@@ -104,14 +104,16 @@ func LoadBpfFile(iface, iface2 string, bindata []byte, program string, native bo
 
 	//xdp.p = C.load_bpf_file(C.CString(iface), C.CString(tmpfile.Name()), C.CString(program))
 	o := C.load_bpf_file2(C.CString(tmpfile.Name()))
-	C.xdp_link_detach2(C.CString(iface))
-	C.xdp_link_detach2(C.CString(iface2))
 
-	if C.load_bpf_section(o, C.CString(iface), C.CString(program), C.int(boolint(native))) != 0 {
-		panic("load_bpf_section")
+	for _, iface := range peth {
+		C.xdp_link_detach2(C.CString(iface))
+		if C.load_bpf_section(o, C.CString(iface), C.CString(program), C.int(boolint(native))) != 0 {
+			panic("load_bpf_section")
+		}
 	}
 
-	C.load_bpf_section(o, C.CString(iface2), C.CString(program), 0)
+	C.xdp_link_detach2(C.CString(veth))
+	C.load_bpf_section(o, C.CString(veth), C.CString(program), 0)
 	xdp.p = o
 
 	if xdp.p == nil {

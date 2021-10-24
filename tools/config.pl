@@ -15,18 +15,13 @@ getopts('h', \my %opts);
     
     my $s = $conf->{'services'} or die;
     my $r = $conf->{'reals'} or die;
-    #my $p = $conf->{'peers'} or die;
+    my $v = $conf->{'vlans'};
+    $v = {} unless defined $v;
 
-#    if($opts{'h'}) {
-#	my $v = $conf->{'vhosts'} or die;
-#	my $b = $conf->{'backends'} or die;
-#	haproxy($v, $b);
-#	exit;
- #   }
-
+    foreach(keys %$v) {
+	$v->{$_} += 0;
+    }
     
-    #my $json = config($s, $r);
-
     my $services = services($s, $r);
     #my $peers = peers($p);
     #my $peers = $p;
@@ -34,7 +29,7 @@ getopts('h', \my %opts);
     $rhi->{'as_number'} =  $rhi->{'as_number'}+0;
 
     #my $json = { 'peers' => $peers, 'services' => $services, 'multicast' => $conf->{'multicast'} };
-    my $json = { 'learn' => $conf->{'learn'}+0, 'services' => $services, 'multicast' => $conf->{'multicast'}, 'rhi' => $rhi };
+    my $json = { 'learn' => $conf->{'learn'}+0, 'services' => $services, 'multicast' => $conf->{'multicast'}, 'rhi' => $rhi, 'vlans' => $v };
     
     print to_json($json, {pretty=>1}),"\n";
 }
