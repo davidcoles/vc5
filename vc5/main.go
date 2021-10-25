@@ -107,7 +107,7 @@ func main() {
 	}
 
 	fmt.Println(config.Peers)
-	b := bgp4rhi.Manager(c.ipaddr, config.RHI.Peers)
+	b := bgp4rhi.Manager(c.ipaddr, config.RHI.ASNumber, config.RHI.Peers)
 
 	for _, s := range config.Services {
 		fmt.Println("=========", s.Vip, s.Port)
@@ -120,6 +120,11 @@ func main() {
 		}
 
 		go c.monitor_vip(s, ch)
+	}
+
+	if false {
+		time.Sleep(3 * time.Second)
+		exec.Command("/bin/sh", "-c", "ip link set dev eth0 master br0").Output()
 	}
 
 	multicast_send(c, c.ipaddr[3], config.Multicast)
@@ -151,13 +156,15 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4rhi.Peers) chan vipstatu
 
 				b.NLRI(ip, up)
 
-				if up {
-					command := fmt.Sprintf("ip a add %s/32 dev %s >/dev/null 2>&1", ip, veth)
-					exec.Command("/bin/sh", "-c", command).Output()
-				} else {
-					command := fmt.Sprintf("ip a del %s/32 dev %s >/dev/null 2>&1", ip, veth)
-					exec.Command("/bin/sh", "-c", command).Output()
-				}
+				/*
+					if up {
+						command := fmt.Sprintf("ip a add %s/32 dev %s >/dev/null 2>&1", ip, veth)
+						exec.Command("/bin/sh", "-c", command).Output()
+					} else {
+						command := fmt.Sprintf("ip a del %s/32 dev %s >/dev/null 2>&1", ip, veth)
+						exec.Command("/bin/sh", "-c", command).Output()
+					}
+				*/
 
 			}
 

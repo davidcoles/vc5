@@ -89,12 +89,12 @@ func (b *bgpopen) data() []byte {
 	return data[:]
 }
 
-func BGP4Start(peer string, myip [4]byte) *BGP4 {
+func BGP4Start(peer string, myip [4]byte, as uint16) *BGP4 {
 	var b BGP4
 	b.updates = make(chan nlri, 100)
 	b.myip = myip
 
-	go b.BGP4State(peer, 179)
+	go b.BGP4State(peer, 179, as)
 
 	return &b
 }
@@ -103,7 +103,7 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 	b.updates <- nlri{ip: ip, up: up}
 }
 
-func (b *BGP4) BGP4State(addr string, port uint16) {
+func (b *BGP4) BGP4State(addr string, port uint16, as uint16) {
 
 	time.Sleep(10 * time.Second)
 
@@ -115,7 +115,7 @@ func (b *BGP4) BGP4State(addr string, port uint16) {
 
 	b.state = IDLE
 
-	go b.BGP4Conn(d, addr, port, ri, ok)
+	go b.BGP4Conn(d, addr, port, as, ri, ok)
 
 	for {
 		select {
@@ -124,7 +124,7 @@ func (b *BGP4) BGP4State(addr string, port uint16) {
 			time.Sleep(10 * time.Second)
 			ok = make(chan bool)
 			ri = make(chan nlri)
-			go b.BGP4Conn(d, addr, port, ri, ok)
+			go b.BGP4Conn(d, addr, port, as, ri, ok)
 			for k, _ := range up {
 				ri <- nlri{ip: k, up: true}
 			}
@@ -144,10 +144,10 @@ type Peers struct {
 	peers []*BGP4
 }
 
-func Manager(myip [4]byte, peers []string) *Peers {
+func Manager(myip [4]byte, as uint16, peers []string) *Peers {
 	var b Peers
 	for _, p := range peers {
-		b.peers = append(b.peers, BGP4Start(p, myip))
+		b.peers = append(b.peers, BGP4Start(p, myip, as))
 	}
 	return &b
 }
@@ -163,7 +163,7 @@ type nlri struct {
 	up bool
 }
 
-func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, ri chan nlri, ok chan bool) {
+func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, as uint16, ri chan nlri, ok chan bool) {
 	defer close(ok)
 
 	b.state = CONNECT
@@ -179,7 +179,7 @@ func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, ri chan nlri, ok
 	fmt.Println("CONNECTED:", addr)
 
 	var open bgpopen
-	var as uint16 = 65304
+	//var as uint16 = 65304
 	open.version = 4
 	open.as = as
 	open.ht = 240

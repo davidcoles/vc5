@@ -104,7 +104,8 @@ type vip_rip_src_if struct {
 	src     IP4
 	ifindex uint32
 	hwaddr  MAC
-	padding [2]byte
+	vlan_hi byte
+	vlan_lo byte
 }
 
 func (c *counters) AddRaw(r raw_counters) {
@@ -346,7 +347,7 @@ func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Con
 //nat->vip/rip
 //vip/rip->nat
 
-func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string) {
+func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16) {
 
 	ifindex := c.ifindex
 	ipaddr := c.ipaddr
@@ -364,7 +365,7 @@ func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string) {
 		copy(hwaddr[:], i.HardwareAddr[:])
 	}
 
-	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr}
+	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr, vlan_hi: byte(vlan >> 8), vlan_lo: byte(vlan & 0xff)}
 
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)

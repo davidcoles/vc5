@@ -88,7 +88,7 @@ func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 			iface = fmt.Sprintf("vlan%d", r.VLan)
 		}
 		c.SetRip(r.Rip)
-		c.SetNatVipRip(r.Nat, vip, r.Rip, r.Src, iface)
+		c.SetNatVipRip(r.Nat, vip, r.Rip, r.Src, iface, r.VLan)
 		vlan[r.Rip] = r.VLan
 	}
 

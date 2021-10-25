@@ -135,7 +135,7 @@ struct vip_rip_src_if {
     __be32 src;
     __u32 ifindex;
     unsigned char hwaddr[6];
-    unsigned char pad[2];
+    __be16 vlan;
 };
 
 /**********************************************************************/
@@ -189,7 +189,6 @@ struct bpf_map_def SEC("maps") service_backend = {
 };
 
 struct bpf_map_def SEC("maps") flows = {
-//.type        = BPF_MAP_TYPE_LRU_PERCPU_HASH,
   .type        = BPF_MAP_TYPE_LRU_HASH,
   .key_size    = sizeof(struct flow),
   .value_size  = sizeof(struct flow_state),
@@ -199,7 +198,6 @@ struct bpf_map_def SEC("maps") flows = {
 struct bpf_map_def SEC("maps") flow_queue = {
   .type        = BPF_MAP_TYPE_QUEUE,
   .key_size    = 0,
-  //.value_size  = sizeof(struct flow)+sizeof(struct flow_state),
   .value_size  = sizeof(struct flow_flow_state),  
   .max_entries = 10000,
 };
@@ -368,7 +366,42 @@ static inline __u16 sdbm(unsigned char *ptr, __u8 len) {
     return hash & 0xffff;
 }
 
-
+static __always_inline int vlan_pop(struct xdp_md *ctx) {
+    void *data_end = (void *)(long)ctx->data_end;
+    void *data     = (void *)(long)ctx->data;
+    
+    struct ethhdr *eth = data;
+    struct vlan_hdr *vlan = data + sizeof(struct ethhdr);
+    
+    if (data + sizeof(struct ethhdr) + sizeof(struct vlan_hdr) > data_end) {
+	return -1;
+    }
+    
+    struct ethhdr eth_cpy;
+    __builtin_memcpy(&eth_cpy, eth, sizeof(eth_cpy));
+    
+    
+    struct vlan_hdr vh;
+    __builtin_memcpy(&vh, vlan, sizeof(vh));
+    
+    eth_cpy.h_proto = vh.h_proto;
+    
+    if (bpf_xdp_adjust_head(ctx, 4)) {
+	return -1;
+    }
+    
+    data_end = (void *)(long)ctx->data_end;
+    data = (void *)(long)ctx->data;
+    
+    eth = data;
+    
+    if ((data + sizeof(struct ethhdr)) > data_end)
+	return -1;
+    
+    __builtin_memcpy(eth, &eth_cpy, sizeof(eth_cpy));
+    
+    return 0;
+}
 
 unsigned char nulmac[6] = {0,0,0,0,0,0};
 
@@ -380,7 +413,7 @@ const __u32 index1 = 1;
 
 __be32 phyaddr = 0;
 
-static inline int xdp_main_func(struct xdp_md *ctx, int native)
+static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 {
     __u64 start = bpf_ktime_get_ns();
 
@@ -684,17 +717,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
       vr0.vip = ipv4->saddr;
       vr0.rip = *rip;
 
-      struct tuple f;
-      f.src = ipv4->saddr;
-      f.dst = ipv4->daddr;
-      f.sport = 0;
-      f.dport = 0;
-      f.protocol = 0;
-      f.pad[0] = 0;
-      f.pad[1] = 0;
-      f.pad[2] = 0;
-      //bpf_map_push_elem(&queue_map, &f, BPF_ANY);
-      
       __be32 *nat = bpf_map_lookup_elem(&vip_rip_to_nat, &vr0);
       if (nat) {
   
@@ -706,28 +728,25 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
 	  ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
 	  tcp->check = 0;
 	  tcp->check = caltcpcsum(ipv4, tcp, data_end);
+	  
+	  /* if probe reply was received on a VLAN then remove the tag */
+	  if(tag != NULL) {
+	      if(vlan_pop(ctx) != 0) {
+		  return XDP_DROP;
+	      }
+          }
 
-	  f.src = *nat;
-	  f.dst = virif->ipaddr;
-
-	  f.sport = virif->ifindex;
-	  f.pad[0] = eth_hdr->h_source[3];
-	  f.pad[1] = eth_hdr->h_source[4];
-	  f.pad[2] = eth_hdr->h_source[5];
-	  //bpf_map_push_elem(&queue_map, &f, BPF_ANY);
-
-	  if (native) {
+	  /* if running in bridged mode (eg. because a native driver doesn't do bpf_redirect well) then PASS */
+	  if (bridge) {
 	      return XDP_PASS;
 	  }
-	  
-	  //int vport = 0;
-	  //return bpf_redirect_map(&tx_port, vport, 0);
+
+	  /* otherwise redirect the packet to the virtual nic which deals with natted probes */
 	  return bpf_redirect(virif->ifindex, 0);
       }
   }
-      
+  
   struct vip_rip_src_if *vr = bpf_map_lookup_elem(&nat_to_vip_rip, &(ipv4->daddr));
-  //struct viprip *vr = bpf_map_lookup_elem(&nat_to_vip_rip, &(ipv4->daddr));
   if (vr) {
       unsigned char *m = bpf_map_lookup_elem(&rip_to_mac, &(vr->rip));
       
@@ -735,30 +754,17 @@ static inline int xdp_main_func(struct xdp_md *ctx, int native)
           return XDP_DROP;
        }
       
-      //ipv4->saddr = phyif->ipaddr;
       ipv4->saddr = vr->src;
       ipv4->daddr = vr->vip;
       maccpy(eth_hdr->h_dest, m);
-      //maccpy(eth_hdr->h_source,  phyif->hwaddr);
       maccpy(eth_hdr->h_source,  vr->hwaddr);
-      
-      struct tuple f;
-      f.src = ipv4->saddr;
-      f.dst = ipv4->daddr;
-      f.sport = 0;
-      f.dport = 0;
-      f.protocol = 0;
-      f.pad[0] = m[3];
-      f.pad[1] = m[4];
-      f.pad[2] = m[5];
-      //bpf_map_push_elem(&queue_map, &f, BPF_ANY);
-      
+            
       ipv4->check = 0;
       ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
       tcp->check = 0;
       tcp->check = caltcpcsum(ipv4, tcp, data_end);
-      
-      //return bpf_redirect(phyif->ifindex, 0);
+
+      // redirect probe packet out to either eth0, or vlanX
       return bpf_redirect(vr->ifindex, 0);
   }
 
