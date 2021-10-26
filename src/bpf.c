@@ -774,12 +774,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 }
 
 
-SEC("xdp_main_drv")
+SEC("xdp_main_bridge")
 int xdp_main_drv_func(struct xdp_md *ctx) {
     return xdp_main_func(ctx, 1);
 }
 
-SEC("xdp_main_skb")
+SEC("xdp_main")
 int xdp_main_skb_func(struct xdp_md *ctx) {
     return xdp_main_func(ctx, 0);
 }

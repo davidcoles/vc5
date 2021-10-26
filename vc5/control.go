@@ -263,7 +263,7 @@ func (c *Control) global_stats() {
 	}
 }
 
-func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Control {
+func New(visible, veth string, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
 	ulimit()
 
 	ipaddr, ok := parseIP(visible)
@@ -277,10 +277,10 @@ func New(visible, veth string, hwaddr [6]byte, native bool, peth ...string) *Con
 	c.ipaddr = ipaddr
 	c.logger = NewLogger()
 
-	prog := "xdp_main_skb"
+	prog := "xdp_main"
 
-	if native {
-		prog = "xdp_main_drv"
+	if bridge {
+		prog = "xdp_main_bridge"
 	}
 
 	x, e := xdp.LoadBpfFile(veth, bpf.BPF_bpf, prog, native, peth...)

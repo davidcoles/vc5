@@ -40,9 +40,17 @@ const OPEN_SENT = 3
 const OPEN_CONFIRM = 4
 const ESTABLISHED = 5
 
+const M_OPEN = 1
+const M_UPDATE = 2
+const M_KEEPALIVE = 4
+
 type BGP4 struct {
 	state   int
+	peer    string
+	port    uint16
 	myip    [4]byte
+	rid     [4]byte
+	asn     uint16
 	updates chan nlri
 }
 
@@ -89,12 +97,20 @@ func (b *bgpopen) data() []byte {
 	return data[:]
 }
 
-func BGP4Start(peer string, myip [4]byte, as uint16) *BGP4 {
+func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16) *BGP4 {
 	var b BGP4
 	b.updates = make(chan nlri, 100)
+	b.peer = peer
+	b.port = 179
 	b.myip = myip
+	b.rid = rid
+	b.asn = asn
 
-	go b.BGP4State(peer, 179, as)
+	if rid == [4]byte{0, 0, 0, 0} {
+		b.rid = myip
+	}
+
+	go b.BGP4State()
 
 	return &b
 }
@@ -103,7 +119,7 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 	b.updates <- nlri{ip: ip, up: up}
 }
 
-func (b *BGP4) BGP4State(addr string, port uint16, as uint16) {
+func (b *BGP4) BGP4State() {
 
 	time.Sleep(10 * time.Second)
 
@@ -115,7 +131,7 @@ func (b *BGP4) BGP4State(addr string, port uint16, as uint16) {
 
 	b.state = IDLE
 
-	go b.BGP4Conn(d, addr, port, as, ri, ok)
+	go b.BGP4Conn(d, ri, ok)
 
 	for {
 		select {
@@ -124,7 +140,7 @@ func (b *BGP4) BGP4State(addr string, port uint16, as uint16) {
 			time.Sleep(10 * time.Second)
 			ok = make(chan bool)
 			ri = make(chan nlri)
-			go b.BGP4Conn(d, addr, port, as, ri, ok)
+			go b.BGP4Conn(d, ri, ok)
 			for k, _ := range up {
 				ri <- nlri{ip: k, up: true}
 			}
@@ -144,10 +160,10 @@ type Peers struct {
 	peers []*BGP4
 }
 
-func Manager(myip [4]byte, as uint16, peers []string) *Peers {
+func Manager(myip [4]byte, rid [4]byte, as uint16, peers []string) *Peers {
 	var b Peers
 	for _, p := range peers {
-		b.peers = append(b.peers, BGP4Start(p, myip, as))
+		b.peers = append(b.peers, BGP4Start(p, myip, rid, as))
 	}
 	return &b
 }
@@ -163,12 +179,12 @@ type nlri struct {
 	up bool
 }
 
-func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, as uint16, ri chan nlri, ok chan bool) {
+func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool) {
 	defer close(ok)
 
 	b.state = CONNECT
 
-	conn, err := d.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+	conn, err := d.Dial("tcp", fmt.Sprintf("%s:%d", b.peer, b.port))
 
 	if err != nil {
 		return
@@ -176,17 +192,18 @@ func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, as uint16, ri ch
 
 	defer conn.Close()
 
-	fmt.Println("CONNECTED:", addr)
+	fmt.Println("CONNECTED:", b.peer)
 
 	var open bgpopen
-	//var as uint16 = 65304
 	open.version = 4
-	open.as = as
+	open.as = b.asn
 	open.ht = 240
-	open.id = b.myip
+	open.id = b.rid
 	open.opl = 0
 
-	conn.Write(headerise(1, open.data()))
+	fmt.Println(open)
+
+	conn.Write(headerise(M_OPEN, open.data()))
 
 	b.state = OPEN_SENT
 
@@ -208,12 +225,12 @@ func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, as uint16, ri ch
 		select {
 		case <-keep:
 			if b.state == ESTABLISHED {
-				conn.Write(headerise(4, nil))
+				conn.Write(headerise(M_KEEPALIVE, nil))
 			}
 		case n := <-ri:
 			pending = append(pending, n)
 			if b.state == ESTABLISHED {
-				conn.Write(headerise(2, bgpupdate(b.myip, pending)))
+				conn.Write(headerise(M_UPDATE, bgpupdate(b.myip, pending)))
 				pending = []nlri{}
 			}
 		case m, ok := <-msgs:
@@ -221,21 +238,20 @@ func (b *BGP4) BGP4Conn(d net.Dialer, addr string, port uint16, as uint16, ri ch
 				return
 			}
 
-			//fmt.Println("RECV", b.state, m)
-
 			switch b.state {
 			case OPEN_SENT:
 				switch m.mtype {
-				case 1: // OPEN
-					conn.Write(headerise(4, nil))
+				case M_OPEN:
+					fmt.Println(m)
+					conn.Write(headerise(M_KEEPALIVE, nil))
 					b.state = OPEN_CONFIRM
 				}
 
 			case OPEN_CONFIRM:
 				switch m.mtype {
-				case 4: // KEEPALIVE
+				case M_KEEPALIVE:
 					b.state = ESTABLISHED
-					conn.Write(headerise(2, bgpupdate(b.myip, pending))) // send any pending routes
+					conn.Write(headerise(M_UPDATE, bgpupdate(b.myip, pending)))
 					pending = []nlri{}
 				}
 
@@ -407,7 +423,7 @@ func BGP4ReadMessages(conn net.Conn, c chan bgpmessage) {
 		}
 
 		switch mtype {
-		case 1: // OPEN
+		case M_OPEN:
 			c <- bgpmessage{mtype: mtype, open: newopen(body)}
 		default:
 			c <- bgpmessage{mtype: mtype}

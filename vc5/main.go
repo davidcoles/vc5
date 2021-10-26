@@ -21,14 +21,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"log"
-	"net"
 
 	"example.com/bgp4rhi"
 	"example.com/bpf"
@@ -47,6 +46,7 @@ func main() {
 	//return simple()
 
 	native := flag.Bool("n", false, "native")
+	bridge := flag.String("b", "", "bridge")
 	flag.Parse()
 
 	args := flag.Args()
@@ -90,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	c := New(ipv4, veth, hwaddr, *native, peth...)
+	c := New(ipv4, veth, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {
 		go multicast_recv(c, c.ipaddr[3], config.Multicast)
@@ -107,7 +107,10 @@ func main() {
 	}
 
 	fmt.Println(config.Peers)
-	b := bgp4rhi.Manager(c.ipaddr, config.RHI.ASNumber, config.RHI.Peers)
+	b := bgp4rhi.Manager(c.ipaddr, config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
+	if len(config.RHI.Peers) == 0 {
+		b = nil
+	}
 
 	for _, s := range config.Services {
 		fmt.Println("=========", s.Vip, s.Port)
@@ -122,12 +125,13 @@ func main() {
 		go c.monitor_vip(s, ch)
 	}
 
-	if false {
+	if *bridge != "" {
 		time.Sleep(3 * time.Second)
-		exec.Command("/bin/sh", "-c", "ip link set dev eth0 master br0").Output()
+		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
 	}
 
 	multicast_send(c, c.ipaddr[3], config.Multicast)
+
 	for {
 		time.Sleep(1 * time.Second)
 	}
@@ -154,17 +158,15 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4rhi.Peers) chan vipstatu
 			if up != was {
 				fmt.Println("***** CHANGED", v, up)
 
-				b.NLRI(ip, up)
-
-				/*
+				if b != nil {
+					b.NLRI(ip, up)
+				} else {
 					if up {
-						command := fmt.Sprintf("ip a add %s/32 dev %s >/dev/null 2>&1", ip, veth)
-						exec.Command("/bin/sh", "-c", command).Output()
+						exec.Command("ip", "a", "add", ip.String()+"/32", "dev", veth).Output()
 					} else {
-						command := fmt.Sprintf("ip a del %s/32 dev %s >/dev/null 2>&1", ip, veth)
-						exec.Command("/bin/sh", "-c", command).Output()
+						exec.Command("ip", "a", "del", ip.String()+"/32", "dev", veth).Output()
 					}
-				*/
+				}
 
 			}
 
@@ -174,7 +176,6 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4rhi.Peers) chan vipstatu
 }
 
 func multicast_recv(control *Control, instance byte, srvAddr string) {
-	//srvAddr := "224.0.0.1:9999"
 	maxDatagramSize := 1500
 
 	addr, err := net.ResolveUDPAddr("udp", srvAddr)
@@ -214,8 +215,6 @@ func multicast_recv(control *Control, instance byte, srvAddr string) {
 }
 
 func multicast_send(control *Control, instance byte, srvAddr string) {
-	//srvAddr := "224.0.0.1:9999"
-
 	if srvAddr == "" {
 		for {
 			if _, ok := control.FlowQueue(); ok {
@@ -275,8 +274,8 @@ func spinner() func() string {
 
 func pulser() func() string {
 	var n int
-	//s := []string{" .\b\b", " o\b\b", " O\b\b", " o\b\b"}
-	s := []string{" O\b\b", " H\b\b", " Y\b\b", " E\b\b", " A\b\b", " H\b\b"}
+	s := []string{" .\b\b", " o\b\b", " O\b\b", " o\b\b"}
+	//s := []string{" O\b\b", " H\b\b", " Y\b\b", " E\b\b", " A\b\b", " H\b\b"}
 	return func() string {
 		n++
 		return s[n%len(s)]

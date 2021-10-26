@@ -2,11 +2,31 @@
 set -x
 set -e
 
-if [ "$1" = "-b" ]; then
-    shift
-    bridge="$1"
-    shift
-fi
+native=
+bridge=
+
+while true; do
+    case "$1" in
+	"-n")
+	    native="-n"
+	    shift
+	    ;;
+	"-b")
+	    shift
+	    bridge="-b $1"
+	    shift
+	    ;;
+	*)
+	    break
+	    ;;
+    esac
+done
+
+#if [ "$1" = "-b" ]; then
+#    shift
+#    bridge="$1"
+#    shift
+#fi
 
 ip link del vc5_1 || true
 ip netns del vc5 || true
@@ -52,11 +72,13 @@ if [ -f ./vc5 ]; then
     VC5=./vc5
 fi
 
-if [ "$bridge" != ""  ]; then
-    brctl addif "$bridge" vc5_1
-    $VC5 -n vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
-else
-    $VC5 vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
-fi
+#if [ "$bridge" != ""  ]; then
+#    brctl addif "$bridge" vc5_1
+#    $VC5 -n vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
+#else
+#    $VC5 vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
+#fi
+
+$VC5 $native $bridge vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
 
 cleanup
