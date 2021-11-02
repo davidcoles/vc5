@@ -79,12 +79,13 @@ struct flow_state {
     __u64 time;
     __be32 rip;
     __u32 era;
+    __u8 finrst;
 };
 
 struct flow_flow_state {
     //struct flow f;
     //struct flow_state fs;
-    __u8 data[36];
+    __u8 data[sizeof(struct flow) + sizeof(struct flow_state)];
 };
 
 struct mac {
@@ -592,8 +593,13 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	  if(concurrent) (*concurrent)++;
       } else {
 	  if(tcp->fin == 1 || tcp->rst == 1) {
-	      __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);      
-	      if(concurrent) (*concurrent)--;	      
+	      if(fs->finrst == 0) {
+		  __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);      
+		  if(concurrent) (*concurrent)--;
+		  fs->finrst = 1;
+	      }
+	  } else {
+	      fs->finrst = 0;
 	  }
       }
 
@@ -655,6 +661,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       f.dport = tcp->dest;
       
       struct flow_state s;
+      memset(&s, 0, sizeof(s));
       s.vlan = *vlan;
       s.era = era_now;
       s.rip = *rip;

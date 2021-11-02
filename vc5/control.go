@@ -32,7 +32,7 @@ import (
 )
 
 const FLOW = 12
-const STATE = 24
+const STATE = 32
 const FLOW_STATE = FLOW + STATE
 
 type IP4 [4]byte
