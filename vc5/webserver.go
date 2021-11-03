@@ -20,14 +20,17 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 )
 
 type global struct {
 	Warning    string               `json:"warning"`
 	Latency    uint64               `json:"average_latency_ns"`
 	Pps        uint64               `json:"packets_per_second"`
+	Concurrent uint64               `json:"current_connections"`
 	New_flows  uint64               `json:"total_connections"`
 	Rx_packets uint64               `json:"rx_packets"`
 	Rx_bytes   uint64               `json:"rx_octets"`
@@ -39,6 +42,8 @@ type global struct {
 func (ctrl *Control) stats_server() {
 
 	var js []byte = []byte("{}")
+
+	var metrics []byte
 
 	go func() {
 
@@ -63,11 +68,18 @@ func (ctrl *Control) stats_server() {
 			g.Rx_bytes = ctrl.raw.Rx_bytes
 			g.Qfailed = ctrl.raw.qfailed
 
+			g.Concurrent = 0
+			for _, s := range g.Services {
+				g.Concurrent += uint64(s.Concurrent)
+			}
+
 			j, err := json.MarshalIndent(&g, "", "  ")
 
 			if err == nil {
 				js = j
 			}
+
+			metrics = prometheus(&g)
 		}
 	}()
 
@@ -82,6 +94,14 @@ func (ctrl *Control) stats_server() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	http.HandleFunc("/metrics/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+		w.Write(metrics)
 		w.Write([]byte("\n"))
 	})
 
@@ -124,3 +144,82 @@ func index() []byte {
 
 	return []byte(s)
 }
+
+func prometheus(g *global) []byte {
+
+	m := []string{
+		"# TYPE vc5_average_latency_ns gauge",
+		"# TYPE vc5_packets_per_second gauge",
+		"# TYPE vc5_current_connections gauge",
+		"# TYPE vc5_total_connections counter",
+		"# TYPE vc5_rx_packets counter",
+		"# TYPE vc5_rx_octets counter",
+		"# TYPE vc5_userland_queue_failed counter",
+
+		"# TYPE vc5_service_current_connections gauge",
+		"# TYPE vc5_service_total_connections counter",
+		"# TYPE vc5_service_rx_packets counter",
+		"# TYPE vc5_service_rx_octets counter",
+
+		"# TYPE vc5_backend_current_connections gauge",
+		"# TYPE vc5_backend_total_connections counter",
+		"# TYPE vc5_backend_rx_packets counter",
+		"# TYPE vc5_backend_rx_octets counter",
+	}
+
+	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
+	m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.Pps))
+	m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
+	m = append(m, fmt.Sprintf("vc5_total_connections %d", g.New_flows))
+	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Rx_packets))
+	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Rx_bytes))
+	m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
+
+	for s, v := range g.Services {
+		m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s"} %d`, s, v.Concurrent))
+		m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s"} %d`, s, v.New_flows))
+		m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s"} %d`, s, v.Rx_packets))
+		m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s"} %d`, s, v.Rx_bytes))
+
+		for b, v := range v.Backends {
+			m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
+			m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.New_flows))
+			m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Rx_packets))
+			m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Rx_bytes))
+		}
+	}
+
+	all := strings.Join(m, "\n")
+	return []byte(all)
+}
+
+/*
+type counters struct {
+	Up         bool   `json:"up"`
+	MAC        string `json:"mac"`
+	Concurrent int64  `json:"current_connections"`
+	New_flows  uint64 `json:"total_connections"`
+	Rx_packets uint64 `json:"rx_packets"`
+	Rx_bytes   uint64 `json:"rx_octets"`
+	qfailed    uint64
+	fp_count   uint64
+	fp_time    uint64
+	ip         IP4
+}
+type scounters struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Up          bool   `json:"up"`
+	Nalive      uint   `json:"live_backends"`
+	Need        uint   `json:"need_backends"`
+	Concurrent  int64  `json:"current_connections"`
+	New_flows   uint64 `json:"total_connections"`
+	Rx_packets  uint64 `json:"rx_packets"`
+	Rx_bytes    uint64 `json:"rx_octets"`
+	fp_count    uint64
+	fp_time     uint64
+
+	name     string
+	Backends map[string]counters `json:"backends"`
+}
+*/
