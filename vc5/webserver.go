@@ -97,12 +97,10 @@ func (ctrl *Control) stats_server() {
 		w.Write([]byte("\n"))
 	})
 
-	http.HandleFunc("/metrics/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 		w.Write(metrics)
-		w.Write([]byte("\n"))
 	})
 
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
@@ -192,34 +190,3 @@ func prometheus(g *global) []byte {
 	all := strings.Join(m, "\n")
 	return []byte(all)
 }
-
-/*
-type counters struct {
-	Up         bool   `json:"up"`
-	MAC        string `json:"mac"`
-	Concurrent int64  `json:"current_connections"`
-	New_flows  uint64 `json:"total_connections"`
-	Rx_packets uint64 `json:"rx_packets"`
-	Rx_bytes   uint64 `json:"rx_octets"`
-	qfailed    uint64
-	fp_count   uint64
-	fp_time    uint64
-	ip         IP4
-}
-type scounters struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Up          bool   `json:"up"`
-	Nalive      uint   `json:"live_backends"`
-	Need        uint   `json:"need_backends"`
-	Concurrent  int64  `json:"current_connections"`
-	New_flows   uint64 `json:"total_connections"`
-	Rx_packets  uint64 `json:"rx_packets"`
-	Rx_bytes    uint64 `json:"rx_octets"`
-	fp_count    uint64
-	fp_time     uint64
-
-	name     string
-	Backends map[string]counters `json:"backends"`
-}
-*/
