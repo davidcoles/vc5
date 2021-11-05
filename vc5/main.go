@@ -29,9 +29,9 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/bgp4rhi"
-	"example.com/bpf"
-	"example.com/xdp"
+	"bgp4rhi"
+	"bpf"
+	"xdp"
 )
 
 func simple() {

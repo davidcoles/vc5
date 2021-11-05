@@ -174,10 +174,12 @@ func prometheus(g *global) []byte {
 	m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
 
 	for s, v := range g.Services {
-		m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s"} %d`, s, v.Concurrent))
-		m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s"} %d`, s, v.New_flows))
-		m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s"} %d`, s, v.Rx_packets))
-		m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s"} %d`, s, v.Rx_bytes))
+		//d := v.Description
+		n := v.Name
+		m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s",sname="%s"} %d`, s, n, v.Concurrent))
+		m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s",sname="%s"} %d`, s, n, v.New_flows))
+		m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s",sname="%s"} %d`, s, n, v.Rx_packets))
+		m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Rx_bytes))
 
 		for b, v := range v.Backends {
 			m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))

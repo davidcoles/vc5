@@ -4,6 +4,13 @@ A distributed Layer 2 Direct Server Return (L2DSR) load balancer for Linux using
 
 This is very much a proof of concept at this stage - most everything is incomplete and poorly defined!
 
+## Homepage
+
+The code is hosted at GitHub, https://github.com/davidcoles/vc5
+
+Clone with `git clone https://github.com/davidcoles/vc5.git`
+
+
 ## Quickstart
 
 It would be recommended to start out using a fresh virtual machine.

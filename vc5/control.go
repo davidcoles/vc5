@@ -27,8 +27,8 @@ import (
 	"time"
 	"unsafe"
 
-	"example.com/bpf"
-	"example.com/xdp"
+	"bpf"
+	"xdp"
 )
 
 const FLOW = 12

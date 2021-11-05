@@ -1,3 +1,3 @@
-module example.com/xdp
+module xdp
 
 go 1.15

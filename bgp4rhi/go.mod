@@ -1,3 +1,3 @@
-module example.com/bgp4rhi
+module bgp4rhi
 
 go 1.15
