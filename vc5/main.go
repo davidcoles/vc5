@@ -32,7 +32,6 @@ import (
 	"bpf"
 
 	"vc5/bgp4"
-	"vc5/stats"
 	"vc5/xdp"
 )
 
@@ -46,7 +45,6 @@ func simple() {
 
 func main() {
 	//return simple()
-	fmt.Println(stats.SayHello())
 
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")
@@ -156,7 +154,7 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
 				}
 			}
 
-			c.rhi <- rhi{ip: ip, up: up}
+			c.rhi <- rhi{Ip: ip, Up: up}
 
 			if up != was {
 				fmt.Println("***** CHANGED", v, up)

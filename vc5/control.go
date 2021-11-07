@@ -30,6 +30,7 @@ import (
 	"unsafe"
 
 	"bpf"
+	"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -103,17 +104,20 @@ type Control struct {
 
 	latency uint64
 	pps     uint64
-	raw     raw_counters
+	//raw     raw_counters
+	Cooked counters
 
 	ipaddr  IP4
 	hwaddr  MAC
 	ifindex uint32
 }
 
-type rhi struct {
-	ip IP4
-	up bool
-}
+//type rhi struct {
+//	ip IP4
+//	up bool
+//}
+
+type rhi = types.RHI
 
 type service struct {
 	vip  IP4
@@ -233,7 +237,11 @@ func (c *Control) global_stats() {
 
 		c.latency = latency
 		c.pps = (t.Rx_packets - prev.Rx_packets) / 10 // see sleep below
-		c.raw = t
+		//c.raw = t
+
+		var count counters
+		cAddRaw(&count, t)
+		c.Cooked = count
 
 		fmt.Printf(">>> %d pps, %d ns avg. latency\n", c.pps, latency)
 		prev = t
@@ -309,7 +317,8 @@ func New(visible, veth string, hwaddr [6]byte, native, bridge bool, peth ...stri
 	xdp.BpfMapUpdateElem(c.interfaces, uP(&one), uP(&vir), xdp.BPF_ANY)
 
 	go c.global_stats()
-	go c.stats_server()
+	//go c.stats_server()
+	go stats.Stats_server(c.rhi, c.scounters, &(c.Cooked), &(c.latency), &(c.pps))
 
 	return &c
 }

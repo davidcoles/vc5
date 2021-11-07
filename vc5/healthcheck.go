@@ -43,7 +43,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 	port := service.Port
 	backends := service.Rip
 
-	//name := fmt.Sprintf("%s:%d", vip, port)
+	name := fmt.Sprintf("%s:%d", vip, port)
 	bup := make(map[IP4]bool)
 	mac := make(map[IP4]MAC)
 	ctr := make(map[IP4]counters)
@@ -93,7 +93,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 			ct.Up = bup[ct.Ip]
 			ct.MAC = mac[ct.Ip].String()
 			ctr[ct.Ip] = ct
-			s := scounters{Up: up, Nalive: nalive, Need: service.Need, Name: service.Name, Description: service.Description}
+			s := scounters{Sname: name, Up: up, Nalive: nalive, Need: service.Need, Name: service.Name, Description: service.Description}
 			s.Backends = make(map[string]counters)
 			for k, v := range ctr {
 				s.Backends[k.String()] = v
