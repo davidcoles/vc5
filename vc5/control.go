@@ -23,32 +23,64 @@ import (
 	"log"
 	"net"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"syscall"
 	"time"
 	"unsafe"
 
 	"bpf"
-	"xdp"
+	"vc5/types"
+	"vc5/xdp"
 )
+
+type scounters = types.Scounters
+type counters = types.Counters
+
+//type raw_counters = types.Raw_counters
+type raw_counters = Raw_counters
+
+func cAddRaw(c *counters, r Raw_counters) {
+	c.New_flows += r.New_flows
+	c.Rx_packets += r.Rx_packets
+	c.Rx_bytes += r.Rx_bytes
+	c.Fp_count += r.Fp_count
+	c.Fp_time += r.Fp_time
+	c.Qfailed += r.Qfailed
+}
+
+type Raw_counters struct {
+	New_flows  uint64 `json:"total_connections"`
+	Rx_packets uint64 `json:"rx_packets"`
+	Rx_bytes   uint64 `json:"rx_bytes"`
+	Fp_count   uint64
+	Fp_time    uint64
+	Qfailed    uint64
+}
+
+func (c *Raw_counters) AddRaw(r Raw_counters) {
+	c.New_flows += r.New_flows
+	c.Rx_packets += r.Rx_packets
+	c.Rx_bytes += r.Rx_bytes
+	c.Fp_count += r.Fp_count
+	c.Fp_time += r.Fp_time
+	c.Qfailed += r.Qfailed
+}
+
+type IP4 = types.IP4
+type IP6 = types.IP6
+type MAC = types.MAC
 
 const FLOW = 12
 const STATE = 32
 const FLOW_STATE = FLOW + STATE
 
-type IP4 [4]byte
-type IP6 [16]byte
-type MAC [6]byte
+//type IP4 [4]byte
+//type IP6 [16]byte
+//type MAC [6]byte
 type uP = unsafe.Pointer
 
 const MAX_CPU = 256
-
-func (i IP4) String() string {
-	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
-}
-
-func (m MAC) String() string {
-	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
-}
 
 type Control struct {
 	xdp                     *xdp.XDP_
@@ -106,61 +138,6 @@ type vip_rip_src_if struct {
 	hwaddr  MAC
 	vlan_hi byte
 	vlan_lo byte
-}
-
-func (c *counters) AddRaw(r raw_counters) {
-	c.New_flows += r.New_flows
-	c.Rx_packets += r.Rx_packets
-	c.Rx_bytes += r.Rx_bytes
-	c.fp_count += r.fp_count
-	c.fp_time += r.fp_time
-	c.qfailed += r.qfailed
-}
-
-func (c *raw_counters) AddRaw(r raw_counters) {
-	c.New_flows += r.New_flows
-	c.Rx_packets += r.Rx_packets
-	c.Rx_bytes += r.Rx_bytes
-	c.fp_count += r.fp_count
-	c.fp_time += r.fp_time
-	c.qfailed += r.qfailed
-}
-
-type raw_counters struct {
-	New_flows  uint64 `json:"total_connections"`
-	Rx_packets uint64 `json:"rx_packets"`
-	Rx_bytes   uint64 `json:"rx_bytes"`
-	fp_count   uint64
-	fp_time    uint64
-	qfailed    uint64
-}
-type counters struct {
-	Up         bool   `json:"up"`
-	MAC        string `json:"mac"`
-	Concurrent int64  `json:"current_connections"`
-	New_flows  uint64 `json:"total_connections"`
-	Rx_packets uint64 `json:"rx_packets"`
-	Rx_bytes   uint64 `json:"rx_octets"`
-	qfailed    uint64
-	fp_count   uint64
-	fp_time    uint64
-	ip         IP4
-}
-type scounters struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Up          bool   `json:"up"`
-	Nalive      uint   `json:"live_backends"`
-	Need        uint   `json:"need_backends"`
-	Concurrent  int64  `json:"current_connections"`
-	New_flows   uint64 `json:"total_connections"`
-	Rx_packets  uint64 `json:"rx_packets"`
-	Rx_bytes    uint64 `json:"rx_octets"`
-	fp_count    uint64
-	fp_time     uint64
-
-	name     string
-	Backends map[string]counters `json:"backends"`
 }
 
 type interfaces struct {
@@ -235,9 +212,9 @@ func (c *Control) global_stats() {
 			t.AddRaw(s)
 		}
 
-		latency := t.fp_time
-		if t.fp_count > 0 {
-			latency /= t.fp_count
+		latency := t.Fp_time
+		if t.Fp_count > 0 {
+			latency /= t.Fp_count
 		}
 
 		avg = append(avg, latency)
@@ -418,7 +395,8 @@ func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16) counters {
 	xdp.BpfMapLookupElem(c.vip_rip_port_counters, uP(&vrp), uP(&raw))
 
 	for _, r := range raw {
-		counter.AddRaw(r)
+		//counter.AddRaw(r)
+		cAddRaw(&counter, r)
 	}
 
 	return counter
@@ -509,8 +487,25 @@ func (c *Control) vrp_stats(v, r IP4, port uint16, counters chan counters) {
 			conn = 0
 		}
 
-		counter.ip = r
+		counter.Ip = r
 		counter.Concurrent = int64(conn)
 		counters <- counter
 	}
+}
+
+func parseIP(ip string) ([4]byte, bool) {
+	var addr [4]byte
+	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
+	m := re.FindStringSubmatch(ip)
+	if len(m) != 5 {
+		return addr, false
+	}
+	for n, _ := range addr {
+		a, err := strconv.ParseInt(m[n+1], 10, 9)
+		if err != nil || a < 0 || a > 255 {
+			return addr, false
+		}
+		addr[n] = byte(a)
+	}
+	return addr, true
 }

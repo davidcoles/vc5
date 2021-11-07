@@ -20,31 +20,10 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"io/ioutil"
 	"net"
 	"os"
-	"regexp"
-	"strconv"
 )
-
-func (i *IP4) UnmarshalJSON(d []byte) error {
-	l := len(d)
-	if l < 2 || d[0] != '"' || d[l-1] != '"' {
-		return errors.New("Badly formated IPv4 address: " + string(d))
-	}
-
-	ip, ok := parseIP(string(d[1 : l-1]))
-
-	if ok {
-		i[0] = ip[0]
-		i[1] = ip[1]
-		i[2] = ip[2]
-		i[3] = ip[3]
-		return nil
-	}
-	return errors.New("Badly formated IPv4 address: " + string(d))
-}
 
 type HttpCheck struct {
 	Path   string `json:"path"`
@@ -165,21 +144,4 @@ func fix_nat(config *Config) {
 			}
 		}
 	}
-}
-
-func parseIP(ip string) ([4]byte, bool) {
-	var addr [4]byte
-	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
-	m := re.FindStringSubmatch(ip)
-	if len(m) != 5 {
-		return addr, false
-	}
-	for n, _ := range addr {
-		a, err := strconv.ParseInt(m[n+1], 10, 9)
-		if err != nil || a < 0 || a > 255 {
-			return addr, false
-		}
-		addr[n] = byte(a)
-	}
-	return addr, true
 }

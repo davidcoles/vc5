@@ -29,9 +29,11 @@ import (
 	"syscall"
 	"time"
 
-	"bgp4"
 	"bpf"
-	"xdp"
+
+	"vc5/bgp4"
+	"vc5/stats"
+	"vc5/xdp"
 )
 
 func simple() {
@@ -44,6 +46,7 @@ func simple() {
 
 func main() {
 	//return simple()
+	fmt.Println(stats.SayHello())
 
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")

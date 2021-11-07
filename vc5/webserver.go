@@ -58,7 +58,7 @@ func (ctrl *Control) stats_server() {
 				g.RHI[r.ip.String()] = r.up
 
 			case c := <-ctrl.scounters:
-				g.Services[c.name] = c
+				g.Services[c.Name] = c
 			}
 
 			g.Latency = ctrl.latency
@@ -66,7 +66,7 @@ func (ctrl *Control) stats_server() {
 			g.New_flows = ctrl.raw.New_flows
 			g.Rx_packets = ctrl.raw.Rx_packets
 			g.Rx_bytes = ctrl.raw.Rx_bytes
-			g.Qfailed = ctrl.raw.qfailed
+			g.Qfailed = ctrl.raw.Qfailed
 
 			g.Concurrent = 0
 			for _, s := range g.Services {
