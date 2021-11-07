@@ -154,15 +154,26 @@ func prometheus(g *global) []byte {
 		"# TYPE vc5_rx_octets counter",
 		"# TYPE vc5_userland_queue_failed counter",
 
+		"# TYPE vc5_rhi gauge",
+
 		"# TYPE vc5_service_current_connections gauge",
 		"# TYPE vc5_service_total_connections counter",
 		"# TYPE vc5_service_rx_packets counter",
 		"# TYPE vc5_service_rx_octets counter",
+		"# TYPE vc5_service_healthcheck gauge",
 
 		"# TYPE vc5_backend_current_connections gauge",
 		"# TYPE vc5_backend_total_connections counter",
 		"# TYPE vc5_backend_rx_packets counter",
 		"# TYPE vc5_backend_rx_octets counter",
+		"# TYPE vc5_backend_healthcheck gauge",
+	}
+
+	b2u8 := func(v bool) uint8 {
+		if v {
+			return 1
+		}
+		return 0
 	}
 
 	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
@@ -173,6 +184,10 @@ func prometheus(g *global) []byte {
 	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Rx_bytes))
 	m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
 
+	for i, v := range g.RHI {
+		m = append(m, fmt.Sprintf(`vc5_rhi{address="%s"} %d`, i, b2u8(v)))
+	}
+
 	for s, v := range g.Services {
 		//d := v.Description
 		n := v.Name
@@ -181,11 +196,15 @@ func prometheus(g *global) []byte {
 		m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s",sname="%s"} %d`, s, n, v.Rx_packets))
 		m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Rx_bytes))
 
+		m = append(m, fmt.Sprintf(`vc5_service_healthcheck{service="%s",sname="%s"} %d`, s, n, b2u8(v.Up)))
+
 		for b, v := range v.Backends {
 			m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
 			m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.New_flows))
 			m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Rx_packets))
 			m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Rx_bytes))
+
+			m = append(m, fmt.Sprintf(`vc5_backend_healthcheck{service="%s",backend="%s"} %d`, s, b, b2u8(v.Up)))
 		}
 	}
 

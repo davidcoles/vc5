@@ -5,6 +5,9 @@ LIBBPF_VER := v0.4.0
 export CGO_CFLAGS = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 
+MAX_FLOWS    ?= 10000000
+MAX_SERVICES ?= 100
+
 all: clean build
 
 build: vc5/vc5 vc5.json
@@ -24,6 +27,8 @@ bpf/%.go: src/%.o
 %.o: %.c libbpf/bpf
 	clang -S \
 	    -target bpf \
+	    -D MAX_FLOWS=$(MAX_FLOWS) \
+	    -D MAX_SERVICES=$(MAX_SERVICES) \
 	    -D __BPF_TRACING__ \
 	    -I$(LIBBPF) \
 	    -Wall \

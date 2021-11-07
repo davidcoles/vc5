@@ -113,3 +113,18 @@ A check consists of
 * type - http, https or tcp
 * port - the port that the check will be run against, optional if there is only one port listed in the service
 * path - the path to run http or https checks against, not needed for tcp
+
+
+## Notes
+
+https://wiki.nftables.org/wiki-nftables/index.php/Performing_Network_Address_Translation_(NAT)
+
+https://unix.stackexchange.com/questions/429077/how-to-do-nat-based-on-port-number-in-stateless-nat
+
+
+Set destination IP address on real server by DSCP - for L3 DSR
+
+`nft add table raw`
+`nft add chain raw prerouting { type filter hook prerouting priority raw \; }`
+`nft add rule raw prerouting ip dscp 0x04 ip daddr set 192.168.101.4 notrack`
+

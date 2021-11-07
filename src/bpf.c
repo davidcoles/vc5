@@ -143,7 +143,7 @@ struct vip_rip_src_if {
 /* MAPS */
 /**********************************************************************/
 
-#define PHYSICAL 0
+//#define PHYSICAL 0
 #define VIRTUAL  1
 
 struct bpf_map_def SEC("maps") stats = {
@@ -186,14 +186,14 @@ struct bpf_map_def SEC("maps") service_backend = {
   .type        = BPF_MAP_TYPE_HASH,
   .key_size    = sizeof(struct service),
   .value_size  = sizeof(struct backend),
-  .max_entries = 1024,
+  .max_entries = MAX_SERVICES,
 };
 
 struct bpf_map_def SEC("maps") flows = {
   .type        = BPF_MAP_TYPE_LRU_HASH,
   .key_size    = sizeof(struct flow),
   .value_size  = sizeof(struct flow_state),
-  .max_entries = 10000000,
+  .max_entries = MAX_FLOWS,
 };
 
 struct bpf_map_def SEC("maps") flow_queue = {
@@ -201,14 +201,6 @@ struct bpf_map_def SEC("maps") flow_queue = {
   .key_size    = 0,
   .value_size  = sizeof(struct flow_flow_state),  
   .max_entries = 10000,
-};
-
-struct bpf_map_def SEC("maps") queue_map = {
-        .type = BPF_MAP_TYPE_QUEUE,
-        .key_size = 0,
-        .value_size = sizeof(struct tuple),
-        .max_entries = 1024,
-        .map_flags = 0,
 };
 
 struct bpf_map_def SEC("maps") rip_to_mac = {
@@ -318,15 +310,15 @@ static inline __u16 caltcpcsum(struct iphdr *iph, struct tcphdr *tcph, void *dat
 /**********************************************************************/
 
 static inline void maccpy(unsigned char *dst, unsigned char *src) {
-    //dst[0] = src[0];
-    //dst[1] = src[1];
-    //dst[2] = src[2];
-    //dst[3] = src[3];
-    //dst[4] = src[4];
-    //dst[5] = src[5];
+    dst[0] = src[0];
+    dst[1] = src[1];
+    dst[2] = src[2];
+    dst[3] = src[3];
+    dst[4] = src[4];
+    dst[5] = src[5];
 
-    *((__u32 *) dst) = *((__u32 *) src);
-    *(((__u16 *) dst)+2) = *(((__u16 *) src)+2);
+    //*((__u32 *) dst) = *((__u32 *) src);
+    //*(((__u16 *) dst)+2) = *(((__u16 *) src)+2);
 }
 
 static inline int maccmp(unsigned char *m, unsigned char *s) {
@@ -412,7 +404,7 @@ __u64 wallclock = 0;
 const __u32 index0 = 0;
 const __u32 index1 = 1;
 
-__be32 phyaddr = 0;
+//__be32 phyaddr = 0;
 
 static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 {
@@ -511,7 +503,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 		  
 		  /* update RIP to MAC record in place */
 		  maccpy(m, s);
-		  
+
+		  /*
 		  struct tuple f;
 		  f.src = ipv4->saddr;
 		  f.dst = ipv4->daddr;
@@ -521,7 +514,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 		  f.pad[0] = s[3];
 		  f.pad[1] = s[4];
 		  f.pad[2] = s[5];
-		  
+		  */
 		  //bpf_map_push_elem(&queue_map, &f, BPF_ANY);
 	      }
 	      
@@ -557,14 +550,9 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	  bpf_map_delete_elem(&flows, &f);
 	  goto new_flow;
       }
-      //if (!maccmp(fs->hwaddr, nulmac)) {
-      //  bpf_map_delete_elem(&flows, &f);
-      //  goto new_flow;
-      //}
+
       maccpy(eth_hdr->h_source, eth_hdr->h_dest);
       maccpy(eth_hdr->h_dest, fs->hwaddr);
-      //memcpy(eth_hdr->h_source, eth_hdr->h_dest, 6);
-      //memcpy(eth_hdr->h_dest, fs->hwaddr, 6);
 
       if(tag != NULL) {
 	  //tag->h_tci = fs->vlan;

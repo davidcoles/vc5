@@ -18,7 +18,7 @@
 
 // A really stupid BGP4 implementation for avertising /32 addresses for load balancing
 
-package bgp4rhi
+package bgp4
 
 import (
 	"fmt"

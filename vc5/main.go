@@ -29,7 +29,7 @@ import (
 	"syscall"
 	"time"
 
-	"bgp4rhi"
+	"bgp4"
 	"bpf"
 	"xdp"
 )
@@ -96,7 +96,7 @@ func main() {
 		go multicast_recv(c, c.ipaddr[3], config.Multicast)
 	}
 
-	//log.Fatal(config.RHI)
+	//log.Fatal(config.RHI
 
 	go Serve(netns)
 
@@ -107,7 +107,7 @@ func main() {
 	}
 
 	fmt.Println(config.Peers)
-	b := bgp4rhi.Manager(c.ipaddr, config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
+	b := bgp4.Manager(c.ipaddr, config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
 	if len(config.RHI.Peers) == 0 {
 		b = nil
 	}
@@ -122,7 +122,7 @@ func main() {
 			ips[s.Vip] = ch
 		}
 
-		go c.monitor_vip(s, ch)
+		go monitor_vip(c, s, ch)
 	}
 
 	if *bridge != "" {
@@ -137,7 +137,7 @@ func main() {
 	}
 }
 
-func vip_status(c *Control, ip IP4, veth string, b *bgp4rhi.Peers) chan vipstatus {
+func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
 	vs := make(chan vipstatus, 100)
 	go func() {
 		up := false

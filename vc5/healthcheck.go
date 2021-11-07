@@ -37,34 +37,8 @@ type update struct {
 	up  bool
 }
 
-func (c *Control) vrp_stats(v, r IP4, port uint16, counters chan counters) {
-	last := c.timestamp
-	conn := c.VipRipPortConcurrent(v, r, port, true) // ensure that both counter
-	conn = c.VipRipPortConcurrent(v, r, port, false) // slots are created
-
-	for {
-		time.Sleep(1 * time.Second)
-
-		counter := c.VipRipPortCounters(v, r, port)
-
-		next := c.timestamp
-
-		if last != next {
-			conn = c.VipRipPortConcurrent(v, r, port, last%2 == 0)
-			last = next
-		}
-
-		if conn < 0 {
-			conn = 0
-		}
-
-		counter.ip = r
-		counter.Concurrent = int64(conn)
-		counters <- counter
-	}
-}
-
-func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
+//func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
+func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 	vip := service.Vip
 	port := service.Port
 	backends := service.Rip

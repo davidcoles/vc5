@@ -56,7 +56,6 @@ type Control struct {
 	rhi                     chan rhi
 	interfaces              int
 	service_backend         int
-	queue_map               int
 	rip_to_mac              int
 	nat_to_vip_rip          int
 	vip_rip_to_nat          int
@@ -66,8 +65,9 @@ type Control struct {
 	stats                   int
 	flow_queue              int
 	flows                   int
-	timestamp               int64
-	logger                  *logger
+	//timestamp               int64
+	era    uint64
+	logger *logger
 
 	latency uint64
 	pps     uint64
@@ -199,7 +199,7 @@ func (c *Control) find_map(name string, ks int, rs int) int {
 
 func (c *Control) global_stats() {
 	var zero uint32 = 0
-	var tick int64
+	var tick uint64
 	var prev raw_counters
 	var avg []uint64
 
@@ -219,10 +219,12 @@ func (c *Control) global_stats() {
 	}()
 
 	for {
-		c.timestamp = tick //timestamp
-		tick++
-		clock.era = uint64(tick)
+		c.era = tick
+		clock.era = tick
+
 		xdp.BpfMapUpdateElem(c.clocks, uP(&zero), uP(&clock), xdp.BPF_ANY)
+
+		tick++
 
 		var stats [MAX_CPU]raw_counters
 		var t raw_counters
@@ -294,11 +296,8 @@ func New(visible, veth string, hwaddr [6]byte, native, bridge bool, peth ...stri
 	c.scounters = make(chan scounters, 1000)
 	c.rhi = make(chan rhi, 1000)
 
-	var t_ tuple
 	c.interfaces = c.find_map("interfaces", 4, 16)
-	//c.service_backend = c.find_map("service_backend", 8, 65536*10)
 	c.service_backend = c.find_map("service_backend", 8, 65536*12)
-	c.queue_map = c.find_map("queue_map", 0, int(unsafe.Sizeof(t_)))
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
@@ -327,13 +326,7 @@ func New(visible, veth string, hwaddr [6]byte, native, bridge bool, peth ...stri
 	var vir interfaces
 	vir.ifindex = uint32(v.Index)
 	vir.ipaddr = IP4{10, 0, 0, 1}
-	//peer := [6]byte{0, 1, 2, 3, 4, 5}
-	//copy(vir.hwaddr[:], peer[:])
 	vir.hwaddr = hwaddr
-
-	//var tx_port int
-	//tx_port = c.find_map("tx_port", 4, 4)
-	//xdp.BpfMapUpdateElem(tx_port, uP(&zero), uP(&(vir.ifindex)), xdp.BPF_ANY)
 
 	xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&phy), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.interfaces, uP(&one), uP(&vir), xdp.BPF_ANY)
@@ -392,16 +385,6 @@ func (c *Control) SetBackends(vip IP4, port uint16, be [][12]byte) {
 	xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&backends), xdp.BPF_ANY)
 }
 
-func (c *Control) ReadQueue() *tuple {
-	var t tuple
-	//return nil
-	if xdp.BpfMapLookupAndDeleteElem(c.queue_map, nil, unsafe.Pointer(&t)) != 0 {
-		return nil
-	}
-
-	return &t
-}
-
 func (c *Control) ReadMAC(ip IP4) *MAC {
 	var m MAC
 	if xdp.BpfMapLookupElem(c.rip_to_mac, uP(&ip), uP(&m)) != 0 {
@@ -441,7 +424,29 @@ func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16) counters {
 	return counter
 }
 
-func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, p bool) int32 {
+func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) int32 {
+	var curr [MAX_CPU]int32
+	var zero [MAX_CPU]int32
+	type vip_rip_port struct {
+		vip  IP4
+		rip  IP4
+		port uint16
+		pad  uint16
+	}
+
+	vrp := vip_rip_port{vip: vip, rip: rip, port: port, pad: uint16(era % 2)}
+
+	xdp.BpfMapLookupElem(c.vip_rip_port_concurrent, uP(&vrp), uP(&curr))
+	xdp.BpfMapUpdateElem(c.vip_rip_port_concurrent, uP(&vrp), uP(&zero), xdp.BPF_ANY)
+
+	var total int32
+	for _, t := range curr {
+		total += t
+	}
+	return total
+}
+
+func (c *Control) xxVipRipPortConcurrent(vip, rip IP4, port uint16, p bool) int32 {
 	var concurrent [MAX_CPU]int32
 	type vip_rip_port struct {
 		vip  IP4
@@ -479,8 +484,33 @@ func (c *Control) FlowQueue() (*[FLOW_STATE]byte, bool) {
 	return &entry, true
 }
 
-// c.flows = c.find_map("flows", 12, 24)
 func (c *Control) UpdateFlow(f []byte) {
-	//fmt.Println(f)
 	xdp.BpfMapUpdateElem(c.flows, uP(&f[0]), uP(&f[FLOW]), xdp.BPF_ANY)
+}
+
+func (c *Control) vrp_stats(v, r IP4, port uint16, counters chan counters) {
+	last := c.era
+	conn := c.VipRipPortConcurrent(v, r, port, 0) // ensure that both counter
+	conn = c.VipRipPortConcurrent(v, r, port, 1)  // slots are created
+
+	for {
+		time.Sleep(1 * time.Second)
+
+		counter := c.VipRipPortCounters(v, r, port)
+
+		next := c.era
+
+		if last != next {
+			conn = c.VipRipPortConcurrent(v, r, port, last)
+			last = next
+		}
+
+		if conn < 0 {
+			conn = 0
+		}
+
+		counter.ip = r
+		counter.Concurrent = int64(conn)
+		counters <- counter
+	}
 }
