@@ -16,7 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package stats
 
 import (
 	"encoding/json"
@@ -24,7 +24,12 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"vc5/types"
 )
+
+type scounters = types.Scounters
+type counters = types.Counters
 
 type global struct {
 	Warning    string               `json:"warning"`
@@ -39,7 +44,8 @@ type global struct {
 	Services   map[string]scounters `json:"services"`
 }
 
-func (ctrl *Control) stats_server() {
+//func (ctrl *Control) stats_server() {
+func Stats_server(rhic chan types.RHI, scountersc chan scounters, cooked *counters, latency *uint64, pps *uint64) {
 
 	var js []byte = []byte("{}")
 
@@ -54,19 +60,19 @@ func (ctrl *Control) stats_server() {
 
 		for {
 			select {
-			case r := <-ctrl.rhi:
+			case r := <-rhic:
 				g.RHI[r.Ip.String()] = r.Up
 
-			case c := <-ctrl.scounters:
-				g.Services[c.Name] = c
+			case c := <-scountersc:
+				g.Services[c.Sname] = c
 			}
 
-			g.Latency = ctrl.latency
-			g.Pps = ctrl.pps
-			g.New_flows = ctrl.Cooked.New_flows
-			g.Rx_packets = ctrl.Cooked.Rx_packets
-			g.Rx_bytes = ctrl.Cooked.Rx_bytes
-			g.Qfailed = ctrl.Cooked.Qfailed
+			g.Latency = *latency
+			g.Pps = *pps
+			g.New_flows = cooked.New_flows
+			g.Rx_packets = cooked.Rx_packets
+			g.Rx_bytes = cooked.Rx_bytes
+			g.Qfailed = cooked.Qfailed
 
 			g.Concurrent = 0
 			for _, s := range g.Services {
@@ -108,20 +114,24 @@ func (ctrl *Control) stats_server() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 
-		if j, err := json.MarshalIndent(ctrl.logger.Dump(), "", "  "); err != nil {
-			w.Write([]byte("{}"))
-		} else {
-			w.Write(j)
-		}
-		w.Write([]byte("\n"))
+		/*
+			if j, err := json.MarshalIndent(ctrl.logger.Dump(), "", "  "); err != nil {
+				w.Write([]byte("{}"))
+			} else {
+				w.Write(j)
+			}
+			w.Write([]byte("\n"))
+		*/
 	})
 
 	http.HandleFunc("/log/text", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		for _, t := range ctrl.logger.Text() {
-			w.Write([]byte(t))
-		}
+		/*
+			for _, t := range ctrl.logger.Text() {
+				w.Write([]byte(t))
+			}
+		*/
 	})
 
 	log.Fatal(http.ListenAndServe(":80", nil))
