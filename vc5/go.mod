@@ -2,7 +2,7 @@ module vc5
 
 go 1.15
 
-replace xdp => ../xdp
+replace xdp => ./xdp
 
 replace bpf => ../bpf
 
