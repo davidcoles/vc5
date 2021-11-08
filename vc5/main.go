@@ -34,7 +34,9 @@ import (
 	"bpf"
 
 	"vc5/bgp4"
+	"vc5/config"
 	"vc5/core"
+	"vc5/probes"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -49,6 +51,7 @@ type MAC = types.MAC
 type rhi = types.RHI
 
 type Control = core.Control
+type vvipstatus = probes.Vipstatus
 
 func simple() {
 	ulimit()
@@ -87,7 +90,7 @@ func main() {
 		copy(hwaddr[:], hw[:])
 	}
 
-	config, err := LoadConfigFile(conffile)
+	config, err := config.LoadConfigFile(conffile)
 	//return
 
 	if err != nil {
@@ -115,7 +118,7 @@ func main() {
 
 	go Serve(netns)
 
-	ips := make(map[IP4]chan vipstatus)
+	ips := make(map[IP4]chan vvipstatus)
 
 	if config.Learn > 0 {
 		time.Sleep(time.Duration(config.Learn) * time.Second)
@@ -137,7 +140,7 @@ func main() {
 			ips[s.Vip] = ch
 		}
 
-		go monitor_vip(c, s, ch)
+		go probes.MonitorVip(c, s, ch)
 	}
 
 	if *bridge != "" {
@@ -152,13 +155,13 @@ func main() {
 	}
 }
 
-func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
-	vs := make(chan vipstatus, 100)
+func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vvipstatus {
+	vs := make(chan vvipstatus, 100)
 	go func() {
 		up := false
 		m := make(map[uint16]bool)
 		for v := range vs {
-			m[v.port] = v.up
+			m[v.Port] = v.Up
 			was := up
 			up = true
 
