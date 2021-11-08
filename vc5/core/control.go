@@ -25,7 +25,6 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -158,19 +157,6 @@ type interfaces struct {
 	padding [2]byte
 }
 
-func ulimit() {
-	var rLimit syscall.Rlimit
-	RLIMIT_MEMLOCK := 8
-	if err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
-		log.Fatal("Error Getting Rlimit ", err)
-	}
-	rLimit.Max = 0xffffffffffffffff
-	rLimit.Cur = 0xffffffffffffffff
-	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
-		log.Fatal("Error Setting Rlimit ", err)
-	}
-}
-
 func (c *Control) find_map(name string, ks int, rs int) int {
 	m := c.xdp.FindMap(name)
 
@@ -257,14 +243,7 @@ func (c *Control) global_stats() {
 	}
 }
 
-func New(visible, veth string, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
-	ulimit()
-
-	ipaddr, ok := parseIP(visible)
-
-	if !ok {
-		log.Fatal(visible)
-	}
+func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
 
 	var c Control
 
@@ -320,7 +299,7 @@ func New(visible, veth string, hwaddr [6]byte, native, bridge bool, peth ...stri
 	vir.ipaddr = IP4{10, 0, 0, 1}
 	vir.hwaddr = hwaddr
 
-	xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&phy), xdp.BPF_ANY)
+	//xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&phy), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.interfaces, uP(&one), uP(&vir), xdp.BPF_ANY)
 
 	go c.global_stats()
@@ -384,7 +363,7 @@ func (c *Control) ReadMAC(ip IP4) *MAC {
 		return nil
 	}
 
-	if rendezvous.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) == 0 {
+	if cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) == 0 {
 		return nil
 	}
 
@@ -524,4 +503,16 @@ func parseIP(ip string) ([4]byte, bool) {
 		addr[n] = byte(a)
 	}
 	return addr, true
+}
+
+func cmpmac(a, b [6]byte) int {
+	for n := 0; n < len(a); n++ {
+		if a[n] < b[n] {
+			return -1
+		}
+		if a[n] > b[n] {
+			return 1
+		}
+	}
+	return 0
 }

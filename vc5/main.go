@@ -41,20 +41,11 @@ import (
 	"vc5/xdp"
 )
 
-type scounters = types.Scounters
-type counters = types.Counters
-type raw_counters = core.Raw_counters
-
 type IP4 = types.IP4
-type IP6 = types.IP6
-type MAC = types.MAC
-type rhi = types.RHI
-
 type Control = core.Control
-type vvipstatus = probes.Vipstatus
+type vipstatus = probes.Vipstatus
 
 func simple() {
-	ulimit()
 	x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
 	fmt.Println(x, e)
 	return
@@ -62,6 +53,7 @@ func simple() {
 }
 
 func main() {
+	ulimit()
 	//return simple()
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")
@@ -83,6 +75,12 @@ func main() {
 	peth := args[5:]
 
 	var hwaddr [6]byte
+
+	ipaddr, ok := parseIP(ipv4)
+
+	if !ok {
+		log.Fatal(ipv4)
+	}
 
 	if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
 		panic(err)
@@ -108,7 +106,7 @@ func main() {
 		os.Exit(1)
 	}()
 
-	c := core.New(ipv4, veth, hwaddr, *native, *bridge != "", peth...)
+	c := core.New(ipaddr, veth, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {
 		go multicast_recv(c, c.IPAddr()[3], config.Multicast)
@@ -118,7 +116,7 @@ func main() {
 
 	go probes.Serve(netns)
 
-	ips := make(map[IP4]chan vvipstatus)
+	ips := make(map[IP4]chan vipstatus)
 
 	if config.Learn > 0 {
 		time.Sleep(time.Duration(config.Learn) * time.Second)
@@ -155,8 +153,8 @@ func main() {
 	}
 }
 
-func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vvipstatus {
-	vs := make(chan vvipstatus, 100)
+func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
+	vs := make(chan vipstatus, 100)
 	go func() {
 		up := false
 		m := make(map[uint16]bool)
@@ -171,7 +169,7 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vvipstatus 
 				}
 			}
 
-			c.RHI() <- rhi{Ip: ip, Up: up}
+			c.RHI() <- types.RHI{Ip: ip, Up: up}
 
 			if up != was {
 				fmt.Println("***** CHANGED", v, up)
@@ -300,6 +298,19 @@ func pulser() func() string {
 	}
 }
 
+func ulimit() {
+	var rLimit syscall.Rlimit
+	RLIMIT_MEMLOCK := 8
+	if err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
+		log.Fatal("Error Getting Rlimit ", err)
+	}
+	rLimit.Max = 0xffffffffffffffff
+	rLimit.Cur = 0xffffffffffffffff
+	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
+		log.Fatal("Error Setting Rlimit ", err)
+	}
+}
+
 func parseIP(ip string) ([4]byte, bool) {
 	var addr [4]byte
 	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
@@ -315,22 +326,4 @@ func parseIP(ip string) ([4]byte, bool) {
 		addr[n] = byte(a)
 	}
 	return addr, true
-}
-
-func ulimit() {
-	var rLimit syscall.Rlimit
-	RLIMIT_MEMLOCK := 8
-	if err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
-		log.Fatal("Error Getting Rlimit ", err)
-	}
-	rLimit.Max = 0xffffffffffffffff
-	rLimit.Cur = 0xffffffffffffffff
-	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
-		log.Fatal("Error Setting Rlimit ", err)
-	}
-}
-
-func ping(ip IP4) {
-	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-	exec.Command("/bin/sh", "-c", command).Output()
 }

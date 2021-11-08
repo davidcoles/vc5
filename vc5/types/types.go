@@ -23,13 +23,13 @@ type Counters struct {
 	New_flows  uint64 `json:"total_connections"`
 	Rx_packets uint64 `json:"rx_packets"`
 	Rx_bytes   uint64 `json:"rx_octets"`
-	Qfailed    uint64
-	Fp_count   uint64
-	Fp_time    uint64
-	Ip         IP4
+	Qfailed    uint64 `json:"-"`
+	Fp_count   uint64 `json:"-"`
+	Fp_time    uint64 `json:"-"`
+	Ip         IP4    `json:"-"`
 }
 type Scounters struct {
-	Sname       string
+	Sname       string `json:"-"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Up          bool   `json:"up"`
@@ -39,8 +39,8 @@ type Scounters struct {
 	New_flows   uint64 `json:"total_connections"`
 	Rx_packets  uint64 `json:"rx_packets"`
 	Rx_bytes    uint64 `json:"rx_octets"`
-	fp_count    uint64
-	fp_time     uint64
+	//fp_count    uint64
+	//fp_time     uint64
 
 	//name     string
 	Backends map[string]Counters `json:"backends"`

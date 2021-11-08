@@ -31,19 +31,19 @@ type Stats struct {
 	Duration time.Duration
 }
 
-type macripvids [][12]byte
+type B12s [][12]byte
 
-func (h macripvids) Len() int           { return len(h) }
-func (h macripvids) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h macripvids) Less(i, j int) bool { return cmpmacripvid(h[i], h[j]) == -1 }
+func (h B12s) Len() int           { return len(h) }
+func (h B12s) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h B12s) Less(i, j int) bool { return cmpb12(h[i], h[j]) == -1 }
 
-func cmpmacripvids(a, b [][12]byte) bool {
+func cmpB12s(a, b [][12]byte) bool {
 	if len(a) != len(b) {
 		return false
 	}
 
 	for i := 0; i < len(a); i++ {
-		if cmpmacripvid(a[i], b[i]) != 0 {
+		if cmpb12(a[i], b[i]) != 0 {
 			return false
 		}
 	}
@@ -51,7 +51,7 @@ func cmpmacripvids(a, b [][12]byte) bool {
 	return true
 }
 
-func cmpmacripvid(a, b [12]byte) int {
+func cmpb12(a, b [12]byte) int {
 	for n := 0; n < len(a); n++ {
 		if a[n] < b[n] {
 			return -1
@@ -64,9 +64,7 @@ func cmpmacripvid(a, b [12]byte) int {
 }
 
 func Rendezvous(hws [][12]byte) ([65536][12]byte, Stats) {
-	var nodes macripvids = hws
-
-	//fmt.Println("!!!!!!!!", nodes)
+	var nodes B12s = hws
 
 	var t [65536][12]byte
 	var s Stats
@@ -169,16 +167,4 @@ func bestsh(key uint16, nodes [][12]byte) [12]byte {
 	}
 
 	return best
-}
-
-func Cmpmac(a, b [6]byte) int {
-	for n := 0; n < len(a); n++ {
-		if a[n] < b[n] {
-			return -1
-		}
-		if a[n] > b[n] {
-			return 1
-		}
-	}
-	return 0
 }

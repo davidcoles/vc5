@@ -33,6 +33,7 @@ type Control = core.Control
 type IP4 = types.IP4
 type IP6 = types.IP6
 type MAC = types.MAC
+type B12s = types.B12s
 
 type Service = config.Service
 type Checks = config.Checks
@@ -54,8 +55,6 @@ type update struct {
 	mac MAC
 	up  bool
 }
-
-type B12s = types.B12s
 
 //func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 func MonitorVip(c *Control, service Service, vs chan vipstatus) {
