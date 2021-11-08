@@ -67,6 +67,6 @@ func (l *logger) Log(level int, entry interface{}) {
 	}
 }
 
-func (c *Control) Log(level int, entry interface{}) {
-	c.logger.Log(level, entry)
-}
+//func (c *Controll) Log(level int, entry interface{}) {
+//	c.logger.Log(level, entry)
+//}

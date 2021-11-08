@@ -26,14 +26,29 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"syscall"
 	"time"
 
 	"bpf"
 
 	"vc5/bgp4"
+	"vc5/core"
+	"vc5/types"
 	"vc5/xdp"
 )
+
+type scounters = types.Scounters
+type counters = types.Counters
+type raw_counters = core.Raw_counters
+
+type IP4 = types.IP4
+type IP6 = types.IP6
+type MAC = types.MAC
+type rhi = types.RHI
+
+type Control = core.Control
 
 func simple() {
 	ulimit()
@@ -45,7 +60,6 @@ func simple() {
 
 func main() {
 	//return simple()
-
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")
 	flag.Parse()
@@ -91,10 +105,10 @@ func main() {
 		os.Exit(1)
 	}()
 
-	c := New(ipv4, veth, hwaddr, *native, *bridge != "", peth...)
+	c := core.New(ipv4, veth, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {
-		go multicast_recv(c, c.ipaddr[3], config.Multicast)
+		go multicast_recv(c, c.IPAddr()[3], config.Multicast)
 	}
 
 	//log.Fatal(config.RHI
@@ -108,7 +122,7 @@ func main() {
 	}
 
 	fmt.Println(config.Peers)
-	b := bgp4.Manager(c.ipaddr, config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
+	b := bgp4.Manager(c.IPAddr(), config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
 	if len(config.RHI.Peers) == 0 {
 		b = nil
 	}
@@ -131,7 +145,7 @@ func main() {
 		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
 	}
 
-	multicast_send(c, c.ipaddr[3], config.Multicast)
+	multicast_send(c, c.IPAddr()[3], config.Multicast)
 
 	for {
 		time.Sleep(1 * time.Second)
@@ -154,7 +168,7 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
 				}
 			}
 
-			c.rhi <- rhi{Ip: ip, Up: up}
+			c.RHI() <- rhi{Ip: ip, Up: up}
 
 			if up != was {
 				fmt.Println("***** CHANGED", v, up)
@@ -204,9 +218,9 @@ func multicast_recv(control *Control, instance byte, srvAddr string) {
 		if inst != instance {
 			fmt.Print(spin())
 
-			for len(buff) >= FLOW_STATE {
+			for len(buff) >= core.FLOW_STATE {
 				control.UpdateFlow(buff)
-				buff = buff[FLOW_STATE:]
+				buff = buff[core.FLOW_STATE:]
 			}
 		} else {
 			fmt.Print(pulse())
@@ -281,4 +295,39 @@ func pulser() func() string {
 		n++
 		return s[n%len(s)]
 	}
+}
+
+func parseIP(ip string) ([4]byte, bool) {
+	var addr [4]byte
+	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
+	m := re.FindStringSubmatch(ip)
+	if len(m) != 5 {
+		return addr, false
+	}
+	for n, _ := range addr {
+		a, err := strconv.ParseInt(m[n+1], 10, 9)
+		if err != nil || a < 0 || a > 255 {
+			return addr, false
+		}
+		addr[n] = byte(a)
+	}
+	return addr, true
+}
+
+func ulimit() {
+	var rLimit syscall.Rlimit
+	RLIMIT_MEMLOCK := 8
+	if err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
+		log.Fatal("Error Getting Rlimit ", err)
+	}
+	rLimit.Max = 0xffffffffffffffff
+	rLimit.Cur = 0xffffffffffffffff
+	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
+		log.Fatal("Error Setting Rlimit ", err)
+	}
+}
+
+func ping(ip IP4) {
+	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
+	exec.Command("/bin/sh", "-c", command).Output()
 }

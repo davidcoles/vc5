@@ -95,3 +95,48 @@ func (i IP4) String() string {
 func (m MAC) String() string {
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
 }
+
+type B12s [][12]byte
+type B12 [12]byte
+
+func (h B12s) Len() int           { return len(h) }
+func (h B12s) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h B12s) Less(i, j int) bool { return CmpB12(h[i], h[j]) == -1 }
+
+func Cmpmac(a, b [6]byte) int {
+	for n := 0; n < len(a); n++ {
+		if a[n] < b[n] {
+			return -1
+		}
+		if a[n] > b[n] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func CmpB12s(a, b [][12]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := 0; i < len(a); i++ {
+		if CmpB12(a[i], b[i]) != 0 {
+			return false
+		}
+	}
+
+	return true
+}
+
+func CmpB12(a, b [12]byte) int {
+	for n := 0; n < len(a); n++ {
+		if a[n] < b[n] {
+			return -1
+		}
+		if a[n] > b[n] {
+			return 1
+		}
+	}
+	return 0
+}

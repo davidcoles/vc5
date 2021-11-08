@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"vc5/types"
 )
 
 const ENABLE_HEALTHCHECKS = true
@@ -36,6 +38,8 @@ type update struct {
 	mac MAC
 	up  bool
 }
+
+type B12s = types.B12s
 
 //func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 func monitor_vip(c *Control, service Service, vs chan vipstatus) {
@@ -52,7 +56,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 	updates := make(chan update, 100)
 	countersc := make(chan counters, 100)
 
-	var live macripvids
+	var live B12s
 	var nalive uint
 	var up bool
 
@@ -77,7 +81,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 		checks.https = r.Https
 		fmt.Println(r.Nat, r.Rip, checks)
 		go monitor_nat(c, r.Nat, r.Rip, checks, updates)
-		go c.vrp_stats(vip, r.Rip, port, countersc)
+		go c.VRPStats(vip, r.Rip, port, countersc)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -103,18 +107,18 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 				s.Rx_bytes += v.Rx_bytes
 			}
 
-			c.scounters <- s
+			c.SCounters() <- s
 			goto do_select
 		default:
 		}
 
-		var new macripvids
+		var new B12s
 
 		for r, m := range mac {
 			v := vlan[r]
 			h := uint8(v >> 8)
 			l := uint8(v & 0xff)
-			if bup[r] && cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
+			if bup[r] && types.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
 				new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], h, l})
 			}
 		}
@@ -123,7 +127,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 
 		was := up
 
-		if !cmpmacripvids(live, new) {
+		if !types.CmpB12s(live, new) {
 			live = new
 
 			if service.Need > 0 {
@@ -135,7 +139,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 			if up {
 				c.SetBackends(vip, port, live)
 			} else {
-				c.SetBackends(vip, port, macripvids{})
+				c.SetBackends(vip, port, B12s{})
 			}
 
 			// send update - mark vip up/down etc
@@ -143,7 +147,7 @@ func monitor_vip(c *Control, service Service, vs chan vipstatus) {
 		}
 
 		if was != up {
-			c.Log(0, fmt.Sprint("VIP state change: ", vip, " -> ", ud(up)))
+			//c.Log(0, fmt.Sprint("VIP state change: ", vip, " -> ", ud(up)))
 		}
 
 		vs <- vipstatus{port: port, up: up}
@@ -205,10 +209,10 @@ func monitor_nat(c *Control, nat, rip IP4, checks Checks, updates chan update) {
 			m2 = *m
 		}
 
-		if cmpmac(m2, mac) != 0 {
+		if types.Cmpmac(m2, mac) != 0 {
 			changed = true
 			mac = m2
-			c.Log(0, fmt.Sprint("RIP MAC change: ", rip, " -> ", mac))
+			//c.Log(0, fmt.Sprint("RIP MAC change: ", rip, " -> ", mac))
 		}
 
 		if ok != alive {
@@ -218,7 +222,7 @@ func monitor_nat(c *Control, nat, rip IP4, checks Checks, updates chan update) {
 			changed = true
 			alive = ok
 
-			c.Log(0, fmt.Sprint("RIP state change: ", rip, " -> ", ud(alive)))
+			//c.Log(0, fmt.Sprint("RIP state change: ", rip, " -> ", ud(alive)))
 		}
 
 		if changed {
