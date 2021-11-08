@@ -45,7 +45,7 @@ type global struct {
 }
 
 //func (ctrl *Control) stats_server() {
-func Stats_server(rhic chan types.RHI, scountersc chan scounters, cooked *counters, latency *uint64, pps *uint64) {
+func Stats_server(rhic chan types.RHI, scountersc chan scounters, countersc chan counters) {
 
 	var js []byte = []byte("{}")
 
@@ -58,6 +58,8 @@ func Stats_server(rhic chan types.RHI, scountersc chan scounters, cooked *counte
 		g.RHI = make(map[string]bool)
 		g.Services = make(map[string]scounters)
 
+		var cooked counters
+
 		for {
 			select {
 			case r := <-rhic:
@@ -65,10 +67,13 @@ func Stats_server(rhic chan types.RHI, scountersc chan scounters, cooked *counte
 
 			case c := <-scountersc:
 				g.Services[c.Sname] = c
+
+			case c := <-countersc:
+				cooked = c
 			}
 
-			g.Latency = *latency
-			g.Pps = *pps
+			g.Latency = cooked.Latency
+			g.Pps = cooked.Pps
 			g.New_flows = cooked.New_flows
 			g.Rx_packets = cooked.Rx_packets
 			g.Rx_bytes = cooked.Rx_bytes

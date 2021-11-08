@@ -97,9 +97,9 @@ func (b *bgpopen) data() []byte {
 	return data[:]
 }
 
-func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16) *BGP4 {
+func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16, start chan bool) *BGP4 {
 	var b BGP4
-	b.updates = make(chan nlri, 100)
+	b.updates = make(chan nlri, 100000)
 	b.peer = peer
 	b.port = 179
 	b.myip = myip
@@ -110,7 +110,7 @@ func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16) *BGP4 {
 		b.rid = myip
 	}
 
-	go b.BGP4State()
+	go b.BGP4State(start)
 
 	return &b
 }
@@ -119,9 +119,10 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 	b.updates <- nlri{ip: ip, up: up}
 }
 
-func (b *BGP4) BGP4State() {
+func (b *BGP4) BGP4State(start chan bool) {
 
-	time.Sleep(10 * time.Second)
+	//time.Sleep(10 * time.Second)
+	<-start
 
 	d := net.Dialer{Timeout: 2 * time.Second}
 
@@ -157,13 +158,18 @@ func (b *BGP4) BGP4State() {
 }
 
 type Peers struct {
+	start chan bool
 	peers []*BGP4
 }
 
+func (p *Peers) Start() {
+	close(p.start)
+}
+
 func Manager(myip [4]byte, rid [4]byte, as uint16, peers []string) *Peers {
-	var b Peers
+	b := Peers{start: make(chan bool)}
 	for _, p := range peers {
-		b.peers = append(b.peers, BGP4Start(p, myip, rid, as))
+		b.peers = append(b.peers, BGP4Start(p, myip, rid, as, b.start))
 	}
 	return &b
 }

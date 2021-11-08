@@ -40,7 +40,6 @@ type Checks = config.Checks
 
 type scounters = types.Scounters
 type counters = types.Counters
-type raw_counters = core.Raw_counters
 
 const ENABLE_HEALTHCHECKS = true
 

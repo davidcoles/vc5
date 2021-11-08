@@ -27,6 +27,8 @@ type Counters struct {
 	Fp_count   uint64 `json:"-"`
 	Fp_time    uint64 `json:"-"`
 	Ip         IP4    `json:"-"`
+	Pps        uint64 `json:"-"`
+	Latency    uint64 `json:"-"`
 }
 type Scounters struct {
 	Sname       string `json:"-"`

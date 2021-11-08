@@ -23,8 +23,6 @@ import (
 	"log"
 	"net"
 	"os/exec"
-	"regexp"
-	"strconv"
 	"time"
 	"unsafe"
 
@@ -37,12 +35,14 @@ import (
 
 type scounters = types.Scounters
 type counters = types.Counters
-type raw_counters = Raw_counters
+
 type IP4 = types.IP4
 type IP6 = types.IP6
 type MAC = types.MAC
 
-func cAddRaw(c *counters, r Raw_counters) {
+type uP = unsafe.Pointer
+
+func addRaw(c *counters, r raw_counters) {
 	c.New_flows += r.New_flows
 	c.Rx_packets += r.Rx_packets
 	c.Rx_bytes += r.Rx_bytes
@@ -51,7 +51,18 @@ func cAddRaw(c *counters, r Raw_counters) {
 	c.Qfailed += r.Qfailed
 }
 
-type Raw_counters struct {
+func (r raw_counters) cook() counters {
+	var c counters
+	c.New_flows = r.New_flows
+	c.Rx_packets = r.Rx_packets
+	c.Rx_bytes = r.Rx_bytes
+	c.Fp_count = r.Fp_count
+	c.Fp_time = r.Fp_time
+	c.Qfailed = r.Qfailed
+	return c
+}
+
+type raw_counters struct {
 	New_flows  uint64 `json:"total_connections"`
 	Rx_packets uint64 `json:"rx_packets"`
 	Rx_bytes   uint64 `json:"rx_bytes"`
@@ -60,7 +71,7 @@ type Raw_counters struct {
 	Qfailed    uint64
 }
 
-func (c *Raw_counters) AddRaw(r Raw_counters) {
+func (c *raw_counters) add(r raw_counters) {
 	c.New_flows += r.New_flows
 	c.Rx_packets += r.Rx_packets
 	c.Rx_bytes += r.Rx_bytes
@@ -72,15 +83,17 @@ func (c *Raw_counters) AddRaw(r Raw_counters) {
 const FLOW = 12
 const STATE = 32
 const FLOW_STATE = FLOW + STATE
-
-type uP = unsafe.Pointer
-
 const MAX_CPU = 256
+const INTERVAL = 10
 
 type Control struct {
-	xdp                     *xdp.XDP_
-	scounters               chan scounters
-	rhi                     chan rhi
+	xdp       *xdp.XDP_
+	era       uint64
+	interval  uint8
+	scounters chan scounters
+	counters  chan counters
+	rhi       chan rhi
+
 	interfaces              int
 	service_backend         int
 	rip_to_mac              int
@@ -92,19 +105,16 @@ type Control struct {
 	stats                   int
 	flow_queue              int
 	flows                   int
-	//timestamp               int64
-	era uint64
 
 	//// logger *logger
-
-	latency uint64
-	pps     uint64
-	//raw     raw_counters
-	Cooked counters
 
 	ipaddr  IP4
 	hwaddr  MAC
 	ifindex uint32
+}
+
+func (c *Control) Era() (uint64, uint8) {
+	return c.era, c.interval
 }
 
 func (c *Control) IPAddr() [4]byte {
@@ -114,14 +124,12 @@ func (c *Control) IPAddr() [4]byte {
 func (c *Control) SCounters() chan scounters {
 	return c.scounters
 }
+func (c *Control) Counters() chan counters {
+	return c.counters
+}
 func (c *Control) RHI() chan rhi {
 	return c.rhi
 }
-
-//type rhi struct {
-//	ip IP4
-//	up bool
-//}
 
 type rhi = types.RHI
 
@@ -171,11 +179,9 @@ func (c *Control) find_map(name string, ks int, rs int) int {
 	return m
 }
 
-func (c *Control) global_stats() {
+func (c *Control) global_update() {
 	var zero uint32 = 0
-	var tick uint64
-	var prev raw_counters
-	var avg []uint64
+	c.era = 0
 
 	type clocks struct {
 		era  uint64
@@ -193,60 +199,19 @@ func (c *Control) global_stats() {
 	}()
 
 	for {
-		c.era = tick
-		clock.era = tick
-
+		c.era++
+		clock.era = c.era
 		xdp.BpfMapUpdateElem(c.clocks, uP(&zero), uP(&clock), xdp.BPF_ANY)
-
-		tick++
-
-		var stats [MAX_CPU]raw_counters
-		var t raw_counters
-
-		xdp.BpfMapLookupElem(c.stats, uP(&zero), uP(&stats))
-
-		for _, s := range stats {
-			t.AddRaw(s)
-		}
-
-		latency := t.Fp_time
-		if t.Fp_count > 0 {
-			latency /= t.Fp_count
-		}
-
-		avg = append(avg, latency)
-		for len(avg) > 4 {
-			avg = avg[1:]
-		}
-
-		latency = 0
-
-		if len(avg) > 0 {
-			for _, v := range avg {
-				latency += v
-			}
-			latency /= uint64(len(avg))
-		}
-
-		c.latency = latency
-		c.pps = (t.Rx_packets - prev.Rx_packets) / 10 // see sleep below
-		//c.raw = t
-
-		var count counters
-		cAddRaw(&count, t)
-		c.Cooked = count
-
-		fmt.Printf(">>> %d pps, %d ns avg. latency\n", c.pps, latency)
-		prev = t
-
-		time.Sleep(10 * time.Second) // DONT CHANGE SLEEP - breaks concurrents
+		time.Sleep(INTERVAL * time.Second)
 	}
+
 }
 
 func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
 
 	var c Control
 
+	c.interval = INTERVAL
 	c.ipaddr = ipaddr
 	////c.logger = NewLogger()
 
@@ -265,6 +230,7 @@ func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...s
 	c.xdp = x
 
 	c.scounters = make(chan scounters, 1000)
+	c.counters = make(chan counters, 1000)
 	c.rhi = make(chan rhi, 1000)
 
 	c.interfaces = c.find_map("interfaces", 4, 16)
@@ -272,7 +238,6 @@ func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...s
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
-
 	c.clocks = c.find_map("clocks", 4, 16)
 	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", 12, 8*6)
 	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", 12, 4)
@@ -280,7 +245,7 @@ func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...s
 	c.flow_queue = c.find_map("flow_queue", 0, FLOW_STATE)
 	c.flows = c.find_map("flows", FLOW, STATE)
 
-	var zero uint32 = 0
+	//var zero uint32 = 0
 	var one uint32 = 1
 
 	p, _ := net.InterfaceByName(peth[0])
@@ -302,9 +267,9 @@ func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...s
 	//xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&phy), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.interfaces, uP(&one), uP(&vir), xdp.BPF_ANY)
 
+	go c.global_update()
 	go c.global_stats()
-	//go c.stats_server()
-	go stats.Stats_server(c.rhi, c.scounters, &(c.Cooked), &(c.latency), &(c.pps))
+	go stats.Stats_server(c.rhi, c.scounters, c.counters)
 
 	return &c
 }
@@ -363,6 +328,18 @@ func (c *Control) ReadMAC(ip IP4) *MAC {
 		return nil
 	}
 
+	cmpmac := func(a, b [6]byte) int {
+		for n := 0; n < len(a); n++ {
+			if a[n] < b[n] {
+				return -1
+			}
+			if a[n] > b[n] {
+				return 1
+			}
+		}
+		return 0
+	}
+
 	if cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) == 0 {
 		return nil
 	}
@@ -376,7 +353,6 @@ func ping(ip IP4) {
 }
 
 func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16) counters {
-	var counter counters
 	var raw [MAX_CPU]raw_counters
 	type vip_rip_port struct {
 		vip  IP4
@@ -389,12 +365,11 @@ func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16) counters {
 	xdp.BpfMapUpdateElem(c.vip_rip_port_counters, uP(&vrp), uP(&raw), xdp.BPF_NOEXIST)
 	xdp.BpfMapLookupElem(c.vip_rip_port_counters, uP(&vrp), uP(&raw))
 
+	var t raw_counters
 	for _, r := range raw {
-		//counter.AddRaw(r)
-		cAddRaw(&counter, r)
+		t.add(r)
 	}
-
-	return counter
+	return t.cook()
 }
 
 func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) int32 {
@@ -462,7 +437,7 @@ func (c *Control) UpdateFlow(f []byte) {
 }
 
 func (c *Control) VRPStats(v, r IP4, port uint16, counters chan counters) {
-	last := c.era
+	last, _ := c.Era()
 	conn := c.VipRipPortConcurrent(v, r, port, 0) // ensure that both counter
 	conn = c.VipRipPortConcurrent(v, r, port, 1)  // slots are created
 
@@ -471,7 +446,7 @@ func (c *Control) VRPStats(v, r IP4, port uint16, counters chan counters) {
 
 		counter := c.VipRipPortCounters(v, r, port)
 
-		next := c.era
+		next, _ := c.Era()
 
 		if last != next {
 			conn = c.VipRipPortConcurrent(v, r, port, last)
@@ -488,31 +463,54 @@ func (c *Control) VRPStats(v, r IP4, port uint16, counters chan counters) {
 	}
 }
 
-func parseIP(ip string) ([4]byte, bool) {
-	var addr [4]byte
-	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
-	m := re.FindStringSubmatch(ip)
-	if len(m) != 5 {
-		return addr, false
+func (c *Control) GlobalStats() counters {
+	var zero uint32 = 0
+	var stats [MAX_CPU]raw_counters
+	var t raw_counters
+
+	xdp.BpfMapLookupElem(c.stats, uP(&zero), uP(&stats))
+
+	for _, s := range stats {
+		t.add(s)
 	}
-	for n, _ := range addr {
-		a, err := strconv.ParseInt(m[n+1], 10, 9)
-		if err != nil || a < 0 || a > 255 {
-			return addr, false
-		}
-		addr[n] = byte(a)
-	}
-	return addr, true
+	return t.cook()
 }
 
-func cmpmac(a, b [6]byte) int {
-	for n := 0; n < len(a); n++ {
-		if a[n] < b[n] {
-			return -1
+func (c *Control) global_stats() {
+	var prev counters
+	var avg []uint64
+
+	for n := 0; ; n++ {
+		time.Sleep(1 * time.Second)
+
+		count := c.GlobalStats()
+
+		latency := count.Fp_time
+		if count.Fp_count > 0 {
+			latency /= count.Fp_count
 		}
-		if a[n] > b[n] {
-			return 1
+
+		avg = append(avg, latency)
+		for len(avg) > 4 {
+			avg = avg[1:]
 		}
+
+		latency = 0
+
+		if len(avg) > 0 {
+			for _, v := range avg {
+				latency += v
+			}
+			latency /= uint64(len(avg))
+		}
+
+		count.Latency = latency
+		count.Pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
+		c.Counters() <- count
+
+		if n%10 == 0 {
+			fmt.Printf(">>> %d pps, %d ns avg. latency\n", count.Pps, count.Latency)
+		}
+		prev = count
 	}
-	return 0
 }

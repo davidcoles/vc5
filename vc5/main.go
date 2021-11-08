@@ -54,7 +54,9 @@ func simple() {
 
 func main() {
 	ulimit()
+
 	//return simple()
+
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")
 	flag.Parse()
@@ -112,22 +114,17 @@ func main() {
 		go multicast_recv(c, c.IPAddr()[3], config.Multicast)
 	}
 
-	//log.Fatal(config.RHI
-
+	// Set up probe server - runs in other network namespace
 	go probes.Serve(netns)
 
-	ips := make(map[IP4]chan vipstatus)
-
-	if config.Learn > 0 {
-		time.Sleep(time.Duration(config.Learn) * time.Second)
-	}
-
+	// Set up BGP4 peer manager
 	fmt.Println(config.Peers)
 	b := bgp4.Manager(c.IPAddr(), config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
 	if len(config.RHI.Peers) == 0 {
 		b = nil
 	}
 
+	ips := make(map[IP4]chan vipstatus)
 	for _, s := range config.Services {
 		fmt.Println("=========", s.Vip, s.Port)
 		fmt.Println(s)
@@ -144,6 +141,14 @@ func main() {
 	if *bridge != "" {
 		time.Sleep(3 * time.Second)
 		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
+	}
+
+	if config.Learn > 0 {
+		time.Sleep(time.Duration(config.Learn) * time.Second)
+	}
+
+	if b != nil {
+		b.Start()
 	}
 
 	multicast_send(c, c.IPAddr()[3], config.Multicast)
