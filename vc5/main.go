@@ -70,7 +70,7 @@ func main() {
 	args := flag.Args()
 
 	if len(args) == 1 {
-		Daemon(args[0])
+		probes.Daemon(args[0])
 	}
 
 	fmt.Println(args)
@@ -116,7 +116,7 @@ func main() {
 
 	//log.Fatal(config.RHI
 
-	go Serve(netns)
+	go probes.Serve(netns)
 
 	ips := make(map[IP4]chan vvipstatus)
 
