@@ -97,7 +97,7 @@ func (b *bgpopen) data() []byte {
 	return data[:]
 }
 
-func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16, start chan bool) *BGP4 {
+func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16, start chan bool, done chan bool) *BGP4 {
 	var b BGP4
 	b.updates = make(chan nlri, 100000)
 	b.peer = peer
@@ -110,7 +110,7 @@ func BGP4Start(peer string, myip [4]byte, rid [4]byte, asn uint16, start chan bo
 		b.rid = myip
 	}
 
-	go b.BGP4State(start)
+	go b.BGP4State(start, done)
 
 	return &b
 }
@@ -119,7 +119,7 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 	b.updates <- nlri{ip: ip, up: up}
 }
 
-func (b *BGP4) BGP4State(start chan bool) {
+func (b *BGP4) BGP4State(start chan bool, done chan bool) {
 
 	//time.Sleep(10 * time.Second)
 	<-start
@@ -132,16 +132,18 @@ func (b *BGP4) BGP4State(start chan bool) {
 
 	b.state = IDLE
 
-	go b.BGP4Conn(d, ri, ok)
+	go b.BGP4Conn(d, ri, ok, done)
 
 	for {
 		select {
+		case <-done:
+			return
 		case <-ok: // connection is closed - re-open
 			b.state = IDLE
 			time.Sleep(10 * time.Second)
 			ok = make(chan bool)
 			ri = make(chan nlri)
-			go b.BGP4Conn(d, ri, ok)
+			go b.BGP4Conn(d, ri, ok, done)
 			for k, _ := range up {
 				ri <- nlri{ip: k, up: true}
 			}
@@ -159,17 +161,21 @@ func (b *BGP4) BGP4State(start chan bool) {
 
 type Peers struct {
 	start chan bool
+	done  chan bool
 	peers []*BGP4
 }
 
 func (p *Peers) Start() {
 	close(p.start)
 }
+func (p *Peers) Close() {
+	close(p.done)
+}
 
 func Manager(myip [4]byte, rid [4]byte, as uint16, peers []string) *Peers {
-	b := Peers{start: make(chan bool)}
+	b := Peers{start: make(chan bool), done: make(chan bool)}
 	for _, p := range peers {
-		b.peers = append(b.peers, BGP4Start(p, myip, rid, as, b.start))
+		b.peers = append(b.peers, BGP4Start(p, myip, rid, as, b.start, b.done))
 	}
 	return &b
 }
@@ -185,7 +191,7 @@ type nlri struct {
 	up bool
 }
 
-func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool) {
+func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool, done chan bool) {
 	defer close(ok)
 
 	b.state = CONNECT
@@ -223,12 +229,16 @@ func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool) {
 		}
 	}()
 
-	go BGP4ReadMessages(conn, msgs)
+	go BGP4ReadMessages(conn, msgs, done)
 
 	var pending []nlri
 
 	for {
 		select {
+		case <-done: // program is exiting
+			fmt.Println("CLOSING", b.peer)
+			return
+
 		case <-keep:
 			if b.state == ESTABLISHED {
 				conn.Write(headerise(M_KEEPALIVE, nil))
@@ -391,9 +401,17 @@ func headerise(t byte, d []byte) []byte {
 	return p
 }
 
-func BGP4ReadMessages(conn net.Conn, c chan bgpmessage) {
+func BGP4ReadMessages(conn net.Conn, c chan bgpmessage, done chan bool) {
 	defer close(c)
 	for {
+
+		select {
+		case <-done:
+			return
+		default:
+			// carry on if done isn't closed
+		}
+
 		var header [19]byte
 
 		n, e := io.ReadFull(conn, header[:])

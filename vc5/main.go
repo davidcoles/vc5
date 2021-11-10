@@ -97,17 +97,6 @@ func main() {
 		panic(err)
 	}
 
-	sig := make(chan os.Signal)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sig
-		fmt.Println("Exiting ...")
-		exec.Command("ip", "link", "delete", veth).Run()
-		exec.Command("ip", "netns", "delete", netns).Run()
-		time.Sleep(3 * time.Second)
-		os.Exit(1)
-	}()
-
 	c := core.New(ipaddr, veth, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {
@@ -137,6 +126,20 @@ func main() {
 
 		go probes.MonitorVip(c, s, ch)
 	}
+
+	sig := make(chan os.Signal)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		fmt.Println("Exiting ...")
+		exec.Command("ip", "link", "delete", veth).Run()
+		exec.Command("ip", "netns", "delete", netns).Run()
+		if b != nil {
+			b.Close()
+		}
+		time.Sleep(5 * time.Second)
+		os.Exit(1)
+	}()
 
 	if *bridge != "" {
 		time.Sleep(3 * time.Second)

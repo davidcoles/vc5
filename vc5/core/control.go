@@ -84,7 +84,7 @@ const FLOW = 12
 const STATE = 32
 const FLOW_STATE = FLOW + STATE
 const MAX_CPU = 256
-const INTERVAL = 10
+const INTERVAL = 3
 
 type Control struct {
 	xdp       *xdp.XDP_
