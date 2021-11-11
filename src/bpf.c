@@ -40,7 +40,7 @@
 #define lock_xadd(ptr, val) ((void) __sync_fetch_and_add(ptr, val))
 #endif
 
-#define SECOND 1000000000
+#define SECOND 1000000000//nanoseconds
 
 struct counter {
     __u64 new_flows;
@@ -402,9 +402,6 @@ __u64 era = 0;
 __u64 era_last = 0;
 __u64 wallclock = 0;
 const __u32 index0 = 0;
-const __u32 index1 = 1;
-
-//__be32 phyaddr = 0;
 
 static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 {
@@ -503,19 +500,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 		  
 		  /* update RIP to MAC record in place */
 		  maccpy(m, s);
-
-		  /*
-		  struct tuple f;
-		  f.src = ipv4->saddr;
-		  f.dst = ipv4->daddr;
-		  f.sport = 0;
-		  f.dport = 0;
-		  f.protocol = IPPROTO_ICMP;
-		  f.pad[0] = s[3];
-		  f.pad[1] = s[4];
-		  f.pad[2] = s[5];
-		  */
-		  //bpf_map_push_elem(&queue_map, &f, BPF_ANY);
 	      }
 	      
 	  }
@@ -546,16 +530,34 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
   struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
   
   if (fs) {
-      if(tcp->syn == 1) {
-	  bpf_map_delete_elem(&flows, &f);
-	  goto new_flow;
+      
+      // If we receive a SYN then we should start a new flow
+      // However, to prevent TCP sniping, the connection should
+      // have been idle for some time (30s?)
+      // NOTE: this could have an impact if running load tests (wth, eg. ab(1))
+      // from a single IP as TCP ports will be reused very frequently so new
+      // connections will be bound to a possibly dead backend
+      if (tcp->syn == 1) {
+	  //bpf_map_delete_elem(&flows, &f);
+	  //goto new_flow;
+	  if ((fs->time + 30) < wallclock_now) {
+	      bpf_map_delete_elem(&flows, &f);
+	      goto new_flow;
+	  }
+	  // otherwise clear conn tracking fields
+	  fs->era = 0;
+	  fs->finrst = 0;
+	  statsp->new_flows++;
       }
+      //if (tcp->syn == 1) {
+      //    bpf_map_delete_elem(&flows, &f);
+      //  goto new_flow;
+      ///}
 
       maccpy(eth_hdr->h_source, eth_hdr->h_dest);
       maccpy(eth_hdr->h_dest, fs->hwaddr);
 
       if(tag != NULL) {
-	  //tag->h_tci = fs->vlan;
 	  tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (fs->vlan & bpf_htons(0x0fff));	  
       }
       
@@ -570,11 +572,15 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       if (counter) {
 	  counter->rx_packets++;
 	  counter->rx_bytes += rx_bytes;
+	  if (tcp->syn == 1) {
+	      counter->new_flows++;
+	  }
       }
 
       // change padding for counters!
       vrp.pad = era_now % 2;
-      
+
+      /*
       if (fs->era != era_now) {
 	  fs->era = era_now;
 	  __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp); 
@@ -590,11 +596,45 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	      fs->finrst = 0;
 	  }
       }
+      */
 
+      if ((tcp->rst == 1) || (tcp->fin == 1)) {
+	  fs->finrst = 2;
+      } else {
+	  if (fs->finrst > 0) {
+	      (fs->finrst)--;
+	  }
+      }
+
+      //fs->rip = tcp->ack_seq;
+      
+      __s32 *concurrent = NULL;
+      if (fs->era != era_now) {
+	  fs->era = era_now;
+	  switch(fs->finrst) {
+	  case 2: // connection is closing, but we've not noted this connection in this era - do nothing
+	      break;
+	  case 0: // connection is continuing, we've not noted this connection in this era - so note it
+	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+	      if(concurrent) (*concurrent)++;
+	      break;
+	  }
+      } else {
+	  switch(fs->finrst) {
+          case 2: // connection is closing, we have previously noted this connection in this era - decrement conns
+	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+	      if(concurrent) (*concurrent)--;
+	      break;
+          case 0: // connection is continuing, we have noted this connection in this era, so no need to do anything
+	      break;
+          }
+	  
+      }
+      
       if (fs->time > wallclock_now) {
 	  fs->time = wallclock_now - (tcp->ack_seq % 11);
-      } else if ((fs->time + 60) <  wallclock_now) {	 // approx 60s
-	  fs->time = wallclock_now - (tcp->ack_seq % 17);
+      } else if ((fs->time + 30) <  wallclock_now) {
+	  fs->time = wallclock_now - (tcp->ack_seq % 7);
 	  push_flow_queue(&f, fs, statsp);	      
       }
       
@@ -695,10 +735,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 
 
 
-  //struct interface *phyif = bpf_map_lookup_elem(&interfaces, &index0);
-  struct interface *virif = bpf_map_lookup_elem(&interfaces, &index1);
-  
-  //if (!phyif || !virif || !maccmp(phyif->hwaddr, nulmac) || !maccmp(virif->hwaddr, nulmac)) {
+  struct interface *virif = bpf_map_lookup_elem(&interfaces, &index0);
   if (!virif || !maccmp(virif->hwaddr, nulmac)) {
       return XDP_PASS;
   }

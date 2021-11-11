@@ -39,52 +39,42 @@ type counters = types.Counters
 type IP4 = types.IP4
 type IP6 = types.IP6
 type MAC = types.MAC
-
 type uP = unsafe.Pointer
 
-func addRaw(c *counters, r raw_counters) {
-	c.New_flows += r.New_flows
-	c.Rx_packets += r.Rx_packets
-	c.Rx_bytes += r.Rx_bytes
-	c.Fp_count += r.Fp_count
-	c.Fp_time += r.Fp_time
-	c.Qfailed += r.Qfailed
+type raw_counters struct {
+	new_flows  uint64 //`json:"total_connections"`
+	rx_packets uint64 //`json:"rx_packets"`
+	rx_bytes   uint64 //`json:"rx_bytes"`
+	fp_count   uint64
+	fp_time    uint64
+	qfailed    uint64
 }
 
 func (r raw_counters) cook() counters {
 	var c counters
-	c.New_flows = r.New_flows
-	c.Rx_packets = r.Rx_packets
-	c.Rx_bytes = r.Rx_bytes
-	c.Fp_count = r.Fp_count
-	c.Fp_time = r.Fp_time
-	c.Qfailed = r.Qfailed
+	c.New_flows = r.new_flows
+	c.Rx_packets = r.rx_packets
+	c.Rx_bytes = r.rx_bytes
+	c.Fp_count = r.fp_count
+	c.Fp_time = r.fp_time
+	c.Qfailed = r.qfailed
 	return c
 }
 
-type raw_counters struct {
-	New_flows  uint64 `json:"total_connections"`
-	Rx_packets uint64 `json:"rx_packets"`
-	Rx_bytes   uint64 `json:"rx_bytes"`
-	Fp_count   uint64
-	Fp_time    uint64
-	Qfailed    uint64
-}
-
 func (c *raw_counters) add(r raw_counters) {
-	c.New_flows += r.New_flows
-	c.Rx_packets += r.Rx_packets
-	c.Rx_bytes += r.Rx_bytes
-	c.Fp_count += r.Fp_count
-	c.Fp_time += r.Fp_time
-	c.Qfailed += r.Qfailed
+	c.new_flows += r.new_flows
+	c.rx_packets += r.rx_packets
+	c.rx_bytes += r.rx_bytes
+	c.fp_count += r.fp_count
+	c.fp_time += r.fp_time
+	c.qfailed += r.qfailed
 }
 
 const FLOW = 12
 const STATE = 32
 const FLOW_STATE = FLOW + STATE
 const MAX_CPU = 256
-const INTERVAL = 3
+const INTERVAL = 5
 
 type Control struct {
 	xdp       *xdp.XDP_
@@ -207,7 +197,7 @@ func (c *Control) global_update() {
 
 }
 
-func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
+func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
 
 	var c Control
 
@@ -245,27 +235,25 @@ func New(ipaddr IP4, veth string, hwaddr [6]byte, native, bridge bool, peth ...s
 	c.flow_queue = c.find_map("flow_queue", 0, FLOW_STATE)
 	c.flows = c.find_map("flows", FLOW, STATE)
 
-	//var zero uint32 = 0
-	var one uint32 = 1
+	if p, err := net.InterfaceByName(peth[0]); err != nil {
+		fmt.Println(peth, err)
+		return nil
+	} else {
+		c.ifindex = uint32(p.Index)
+		copy(c.hwaddr[:], p.HardwareAddr[:])
+	}
 
-	p, _ := net.InterfaceByName(peth[0])
-	v, _ := net.InterfaceByName(veth)
-
-	var phy interfaces
-	phy.ifindex = uint32(p.Index)
-	phy.ipaddr = ipaddr
-	copy(phy.hwaddr[:], p.HardwareAddr[:])
-
-	c.ifindex = phy.ifindex
-	c.hwaddr = phy.hwaddr
-
-	var vir interfaces
-	vir.ifindex = uint32(v.Index)
-	vir.ipaddr = IP4{10, 0, 0, 1}
-	vir.hwaddr = hwaddr
-
-	//xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&phy), xdp.BPF_ANY)
-	xdp.BpfMapUpdateElem(c.interfaces, uP(&one), uP(&vir), xdp.BPF_ANY)
+	if v, err := net.InterfaceByName(veth); err != nil {
+		fmt.Println(veth, err)
+		return nil
+	} else {
+		var zero uint32
+		var virt interfaces
+		virt.ifindex = uint32(v.Index)
+		virt.ipaddr = vip
+		virt.hwaddr = hwaddr
+		xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&virt), xdp.BPF_ANY)
+	}
 
 	go c.global_update()
 	go c.global_stats()

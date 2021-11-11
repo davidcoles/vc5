@@ -55,6 +55,33 @@ type update struct {
 	up  bool
 }
 
+func VRPStats(c *Control, v, r IP4, port uint16, counters chan counters) {
+	last, _ := c.Era()
+	conn := c.VipRipPortConcurrent(v, r, port, 0) // ensure that both counter
+	conn = c.VipRipPortConcurrent(v, r, port, 1)  // slots are created
+
+	for {
+		time.Sleep(1 * time.Second)
+
+		counter := c.VipRipPortCounters(v, r, port)
+
+		next, _ := c.Era()
+
+		if last != next {
+			conn = c.VipRipPortConcurrent(v, r, port, last)
+			last = next
+		}
+
+		if conn < 0 {
+			conn = 0
+		}
+
+		counter.Ip = r
+		counter.Concurrent = int64(conn)
+		counters <- counter
+	}
+}
+
 //func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
 func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 	vip := service.Vip

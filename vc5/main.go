@@ -97,7 +97,8 @@ func main() {
 		panic(err)
 	}
 
-	c := core.New(ipaddr, veth, hwaddr, *native, *bridge != "", peth...)
+	vip := IP4{10, 0, 0, 1}
+	c := core.New(ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {
 		go multicast_recv(c, c.IPAddr()[3], config.Multicast)
