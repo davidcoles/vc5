@@ -123,9 +123,6 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 		c.SetNatVipRip(r.Nat, vip, r.Rip, r.Src, iface, r.VLan)
 		vlan[r.Rip] = r.VLan
 
-		//}
-		//for _, r := range backends {
-
 		var checks Checks
 		checks.Tcp = r.Tcp
 		checks.Http = r.Http
@@ -165,21 +162,13 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 
 		var new B12s
 
-		//for r, m := range mac {
-		//	v := vlan[r]
-		//	h := uint8(v >> 8)
-		//	l := uint8(v & 0xff)
-		//	if bup[r] && types.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
-		//		new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], h, l})
-		//	}
-		//}
 		for r, m := range mac {
 			if bup[r] && types.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
 				new = append(new, makeB12(m, r, vlan[r]))
 			}
 		}
 
-		sort.Sort(new)
+		//sort.Sort(new)
 
 		was := up
 
