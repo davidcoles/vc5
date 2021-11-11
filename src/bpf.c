@@ -110,6 +110,8 @@ struct backend {
     //__u8 hwaddr[65536][10];
     // MAC + IPv4 + VLANID
     __u8 hwaddr[65536][12];
+    __u8 least[12];
+    __u8 weight;
 };
 
 struct interface {
@@ -667,6 +669,11 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       struct mac *m = (struct mac *) b->hwaddr[n];
       __be32 *rip = (__be32 *) (b->hwaddr[n] + 6);
       __be16 *vlan = (__be16 *) (b->hwaddr[n] + 10);
+
+      if(b->weight > 0) {
+	  m = (struct mac *) b->least;
+      }
+
       
       if (!maccmp((unsigned char *)m, nulmac)) {
 	  return XDP_DROP;

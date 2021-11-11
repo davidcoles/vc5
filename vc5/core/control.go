@@ -224,7 +224,7 @@ func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	c.rhi = make(chan rhi, 1000)
 
 	c.interfaces = c.find_map("interfaces", 4, 16)
-	c.service_backend = c.find_map("service_backend", 8, 65536*12)
+	c.service_backend = c.find_map("service_backend", 8, 65536*12+13)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
@@ -296,7 +296,13 @@ func (c *Control) SetRip(rip IP4) {
 	go ping(rip)
 }
 
-func (c *Control) SetBackends(vip IP4, port uint16, be [][12]byte) {
+func (c *Control) SetBackends(vip IP4, port uint16, be [][12]byte, least [12]byte, weight uint8) {
+
+	type bes struct {
+		backends [65536][12]byte
+		least    [12]byte
+		weight   uint8
+	}
 
 	var s service
 	s.vip = vip
@@ -306,8 +312,10 @@ func (c *Control) SetBackends(vip IP4, port uint16, be [][12]byte) {
 	backends, stats := rendezvous.Rendezvous(be)
 
 	fmt.Println(stats)
+	new := bes{backends: backends, least: least, weight: weight}
 
-	xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&backends), xdp.BPF_ANY)
+	//xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&backends), xdp.BPF_ANY)
+	xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&new), xdp.BPF_ANY)
 }
 
 func (c *Control) ReadMAC(ip IP4) *MAC {
@@ -424,7 +432,7 @@ func (c *Control) UpdateFlow(f []byte) {
 	xdp.BpfMapUpdateElem(c.flows, uP(&f[0]), uP(&f[FLOW]), xdp.BPF_ANY)
 }
 
-func (c *Control) VRPStats(v, r IP4, port uint16, counters chan counters) {
+func (c *Control) _VRPStats(v, r IP4, port uint16, counters chan counters) {
 	last, _ := c.Era()
 	conn := c.VipRipPortConcurrent(v, r, port, 0) // ensure that both counter
 	conn = c.VipRipPortConcurrent(v, r, port, 1)  // slots are created

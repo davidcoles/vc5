@@ -34,6 +34,7 @@ type IP4 = types.IP4
 type IP6 = types.IP6
 type MAC = types.MAC
 type B12s = types.B12s
+type B12 = types.B12
 
 type Service = config.Service
 type Checks = config.Checks
@@ -55,20 +56,28 @@ type update struct {
 	up  bool
 }
 
-func VRPStats(c *Control, v, r IP4, port uint16, counters chan counters) {
+func VRPStats(c *Control, vip, rip IP4, port uint16, vlan uint16, counters chan counters) {
 	last, _ := c.Era()
-	conn := c.VipRipPortConcurrent(v, r, port, 0) // ensure that both counter
-	conn = c.VipRipPortConcurrent(v, r, port, 1)  // slots are created
+	conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
+	conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
+
+	prev := c.VipRipPortCounters(vip, rip, port)
+	prev.Timestamp = time.Now()
 
 	for {
 		time.Sleep(1 * time.Second)
 
-		counter := c.VipRipPortCounters(v, r, port)
+		counter := c.VipRipPortCounters(vip, rip, port)
+		counter.Timestamp = time.Now()
+
+		scnds := float64(counter.Timestamp.Sub(prev.Timestamp)) / float64(time.Second)
+
+		counter.Rx_pps = uint64(float64(counter.Rx_packets-prev.Rx_packets) / scnds)
+		counter.Rx_bps = uint64(float64(counter.Rx_bytes-prev.Rx_bytes) / scnds)
 
 		next, _ := c.Era()
-
 		if last != next {
-			conn = c.VipRipPortConcurrent(v, r, port, last)
+			conn = c.VipRipPortConcurrent(vip, rip, port, last)
 			last = next
 		}
 
@@ -76,9 +85,11 @@ func VRPStats(c *Control, v, r IP4, port uint16, counters chan counters) {
 			conn = 0
 		}
 
-		counter.Ip = r
+		counter.Ip = rip
+		counter.Vlan = vlan
 		counter.Concurrent = int64(conn)
 		counters <- counter
+		prev = counter
 	}
 }
 
@@ -87,6 +98,12 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 	vip := service.Vip
 	port := service.Port
 	backends := service.Rip
+	var live B12s
+	var nalive uint
+	var up bool
+
+	c.SetBackends(vip, port, live, [12]byte{}, 0)
+	fmt.Println("initial", vip, port, live, up)
 
 	name := fmt.Sprintf("%s:%d", vip, port)
 	bup := make(map[IP4]bool)
@@ -97,10 +114,6 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 	updates := make(chan update, 100)
 	countersc := make(chan counters, 100)
 
-	var live B12s
-	var nalive uint
-	var up bool
-
 	for _, r := range backends {
 		var iface string
 		if r.VLan != 0 {
@@ -109,20 +122,17 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 		c.SetRip(r.Rip)
 		c.SetNatVipRip(r.Nat, vip, r.Rip, r.Src, iface, r.VLan)
 		vlan[r.Rip] = r.VLan
-	}
 
-	c.SetBackends(vip, port, live)
+		//}
+		//for _, r := range backends {
 
-	fmt.Println("initial", vip, port, live, up)
-
-	for _, r := range backends {
 		var checks Checks
 		checks.Tcp = r.Tcp
 		checks.Http = r.Http
 		checks.Https = r.Https
 		fmt.Println(r.Nat, r.Rip, checks)
 		go monitor_nat(c, r.Nat, r.Rip, checks, updates)
-		go c.VRPStats(vip, r.Rip, port, countersc)
+		go VRPStats(c, vip, r.Rip, port, r.VLan, countersc)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -136,7 +146,7 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 			goto do_select
 		case ct := <-countersc:
 			ct.Up = bup[ct.Ip]
-			ct.MAC = mac[ct.Ip].String()
+			ct.MAC = mac[ct.Ip]
 			ctr[ct.Ip] = ct
 			s := scounters{Sname: name, Up: up, Nalive: nalive, Need: service.Need, Name: service.Name, Description: service.Description}
 			s.Backends = make(map[string]counters)
@@ -155,12 +165,17 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 
 		var new B12s
 
+		//for r, m := range mac {
+		//	v := vlan[r]
+		//	h := uint8(v >> 8)
+		//	l := uint8(v & 0xff)
+		//	if bup[r] && types.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
+		//		new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], h, l})
+		//	}
+		//}
 		for r, m := range mac {
-			v := vlan[r]
-			h := uint8(v >> 8)
-			l := uint8(v & 0xff)
 			if bup[r] && types.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
-				new = append(new, [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], r[0], r[1], r[2], r[3], h, l})
+				new = append(new, makeB12(m, r, vlan[r]))
 			}
 		}
 
@@ -168,7 +183,11 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 
 		was := up
 
-		if !types.CmpB12s(live, new) {
+		var foo [12]byte
+		var weight uint8
+
+		//if !types.CmpB12s(live, new) {
+		if setsDiffer(live, new) {
 			live = new
 
 			if service.Need > 0 {
@@ -178,9 +197,9 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 			}
 
 			if up {
-				c.SetBackends(vip, port, live)
+				c.SetBackends(vip, port, live, foo, weight)
 			} else {
-				c.SetBackends(vip, port, B12s{})
+				c.SetBackends(vip, port, B12s{}, foo, weight)
 			}
 
 			// send update - mark vip up/down etc
@@ -198,6 +217,53 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 		time.Sleep(1 * time.Second)
 	}
 
+}
+
+func outlier(ctr map[string]counters) (B12, uint8) {
+
+	if len(ctr) < 1 {
+		return B12{}, 0
+	}
+
+	var pps, bps uint64
+
+	for _, v := range ctr {
+		pps += v.Rx_pps
+		bps += v.Rx_bps
+	}
+
+	if len(ctr) > 0 {
+		pps /= uint64(len(ctr))
+		bps /= uint64(len(ctr))
+	}
+
+	var m counters
+	for _, v := range ctr {
+		if m.Rx_pps == 0 {
+			m = v
+		}
+		if v.Rx_pps < m.Rx_pps {
+			m = v
+		}
+	}
+
+	if m.Rx_pps < ((pps * 4) / 5) {
+		return makeB12(m.MAC, m.Ip, 0), 1
+	}
+
+	return B12{}, 0
+}
+
+func makeB12(m MAC, i IP4, v uint16) B12 {
+	h := uint8(v >> 8)
+	l := uint8(v & 0xff)
+	return [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], i[0], i[1], i[2], i[3], h, l}
+}
+
+func setsDiffer(a, b B12s) bool {
+	sort.Sort(a)
+	sort.Sort(b)
+	return !types.CmpB12s(a, b)
 }
 
 func ud(b bool) string {

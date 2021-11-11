@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 type IP4 [4]byte
@@ -17,18 +18,22 @@ type RHI struct {
 }
 
 type Counters struct {
-	Up         bool   `json:"up"`
-	MAC        string `json:"mac"`
-	Concurrent int64  `json:"current_connections"`
-	New_flows  uint64 `json:"total_connections"`
-	Rx_packets uint64 `json:"rx_packets"`
-	Rx_bytes   uint64 `json:"rx_octets"`
-	Qfailed    uint64 `json:"-"`
-	Fp_count   uint64 `json:"-"`
-	Fp_time    uint64 `json:"-"`
-	Ip         IP4    `json:"-"`
-	Pps        uint64 `json:"-"`
-	Latency    uint64 `json:"-"`
+	Up         bool      `json:"up"`
+	MAC        MAC       `json:"mac"`
+	Concurrent int64     `json:"current_connections"`
+	New_flows  uint64    `json:"total_connections"`
+	Rx_packets uint64    `json:"rx_packets"`
+	Rx_bytes   uint64    `json:"rx_octets"`
+	Qfailed    uint64    `json:"-"`
+	Fp_count   uint64    `json:"-"`
+	Fp_time    uint64    `json:"-"`
+	Ip         IP4       `json:"-"`
+	Pps        uint64    `json:"-"`
+	Latency    uint64    `json:"-"`
+	Rx_pps     uint64    `json:"-"`
+	Rx_bps     uint64    `json:"-"`
+	Timestamp  time.Time `json:"-"`
+	Vlan       uint16    `json:"-"`
 }
 type Scounters struct {
 	Sname       string `json:"-"`
@@ -71,6 +76,9 @@ func (i *IP4) UnmarshalJSON(d []byte) error {
 //}
 func (i IP4) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + i.String() + `"`), nil
+}
+func (m MAC) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + m.String() + `"`), nil
 }
 
 func parseIP(ip string) ([4]byte, bool) {
