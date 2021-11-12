@@ -112,6 +112,8 @@ struct backend {
     __u8 hwaddr[65536][12];
     __u8 least[12];
     __u8 weight;
+    
+    
 };
 
 struct interface {
@@ -535,14 +537,14 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       
       // If we receive a SYN then we should start a new flow
       // However, to prevent TCP sniping, the connection should
-      // have been idle for some time (30s?)
+      // have been idle for some time (60s?)
       // NOTE: this could have an impact if running load tests (wth, eg. ab(1))
       // from a single IP as TCP ports will be reused very frequently so new
       // connections will be bound to a possibly dead backend
       if (tcp->syn == 1) {
 	  //bpf_map_delete_elem(&flows, &f);
 	  //goto new_flow;
-	  if ((fs->time + 30) < wallclock_now) {
+	  if ((fs->time + 60) < wallclock_now) {
 	      bpf_map_delete_elem(&flows, &f);
 	      goto new_flow;
 	  }
@@ -600,8 +602,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       }
       */
 
-      if ((tcp->rst == 1) || (tcp->fin == 1)) {
-	  fs->finrst = 2;
+      if (fs->finrst == 0 && ((tcp->rst == 1) || (tcp->fin == 1))) {
+	  fs->finrst = 20;
       } else {
 	  if (fs->finrst > 0) {
 	      (fs->finrst)--;
@@ -614,7 +616,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       if (fs->era != era_now) {
 	  fs->era = era_now;
 	  switch(fs->finrst) {
-	  case 2: // connection is closing, but we've not noted this connection in this era - do nothing
+	  case 20: // connection is closing, but we've not noted this connection in this era - do nothing
 	      break;
 	  case 0: // connection is continuing, we've not noted this connection in this era - so note it
 	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
@@ -623,7 +625,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	  }
       } else {
 	  switch(fs->finrst) {
-          case 2: // connection is closing, we have previously noted this connection in this era - decrement conns
+          case 20: // connection is closing, we have previously noted this connection in this era - decrement conns
 	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
 	      if(concurrent) (*concurrent)--;
 	      break;
@@ -635,7 +637,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       
       if (fs->time > wallclock_now) {
 	  fs->time = wallclock_now - (tcp->ack_seq % 11);
-      } else if ((fs->time + 30) <  wallclock_now) {
+      } else if ((fs->time + 60) <  wallclock_now) {
 	  fs->time = wallclock_now - (tcp->ack_seq % 7);
 	  push_flow_queue(&f, fs, statsp);	      
       }
@@ -670,10 +672,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       __be32 *rip = (__be32 *) (b->hwaddr[n] + 6);
       __be16 *vlan = (__be16 *) (b->hwaddr[n] + 10);
 
-      if(b->weight > 0) {
+      // test for a "least-conns" type backend predictor
+      if((n % 256) < (b->weight)) {
 	  m = (struct mac *) b->least;
+	  rip = (__be32 *) (b->least + 6);
+	  vlan = (__be16 *) (b->least + 10);
       }
-
       
       if (!maccmp((unsigned char *)m, nulmac)) {
 	  return XDP_DROP;

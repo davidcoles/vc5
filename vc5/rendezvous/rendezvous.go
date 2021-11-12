@@ -69,6 +69,10 @@ func Rendezvous(hws [][12]byte) ([65536][12]byte, Stats) {
 	var t [65536][12]byte
 	var s Stats
 
+	if len(nodes) < 1 {
+		return t, s
+	}
+
 	t1 := time.Now()
 
 	sort.Sort(nodes)

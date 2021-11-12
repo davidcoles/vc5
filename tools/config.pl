@@ -53,6 +53,7 @@ sub services {
 	my $desc = $_->{'desc'};
 	my $port = $_->{'port'};
 	my $need = $_->{'need'} + 0;
+	my $conn = $_->{'least'} ? JSON::true : JSON::false;
 	my @port = ref($_->{'port'}) eq 'ARRAY' ? @{$_->{'port'}} : ($_->{'port'});
 	my @real = ref($_->{'real'}) eq 'ARRAY' ? @{$_->{'real'}} : ($_->{'real'});
 	my @addr = ref($_->{'addr'}) eq 'ARRAY' ? @{$_->{'addr'}} : ($_->{'addr'});
@@ -97,6 +98,7 @@ sub services {
 		$x->{'name'} = $name;
 		$x->{'need'} = $need;
 		$x->{'description'} = $desc;
+		$x->{'leastconns'} = $conn;;
 		my @rip;
 		foreach my $r (@rips) {
 		    my $y = {};

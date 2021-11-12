@@ -66,6 +66,7 @@ type Service struct {
 	Need        uint   `json:"need"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	LeastConns  bool   `json:"leastconns"`
 }
 
 type Config struct {
