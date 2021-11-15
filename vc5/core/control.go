@@ -342,7 +342,7 @@ func ping(ip IP4) {
 	exec.Command("/bin/sh", "-c", command).Output()
 }
 
-func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16) counters {
+func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16, clear bool) counters {
 	var raw [MAX_CPU]raw_counters
 	type vip_rip_port struct {
 		vip  IP4
@@ -352,7 +352,9 @@ func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16) counters {
 	}
 	vrp := vip_rip_port{vip: vip, rip: rip, port: port, pad: 0}
 
-	xdp.BpfMapUpdateElem(c.vip_rip_port_counters, uP(&vrp), uP(&raw), xdp.BPF_NOEXIST)
+	if clear {
+		xdp.BpfMapUpdateElem(c.vip_rip_port_counters, uP(&vrp), uP(&raw), xdp.BPF_ANY)
+	}
 	xdp.BpfMapLookupElem(c.vip_rip_port_counters, uP(&vrp), uP(&raw))
 
 	var t raw_counters
@@ -426,37 +428,14 @@ func (c *Control) UpdateFlow(f []byte) {
 	xdp.BpfMapUpdateElem(c.flows, uP(&f[0]), uP(&f[FLOW]), xdp.BPF_ANY)
 }
 
-func (c *Control) _VRPStats(v, r IP4, port uint16, counters chan counters) {
-	last, _ := c.Era()
-	conn := c.VipRipPortConcurrent(v, r, port, 0) // ensure that both counter
-	conn = c.VipRipPortConcurrent(v, r, port, 1)  // slots are created
-
-	for {
-		time.Sleep(1 * time.Second)
-
-		counter := c.VipRipPortCounters(v, r, port)
-
-		next, _ := c.Era()
-
-		if last != next {
-			conn = c.VipRipPortConcurrent(v, r, port, last)
-			last = next
-		}
-
-		if conn < 0 {
-			conn = 0
-		}
-
-		counter.Ip = r
-		counter.Concurrent = int64(conn)
-		counters <- counter
-	}
-}
-
-func (c *Control) GlobalStats() counters {
+func (c *Control) GlobalStats(clear bool) counters {
 	var zero uint32 = 0
 	var stats [MAX_CPU]raw_counters
 	var t raw_counters
+
+	if clear {
+		xdp.BpfMapUpdateElem(c.stats, uP(&zero), uP(&stats), xdp.BPF_ANY)
+	}
 
 	xdp.BpfMapLookupElem(c.stats, uP(&zero), uP(&stats))
 
@@ -470,10 +449,12 @@ func (c *Control) global_stats() {
 	var prev counters
 	var avg []uint64
 
+	c.GlobalStats(true)
+
 	for n := 0; ; n++ {
 		time.Sleep(1 * time.Second)
 
-		count := c.GlobalStats()
+		count := c.GlobalStats(false)
 
 		latency := count.Fp_time
 		if count.Fp_count > 0 {

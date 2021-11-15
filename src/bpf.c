@@ -455,108 +455,104 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
     __u32 nh_off = sizeof(struct ethhdr);
     __be16 eth_proto;
     
-  if (data + nh_off > data_end) {
-    return XDP_DROP;
-  }
-
-  eth_proto = eth_hdr->h_proto;
-
-
-  struct vlan_hdr *tag = NULL;
-  if (eth_proto == bpf_ntohs(ETH_P_8021Q)) {
-      if(data + nh_off + sizeof(struct vlan_hdr) > data_end) {
-	  return XDP_DROP;
-      }
-      tag = data + nh_off;
-      eth_proto = tag->h_proto;
-      data += sizeof(struct vlan_hdr);
-  }
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
     
-  if (eth_proto != bpf_ntohs(ETH_P_IP)) {
-      return XDP_PASS;
-  }
-  
-  struct iphdr *ipv4 = data + nh_off;
-  
-  nh_off += sizeof(struct iphdr);
-
-  if (data + nh_off > data_end) {
-      return XDP_DROP;
-  }
-  
-  if (ipv4->protocol != IPPROTO_TCP) {
-      if (ipv4->protocol == IPPROTO_ICMP) {
-	  
-	  unsigned char *s = (unsigned char *) &(eth_hdr->h_source);
-	  unsigned char *m = bpf_map_lookup_elem(&rip_to_mac, &(ipv4->saddr));
-	  
-	  /* TODO: check destination is my visible IP? */
-	  
-	  if(m) {
-	      /* if the current record for the real IP does not match this MAC */
-	      if(maccmp(m, s) != 0) {
-		  
-		  /* delete old MAC to RIP record*/
-		  bpf_map_delete_elem(&mac_to_rip, m);
-		  
-		  /* create new MAC to RIPrecord */
-		  bpf_map_update_elem(&mac_to_rip, s, &(ipv4->saddr), BPF_ANY);
-		  
-		  /* update RIP to MAC record in place */
-		  maccpy(m, s);
-	      }
-	      
-	  }
-	  
-	  return XDP_PASS;
-      }
-      
-      
-      return XDP_PASS;
-  }
-
-  struct tcphdr *tcp = data + nh_off;
-
-  nh_off += sizeof(struct tcphdr);
-  
-  if (data + nh_off > data_end) {
-      return XDP_DROP;
-  }
-
-  struct flow f;
-  f.src = ipv4->saddr;
-  f.dst = ipv4->daddr;
-  f.sport = tcp->source;
-  f.dport = tcp->dest;
-  //f.pad = 0;
-  
-  
-  struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
-  
-  if (fs) {
-      
-      // If we receive a SYN then we should start a new flow
-      // However, to prevent TCP sniping, the connection should
-      // have been idle for some time (60s?)
-      // NOTE: this could have an impact if running load tests (wth, eg. ab(1))
-      // from a single IP as TCP ports will be reused very frequently so new
-      // connections will be bound to a possibly dead backend
-      if (tcp->syn == 1) {
-	  //bpf_map_delete_elem(&flows, &f);
-	  //goto new_flow;
+    eth_proto = eth_hdr->h_proto;
+    
+    
+    struct vlan_hdr *tag = NULL;
+    if (eth_proto == bpf_ntohs(ETH_P_8021Q)) {
+	if(data + nh_off + sizeof(struct vlan_hdr) > data_end) {
+	    return XDP_DROP;
+	}
+	tag = data + nh_off;
+	eth_proto = tag->h_proto;
+	data += sizeof(struct vlan_hdr);
+    }
+    
+    if (eth_proto != bpf_ntohs(ETH_P_IP)) {
+	return XDP_PASS;
+    }
+    
+    struct iphdr *ipv4 = data + nh_off;
+    
+    nh_off += sizeof(struct iphdr);
+    
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
+    
+    if (ipv4->protocol != IPPROTO_TCP) {
+	if (ipv4->protocol == IPPROTO_ICMP) {
+	    
+	    unsigned char *s = (unsigned char *) &(eth_hdr->h_source);
+	    unsigned char *m = bpf_map_lookup_elem(&rip_to_mac, &(ipv4->saddr));
+	    
+	    /* TODO: check destination is my visible IP? */
+	    
+	    if(m) {
+		/* if the current record for the real IP does not match this MAC */
+		if(maccmp(m, s) != 0) {
+		    
+		    /* delete old MAC to RIP record*/
+		    bpf_map_delete_elem(&mac_to_rip, m);
+		    
+		    /* create new MAC to RIPrecord */
+		    bpf_map_update_elem(&mac_to_rip, s, &(ipv4->saddr), BPF_ANY);
+		    
+		    /* update RIP to MAC record in place */
+		    maccpy(m, s);
+		}
+		
+	    }
+	    
+	    return XDP_PASS;
+	}
+	
+	
+	return XDP_PASS;
+    }
+    
+    struct tcphdr *tcp = data + nh_off;
+    
+    nh_off += sizeof(struct tcphdr);
+    
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
+    
+    struct flow f;
+    f.src = ipv4->saddr;
+    f.dst = ipv4->daddr;
+    f.sport = tcp->source;
+    f.dport = tcp->dest;
+    //f.pad = 0;
+    
+    
+    struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
+    
+    if (fs) {
+	
+	// If we receive a SYN then we should start a new flow
+	// However, to prevent TCP sniping, the connection should
+	// have been idle for some time (60s?)
+	// NOTE: this could have an impact if running load tests (wth, eg. ab(1))
+	// from a single IP as TCP ports will be reused very frequently so new
+	// connections will be bound to a possibly dead backend
+	if (tcp->syn == 1) {
+	    //bpf_map_delete_elem(&flows, &f);
+	    //goto new_flow;
 	  if ((fs->time + 60) < wallclock_now) {
 	      bpf_map_delete_elem(&flows, &f);
 	      goto new_flow;
 	  }
 	  // otherwise clear conn tracking fields
-	  fs->era = 0;
+	  fs->era = era_now - 1;
 	  fs->finrst = 0;
 	  statsp->new_flows++;
       }
-      //if (tcp->syn == 1) {
-      //    bpf_map_delete_elem(&flows, &f);
-      //  goto new_flow;
-      ///}
 
       maccpy(eth_hdr->h_source, eth_hdr->h_dest);
       maccpy(eth_hdr->h_dest, fs->hwaddr);
@@ -569,9 +565,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       vrp.vip = ipv4->daddr;
       vrp.rip = fs->rip;
       vrp.port = bpf_ntohs(tcp->dest);
-      vrp.pad = 0;
-
-      
+      vrp.pad = 0; // must be 0 for regular counters
+          
       struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
       if (counter) {
 	  counter->rx_packets++;
@@ -581,59 +576,45 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	  }
       }
 
-      // change padding for counters!
+      // reuse pad field for concurrency counter selection
       vrp.pad = era_now % 2;
-
-      /*
-      if (fs->era != era_now) {
-	  fs->era = era_now;
-	  __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp); 
-	  if(concurrent) (*concurrent)++;
-      } else {
-	  if(tcp->fin == 1 || tcp->rst == 1) {
-	      if(fs->finrst == 0) {
-		  __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);      
-		  if(concurrent) (*concurrent)--;
-		  fs->finrst = 1;
-	      }
-	  } else {
-	      fs->finrst = 0;
-	  }
-      }
-      */
-
+      
       if (fs->finrst == 0 && ((tcp->rst == 1) || (tcp->fin == 1))) {
-	  fs->finrst = 20;
+	  fs->finrst = 10;
       } else {
 	  if (fs->finrst > 0) {
 	      (fs->finrst)--;
 	  }
       }
 
-      //fs->rip = tcp->ack_seq;
-      
-      __s32 *concurrent = NULL;
+      __s32 *concurrent = NULL;      
       if (fs->era != era_now) {
-	  fs->era = era_now;
-	  switch(fs->finrst) {
-	  case 20: // connection is closing, but we've not noted this connection in this era - do nothing
-	      break;
-	  case 0: // connection is continuing, we've not noted this connection in this era - so note it
-	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
-	      if(concurrent) (*concurrent)++;
-	      break;
+	  if((fs->era + 1) != era_now) {
+	      // probably transferred from a peer lb - correct it
+	      fs->era = era_now;
+	  } else {		  
+	      fs->era = era_now;
+	      
+	      switch(fs->finrst) {
+	      case 10:
+		  break;
+	      case 0:
+		  concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+		  if(concurrent) (*concurrent)++;
+		  break;
+	      }
 	  }
       } else {
 	  switch(fs->finrst) {
-          case 20: // connection is closing, we have previously noted this connection in this era - decrement conns
+	  case 10:
 	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
 	      if(concurrent) (*concurrent)--;
 	      break;
-          case 0: // connection is continuing, we have noted this connection in this era, so no need to do anything
+	  case 0:
 	      break;
-          }
-	  
+	  }
       }
+      
       
       if (fs->time > wallclock_now) {
 	  fs->time = wallclock_now - (tcp->ack_seq % 11);

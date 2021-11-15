@@ -271,11 +271,11 @@ func least_conns(c map[IP4]counters) (B12s, B12, uint8) {
 	pps2 := avg_pps(ctr2)
 	pps3 := avg_pps(ctr3)
 
-	if pps < 1000 {
+	if pps < 50000 {
 		return build_list(ctr), B12{}, 0
 	}
 
-	if max.Rx_pps > ((pps2 * 10) / 9) {
+	if max.Rx_pps > ((pps2 * 5) / 4) {
 		delete(ctr, max.Ip)
 	}
 
@@ -394,13 +394,13 @@ func VRPStats(c *Control, vip, rip IP4, port uint16, vlan uint16, counters chan 
 	conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
 	conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
 
-	prev := c.VipRipPortCounters(vip, rip, port)
+	prev := c.VipRipPortCounters(vip, rip, port, true)
 	prev.Timestamp = time.Now()
 
 	for {
 		time.Sleep(1 * time.Second)
 
-		counter := c.VipRipPortCounters(vip, rip, port)
+		counter := c.VipRipPortCounters(vip, rip, port, false)
 		counter.Timestamp = time.Now()
 
 		scnds := float64(counter.Timestamp.Sub(prev.Timestamp)) / float64(time.Second)
