@@ -706,9 +706,9 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       if(concurrent) (*concurrent)++;
       
       //maccpy(s.hwaddr, (unsigned char *) m);
-      
-      bpf_map_update_elem(&flows, &f, &s, BPF_ANY);
 
+      bpf_map_update_elem(&flows, &f, &s, BPF_ANY);
+      
       //////////////////////////////////////////////////////////////////////
       
       struct flow_flow_state fs;

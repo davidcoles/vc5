@@ -67,10 +67,12 @@ static inline __u16 sdbm(unsigned char *ptr, __u8 len) {
     return hash & 0xffff;
 }
 
-unsigned char s0[6] = {0x00,0x50,0x56,0x90,0x9c,0x5e};
-unsigned char s1[6] = {0x00,0x50,0x56,0x90,0xae,0x0d};
-unsigned char s2[6] = {0x00,0x50,0x56,0x90,0xc9,0x3a};
-unsigned char s3[6] = {0x00,0x50,0x56,0x90,0x7e,0x08};
+#define NBACKENDS 3
+
+unsigned char s0[6] = {0x00,0x50,0x56,0x90,0xf9,0x47};
+unsigned char s1[6] = {0x00,0x50,0x56,0x90,0x7a,0x37};
+unsigned char s2[6] = {0x00,0x50,0x56,0x90,0x3a,0x82};
+unsigned char s3[6] = {0x00,0x50,0x56,0x90,0xe8,0x9c};
 unsigned char s4[6] = {0x00,0x50,0x56,0x90,0x75,0x7c};
 unsigned char s5[6] = {0x00,0x50,0x56,0x90,0x8a,0x50};
 unsigned char s6[6] = {0x00,0x50,0x56,0x90,0x60,0xec};
@@ -84,9 +86,21 @@ unsigned char sd[6] = {0x00,0x50,0x56,0x90,0x69,0x98};
 unsigned char se[6] = {0x00,0x50,0x56,0x90,0xf5,0xbf};
 unsigned char sf[6] = {0x00,0x50,0x56,0x90,0x57,0x91};
 
+struct counter {
+    __u64 count;
+    __u64 time;
+};
+struct bpf_map_def SEC("maps") stats = {
+  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
+  .key_size    = sizeof(unsigned int),
+  .value_size  = sizeof(struct counter),
+  .max_entries = 2,
+};
+
 SEC("xdp_main")
 int  xdp_main_func(struct xdp_md *ctx)
 {
+    __u64 start = bpf_ktime_get_ns();
     void *data_end = (void *)(long)ctx->data_end;
     void *data     = (void *)(long)ctx->data;
 
@@ -140,7 +154,7 @@ int  xdp_main_func(struct xdp_md *ctx)
 	    
       __u16 n = sdbm((unsigned char*) &t, sizeof(t));
       
-      switch ((n%6) + 8) {
+      switch ((n%NBACKENDS)) {
       case 0: maccpy(eth_hdr->h_dest, s0); break;
       case 1: maccpy(eth_hdr->h_dest, s1); break;
       case 2: maccpy(eth_hdr->h_dest, s2); break;
@@ -160,8 +174,16 @@ int  xdp_main_func(struct xdp_md *ctx)
       default:
 	  maccpy(eth_hdr->h_dest, s0);
       }
-      
-      
+
+
+      int index0 = 0;
+      struct counter *statsp = bpf_map_lookup_elem(&stats, &index0);
+      if (!statsp) {
+	  return XDP_PASS;
+      }
+
+      statsp->count++;
+      statsp->time += (bpf_ktime_get_ns() - start);
       return XDP_TX;
   }
       

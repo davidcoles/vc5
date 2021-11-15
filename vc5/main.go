@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"bpf"
 
@@ -47,15 +48,58 @@ type vipstatus = probes.Vipstatus
 
 func simple() {
 	x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
-	fmt.Println(x, e)
-	return
 
+	type counter struct {
+		count uint64
+		time  uint64
+	}
+
+	m := x.FindMap("stats")
+
+	if m == -1 {
+		log.Fatal("not found")
+	}
+
+	if !x.CheckMap(m, 4, 16) {
+		log.Fatal("incorrect size")
+	}
+
+	var zero uint32
+
+	fmt.Println(x, e)
+
+	for {
+		var counters [16]counter
+
+		xdp.BpfMapUpdateElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters), xdp.BPF_ANY)
+
+		time.Sleep(1 * time.Second)
+
+		if xdp.BpfMapLookupElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters)) != 0 {
+			log.Fatal("oops")
+		}
+
+		var s uint64
+		var t uint64
+
+		for _, c := range counters {
+			s += c.count
+			t += c.time
+		}
+
+		if s > 0 {
+			fmt.Println(t / s)
+		} else {
+			fmt.Println(0)
+		}
+	}
 }
 
 func main() {
 	ulimit()
 
-	//return simple()
+	//simple()
+	//return
 
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")
