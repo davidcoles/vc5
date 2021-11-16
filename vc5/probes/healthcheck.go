@@ -44,8 +44,6 @@ type Checks = config.Checks
 type scounters = types.Scounters
 type counters = types.Counters
 
-const ENABLE_HEALTHCHECKS = true
-
 type vipstatus = Vipstatus
 type Vipstatus struct {
 	Port uint16
@@ -109,7 +107,6 @@ func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters
 				s.Rx_bytes += v.Rx_bytes
 			}
 
-			//c.SCounters() <- s
 			sc <- s
 			goto do_select
 		default:
@@ -263,8 +260,18 @@ func ud(b bool) string {
 	}
 	return "down"
 }
-
-func healthcheckBackend(c *Control, nat, rip IP4, checks Checks, updates chan update) {
+func healthcheckBackend(c *Control, nat, rip IP4, checks Checks) chan bool {
+	updates := make(chan update, 100)
+	up := make(chan bool, 100)
+	go healthcheckBackend_(c, nat, rip, checks, updates)
+	go func() {
+		for u := range updates {
+			up <- u.up
+		}
+	}()
+	return up
+}
+func healthcheckBackend_(c *Control, nat, rip IP4, checks Checks, updates chan update) {
 	var mac MAC
 
 	alive := false
@@ -276,24 +283,21 @@ func healthcheckBackend(c *Control, nat, rip IP4, checks Checks, updates chan up
 
 		time.Sleep(1 * time.Second)
 
-		if ENABLE_HEALTHCHECKS {
-
-			for _, c := range checks.Http {
-				if !HTTPCheck(nat, c.Port, c.Path, int(c.Expect)) {
-					ok = false
-				}
+		for _, c := range checks.Http {
+			if !HTTPCheck(nat, c.Port, c.Path, int(c.Expect)) {
+				ok = false
 			}
+		}
 
-			for _, c := range checks.Https {
-				if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect)) {
-					ok = false
-				}
+		for _, c := range checks.Https {
+			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect)) {
+				ok = false
 			}
+		}
 
-			for _, c := range checks.Tcp {
-				if !TCPCheck(nat, c.Port) {
-					ok = false
-				}
+		for _, c := range checks.Tcp {
+			if !TCPCheck(nat, c.Port) {
+				ok = false
 			}
 		}
 
@@ -334,57 +338,33 @@ func healthcheckBackend(c *Control, nat, rip IP4, checks Checks, updates chan up
 func manageBackend(c *Control, vip IP4, port uint16, real config.Real, counters chan counters, checks Checks) {
 
 	var up bool
-	var mac MAC
+	var ac int64
 
 	rip := real.Rip
-	nat := real.Nat
-	vlan := real.VLan
 
-	updates := make(chan update, 100)
-	go healthcheckBackend(c, nat, rip, checks, updates)
-
-	last, _ := c.Era()
-	conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
-	conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
-
+	status := healthcheckBackend(c, real.Nat, rip, checks) // is backend up or down
+	active := c.VipRipPortConcurrents(vip, rip, port)      // number of active connections
 	prev := c.VipRipPortCounters(vip, rip, port, true)
-	prev.Timestamp = time.Now()
 
 	for {
 		time.Sleep(1 * time.Second)
 
 		counter := c.VipRipPortCounters(vip, rip, port, false)
-		counter.Timestamp = time.Now()
+		seconds := float64(counter.Timestamp.Sub(prev.Timestamp)) / float64(time.Second)
+		counter.Rx_pps = uint64(float64(counter.Rx_packets-prev.Rx_packets) / seconds)
+		counter.Rx_bps = uint64(float64(counter.Rx_bytes-prev.Rx_bytes) / seconds)
 
-		scnds := float64(counter.Timestamp.Sub(prev.Timestamp)) / float64(time.Second)
-
-		counter.Rx_pps = uint64(float64(counter.Rx_packets-prev.Rx_packets) / scnds)
-		counter.Rx_bps = uint64(float64(counter.Rx_bytes-prev.Rx_bytes) / scnds)
-
-		next, _ := c.Era()
-		if last != next {
-			conn = c.VipRipPortConcurrent(vip, rip, port, last)
-			last = next
-		}
-
-		if conn < 0 {
-			conn = 0
-		}
-
-	do_select:
+	poll_status:
 		select {
-		case u := <-updates:
-			up = u.up
-			mac = u.mac
-			goto do_select
+		case up = <-status:
+			goto poll_status
+		case ac = <-active:
+			goto poll_status
 		default:
 		}
 
 		counter.Up = up
-		counter.MAC = mac
-		counter.Ip = rip
-		counter.Vlan = vlan
-		counter.Concurrent = int64(conn)
+		counter.Concurrent = ac
 		counters <- counter
 		prev = counter
 	}

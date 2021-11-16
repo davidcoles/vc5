@@ -72,13 +72,19 @@ func main() {
 	ipv4 := args[4]
 	peth := args[5:]
 
+	//var ipaddr [4]byte
 	var hwaddr [6]byte
 
 	ipaddr, ok := parseIP(ipv4)
-
 	if !ok {
 		log.Fatal(ipv4)
 	}
+
+	//if ip := net.ParseIP(ipv4); ip == nil || len(ip) != 4 {
+	//	panic(ipv4)
+	//} else {
+	//	copy(ipaddr[:], ip[:])
+	//}
 
 	if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
 		panic(err)
@@ -87,7 +93,6 @@ func main() {
 	}
 
 	config, err := config.LoadConfigFile(conffile)
-	//return
 
 	if err != nil {
 		panic(err)
@@ -192,9 +197,7 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.R
 						exec.Command("ip", "a", "del", ip.String()+"/32", "dev", veth).Output()
 					}
 				}
-
 			}
-
 		}
 	}()
 	return vs

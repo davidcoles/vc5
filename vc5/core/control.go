@@ -33,7 +33,6 @@ import (
 	"vc5/xdp"
 )
 
-type scounters = types.Scounters
 type counters = types.Counters
 
 type IP4 = types.IP4
@@ -237,8 +236,6 @@ func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	}
 
 	go c.global_update()
-	//go c.global_stats()
-	//go stats.Stats_server(c.rhi, c.scounters, c.counters)
 
 	return &c
 }
@@ -342,7 +339,17 @@ func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16, clear bool) coun
 	for _, r := range raw {
 		t.add(r)
 	}
-	return t.cook()
+	cooked := t.cook()
+	cooked.Timestamp = time.Now()
+	cooked.Ip = rip
+
+	if m := c.ReadMAC(rip); m != nil {
+		cooked.MAC = *m
+	} else {
+		cooked.MAC = MAC{}
+	}
+
+	return cooked
 }
 
 func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) int32 {
@@ -396,4 +403,34 @@ func (c *Control) GlobalStats(clear bool) counters {
 		t.add(s)
 	}
 	return t.cook()
+}
+
+func (c *Control) VipRipPortConcurrents(vip, rip IP4, port uint16) chan int64 {
+
+	counters := make(chan int64, 100)
+
+	go func() {
+
+		last, _ := c.Era()
+		conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
+		conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
+
+		for {
+			time.Sleep(1 * time.Second)
+
+			next, _ := c.Era()
+			if last != next {
+				conn = c.VipRipPortConcurrent(vip, rip, port, last)
+				last = next
+
+				if conn < 0 {
+					counters <- 0
+				} else {
+					counters <- int64(conn)
+				}
+			}
+		}
+	}()
+
+	return counters
 }
