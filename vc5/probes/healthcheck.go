@@ -58,8 +58,7 @@ type update struct {
 	up  bool
 }
 
-//func (c *Control) monitor_vip(service Service, vs chan vipstatus) {
-func MonitorVip(c *Control, service Service, vs chan vipstatus) {
+func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters) {
 	vip := service.Vip
 	port := service.Port
 	backends := service.Rip
@@ -69,16 +68,12 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 
 	hashed, stats := rendezvous.Rendezvous(live)
 
-	c.SetBackends2(vip, port, hashed, [12]byte{}, 0)
+	c.SetBackends(vip, port, hashed, [12]byte{}, 0)
 	fmt.Println("initial", vip, port, live, up)
 
 	name := fmt.Sprintf("%s:%d", vip, port)
-	//bup := make(map[IP4]bool)
-	//mac := make(map[IP4]MAC)
 	ctr := make(map[IP4]counters)
-	vlan := make(map[IP4]uint16)
 
-	//updates := make(chan update, 100)
 	countersc := make(chan counters, 100)
 
 	for _, r := range backends {
@@ -88,15 +83,13 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 		}
 		c.SetRip(r.Rip)
 		c.SetNatVipRip(r.Nat, vip, r.Rip, r.Src, iface, r.VLan)
-		vlan[r.Rip] = r.VLan
 
 		var checks Checks
 		checks.Tcp = r.Tcp
 		checks.Http = r.Http
 		checks.Https = r.Https
 		fmt.Println(r.Nat, r.Rip, checks)
-		//go monitor_nat(c, r.Nat, r.Rip, checks, updates)
-		go VRPStats(c, vip, r.Rip, port, r.VLan, countersc, r.Nat, checks)
+		go manageBackend(c, vip, port, r, countersc, checks)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -104,15 +97,7 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 	for {
 	do_select:
 		select {
-		//case u := <-updates:
-		//	bup[u.rip] = u.up
-		//	mac[u.rip] = u.mac
-		//	goto do_select
 		case ct := <-countersc:
-			//ct.Up = bup[ct.Ip]
-			//ct.MAC = mac[ct.Ip]
-			//bup[ct.Ip] = ct.Up
-			//mac[ct.Ip] = ct.MAC
 			ctr[ct.Ip] = ct
 			s := scounters{Sname: name, Up: up, Nalive: nalive, Need: service.Need, Name: service.Name, Description: service.Description}
 			s.Backends = make(map[string]counters)
@@ -124,26 +109,11 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 				s.Rx_bytes += v.Rx_bytes
 			}
 
-			c.SCounters() <- s
+			//c.SCounters() <- s
+			sc <- s
 			goto do_select
 		default:
 		}
-
-		//var new B12s
-
-		//for r, m := range mac {
-		//	if bup[r] && types.Cmpmac(m, [6]byte{0, 0, 0, 0, 0, 0}) != 0 {
-		//		new = append(new, makeB12(m, r, vlan[r]))
-		//	}
-		//}
-
-		/*
-			for r, c := range ctr {
-				if c.Up && types.Cmpmac(c.MAC, MAC{}) != 0 {
-					new = append(new, makeB12(c.MAC, r, vlan[r]))
-				}
-			}
-		*/
 
 		new := build_list(ctr)
 		var least B12
@@ -153,11 +123,8 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 			new, least, weight = least_conns(ctr)
 		}
 
-		//sort.Sort(new)
-
 		was := up
 
-		//if !types.CmpB12s(live, new) {
 		if setsDiffer(live, new) {
 			live = new
 			hashed, stats = rendezvous.Rendezvous(live)
@@ -171,21 +138,7 @@ func MonitorVip(c *Control, service Service, vs chan vipstatus) {
 			up = nalive > 0
 		}
 
-		//if foo > 0 {
-		//	fmt.Println("XXXX", out, foo)
-		//}
-
-		//var out B12
-		//var foo uint8
-		//ots := IP4{10, 7, 115, 126}
-		//if bup[ots] {
-		//	out = makeB12(mac[ots], ots, 0)
-		//	foo = 128
-		//}
-
-		c.SetBackends2(vip, port, hashed, least, weight)
-		//fmt.Println("changed", vip, port, live, up)
-		//}
+		c.SetBackends(vip, port, hashed, least, weight)
 
 		if was != up {
 			//c.Log(0, fmt.Sprint("VIP state change: ", vip, " -> ", ud(up)))
@@ -311,7 +264,7 @@ func ud(b bool) string {
 	return "down"
 }
 
-func monitor_nat(c *Control, nat, rip IP4, checks Checks, updates chan update) {
+func healthcheckBackend(c *Control, nat, rip IP4, checks Checks, updates chan update) {
 	var mac MAC
 
 	alive := false
@@ -378,17 +331,17 @@ func monitor_nat(c *Control, nat, rip IP4, checks Checks, updates chan update) {
 	}
 }
 
-//func monitor_nat(c *Control, nat, rip IP4, checks Checks, updates chan update) {
-func VRPStats(c *Control, vip, rip IP4, port uint16, vlan uint16, counters chan counters, nat IP4, checks Checks) {
+func manageBackend(c *Control, vip IP4, port uint16, real config.Real, counters chan counters, checks Checks) {
 
 	var up bool
 	var mac MAC
 
+	rip := real.Rip
+	nat := real.Nat
+	vlan := real.VLan
+
 	updates := make(chan update, 100)
-
-	//updates <- update{rip: rip, mac: mac, up: alive}
-
-	go monitor_nat(c, nat, rip, checks, updates)
+	go healthcheckBackend(c, nat, rip, checks, updates)
 
 	last, _ := c.Era()
 	conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
@@ -429,7 +382,6 @@ func VRPStats(c *Control, vip, rip IP4, port uint16, vlan uint16, counters chan 
 
 		counter.Up = up
 		counter.MAC = mac
-
 		counter.Ip = rip
 		counter.Vlan = vlan
 		counter.Concurrent = int64(conn)
@@ -441,4 +393,46 @@ func VRPStats(c *Control, vip, rip IP4, port uint16, vlan uint16, counters chan 
 func ping(ip IP4) {
 	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
 	exec.Command("/bin/sh", "-c", command).Output()
+}
+
+func GlobalStats(c *Control, cchan chan types.Counters) {
+	var prev counters
+	var avg []uint64
+
+	c.GlobalStats(true)
+
+	for n := 0; ; n++ {
+		time.Sleep(1 * time.Second)
+
+		count := c.GlobalStats(false)
+
+		latency := count.Fp_time
+		if count.Fp_count > 0 {
+			latency /= count.Fp_count
+		}
+
+		avg = append(avg, latency)
+		for len(avg) > 4 {
+			avg = avg[1:]
+		}
+
+		latency = 0
+
+		if len(avg) > 0 {
+			for _, v := range avg {
+				latency += v
+			}
+			latency /= uint64(len(avg))
+		}
+
+		count.Latency = latency
+		count.Pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
+		//c.Counters() <- count
+		cchan <- count
+
+		if n%10 == 0 {
+			fmt.Printf(">>> %d pps, %d ns avg. latency\n", count.Pps, count.Latency)
+		}
+		prev = count
+	}
 }

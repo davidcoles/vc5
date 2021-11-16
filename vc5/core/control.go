@@ -28,7 +28,7 @@ import (
 
 	"bpf"
 	//"vc5/rendezvous"
-	"vc5/stats"
+	//"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -77,12 +77,9 @@ const MAX_CPU = 256
 const INTERVAL = 5
 
 type Control struct {
-	xdp       *xdp.XDP_
-	era       uint64
-	interval  uint8
-	scounters chan scounters
-	counters  chan counters
-	rhi       chan rhi
+	xdp      *xdp.XDP_
+	era      uint64
+	interval uint8
 
 	interfaces              int
 	service_backend         int
@@ -110,18 +107,6 @@ func (c *Control) Era() (uint64, uint8) {
 func (c *Control) IPAddr() [4]byte {
 	return c.ipaddr
 }
-
-func (c *Control) SCounters() chan scounters {
-	return c.scounters
-}
-func (c *Control) Counters() chan counters {
-	return c.counters
-}
-func (c *Control) RHI() chan rhi {
-	return c.rhi
-}
-
-type rhi = types.RHI
 
 type service struct {
 	vip  IP4
@@ -219,10 +204,6 @@ func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 
 	c.xdp = x
 
-	c.scounters = make(chan scounters, 1000)
-	c.counters = make(chan counters, 1000)
-	c.rhi = make(chan rhi, 1000)
-
 	c.interfaces = c.find_map("interfaces", 4, 16)
 	c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
@@ -256,8 +237,8 @@ func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	}
 
 	go c.global_update()
-	go c.global_stats()
-	go stats.Stats_server(c.rhi, c.scounters, c.counters)
+	//go c.global_stats()
+	//go stats.Stats_server(c.rhi, c.scounters, c.counters)
 
 	return &c
 }
@@ -296,7 +277,7 @@ func (c *Control) SetRip(rip IP4) {
 	go ping(rip)
 }
 
-func (c *Control) SetBackends2(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
+func (c *Control) SetBackends(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
 	var s service
 	s.vip = vip
 	s.port[0] = byte((port >> 8) & 0xff)
@@ -386,34 +367,6 @@ func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) in
 	return total
 }
 
-func (c *Control) xxVipRipPortConcurrent(vip, rip IP4, port uint16, p bool) int32 {
-	var concurrent [MAX_CPU]int32
-	type vip_rip_port struct {
-		vip  IP4
-		rip  IP4
-		port uint16
-		pad  uint16
-	}
-	pad := uint16(0)
-
-	if p {
-		pad = 1
-	}
-
-	var zero [MAX_CPU]int32
-
-	vrp := vip_rip_port{vip: vip, rip: rip, port: port, pad: pad}
-
-	xdp.BpfMapLookupElem(c.vip_rip_port_concurrent, uP(&vrp), uP(&concurrent))
-	xdp.BpfMapUpdateElem(c.vip_rip_port_concurrent, uP(&vrp), uP(&zero), xdp.BPF_ANY)
-
-	var total int32
-	for _, t := range concurrent {
-		total += t
-	}
-	return total
-}
-
 func (c *Control) FlowQueue() (*[FLOW_STATE]byte, bool) {
 	var entry [FLOW_STATE]byte
 
@@ -443,45 +396,4 @@ func (c *Control) GlobalStats(clear bool) counters {
 		t.add(s)
 	}
 	return t.cook()
-}
-
-func (c *Control) global_stats() {
-	var prev counters
-	var avg []uint64
-
-	c.GlobalStats(true)
-
-	for n := 0; ; n++ {
-		time.Sleep(1 * time.Second)
-
-		count := c.GlobalStats(false)
-
-		latency := count.Fp_time
-		if count.Fp_count > 0 {
-			latency /= count.Fp_count
-		}
-
-		avg = append(avg, latency)
-		for len(avg) > 4 {
-			avg = avg[1:]
-		}
-
-		latency = 0
-
-		if len(avg) > 0 {
-			for _, v := range avg {
-				latency += v
-			}
-			latency /= uint64(len(avg))
-		}
-
-		count.Latency = latency
-		count.Pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
-		c.Counters() <- count
-
-		if n%10 == 0 {
-			fmt.Printf(">>> %d pps, %d ns avg. latency\n", count.Pps, count.Latency)
-		}
-		prev = count
-	}
 }

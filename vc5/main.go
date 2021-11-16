@@ -38,6 +38,7 @@ import (
 	"vc5/config"
 	"vc5/core"
 	"vc5/probes"
+	"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -45,55 +46,6 @@ import (
 type IP4 = types.IP4
 type Control = core.Control
 type vipstatus = probes.Vipstatus
-
-func simple() {
-	x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
-
-	type counter struct {
-		count uint64
-		time  uint64
-	}
-
-	m := x.FindMap("stats")
-
-	if m == -1 {
-		log.Fatal("not found")
-	}
-
-	if !x.CheckMap(m, 4, 16) {
-		log.Fatal("incorrect size")
-	}
-
-	var zero uint32
-
-	fmt.Println(x, e)
-
-	for {
-		var counters [16]counter
-
-		xdp.BpfMapUpdateElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters), xdp.BPF_ANY)
-
-		time.Sleep(1 * time.Second)
-
-		if xdp.BpfMapLookupElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters)) != 0 {
-			log.Fatal("oops")
-		}
-
-		var s uint64
-		var t uint64
-
-		for _, c := range counters {
-			s += c.count
-			t += c.time
-		}
-
-		if s > 0 {
-			fmt.Println(t / s)
-		} else {
-			fmt.Println(0)
-		}
-	}
-}
 
 func main() {
 	ulimit()
@@ -158,6 +110,10 @@ func main() {
 		b = nil
 	}
 
+	ss := stats.Server(":80")
+
+	go probes.GlobalStats(c, ss.Counters())
+
 	ips := make(map[IP4]chan vipstatus)
 	for _, s := range config.Services {
 		fmt.Println("=========", s.Vip, s.Port)
@@ -165,11 +121,11 @@ func main() {
 
 		ch, ok := ips[s.Vip]
 		if !ok {
-			ch = vip_status(c, s.Vip, veth, b)
+			ch = vip_status(c, s.Vip, veth, b, ss.RHI())
 			ips[s.Vip] = ch
 		}
 
-		go probes.MonitorVip(c, s, ch)
+		go probes.ManageVip(c, s, ch, ss.Scounters())
 	}
 
 	sig := make(chan os.Signal)
@@ -206,7 +162,7 @@ func main() {
 	}
 }
 
-func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
+func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.RHI) chan vipstatus {
 	vs := make(chan vipstatus, 100)
 	go func() {
 		up := false
@@ -222,7 +178,7 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers) chan vipstatus {
 				}
 			}
 
-			c.RHI() <- types.RHI{Ip: ip, Up: up}
+			rhi <- types.RHI{Ip: ip, Up: up}
 
 			if up != was {
 				fmt.Println("***** CHANGED", v, up)
@@ -379,4 +335,53 @@ func parseIP(ip string) ([4]byte, bool) {
 		addr[n] = byte(a)
 	}
 	return addr, true
+}
+
+func simple() {
+	x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
+
+	type counter struct {
+		count uint64
+		time  uint64
+	}
+
+	m := x.FindMap("stats")
+
+	if m == -1 {
+		log.Fatal("not found")
+	}
+
+	if !x.CheckMap(m, 4, 16) {
+		log.Fatal("incorrect size")
+	}
+
+	var zero uint32
+
+	fmt.Println(x, e)
+
+	for {
+		var counters [16]counter
+
+		xdp.BpfMapUpdateElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters), xdp.BPF_ANY)
+
+		time.Sleep(1 * time.Second)
+
+		if xdp.BpfMapLookupElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters)) != 0 {
+			log.Fatal("oops")
+		}
+
+		var s uint64
+		var t uint64
+
+		for _, c := range counters {
+			s += c.count
+			t += c.time
+		}
+
+		if s > 0 {
+			fmt.Println(t / s)
+		} else {
+			fmt.Println(0)
+		}
+	}
 }

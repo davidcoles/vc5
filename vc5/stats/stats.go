@@ -45,7 +45,24 @@ type global struct {
 }
 
 //func (ctrl *Control) stats_server() {
-func Stats_server(rhic chan types.RHI, scountersc chan scounters, countersc chan counters) {
+
+type SServer struct {
+	rhic       chan types.RHI
+	scountersc chan scounters
+	countersc  chan counters
+}
+
+func Server(addr string) *SServer {
+	ss := SServer{rhic: make(chan types.RHI, 100), scountersc: make(chan scounters, 100), countersc: make(chan counters, 100)}
+	go Server_(addr, ss.rhic, ss.scountersc, ss.countersc)
+	return &ss
+}
+
+func (s *SServer) RHI() chan types.RHI       { return s.rhic }
+func (s *SServer) Counters() chan counters   { return s.countersc }
+func (s *SServer) Scounters() chan scounters { return s.scountersc }
+
+func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, countersc chan counters) {
 
 	var js []byte = []byte("{}")
 
@@ -139,7 +156,7 @@ func Stats_server(rhic chan types.RHI, scountersc chan scounters, countersc chan
 		*/
 	})
 
-	log.Fatal(http.ListenAndServe(":80", nil))
+	log.Fatal(http.ListenAndServe(addr, nil))
 }
 
 func index() []byte {
