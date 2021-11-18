@@ -1,8 +1,19 @@
+var currents = {};
+var lastms = 0;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function addMessage(msg) {
+    var consoleElement = document.querySelectorAll('#console')[0];
+    var messageElement = document.createElement('div');
+    messageElement.innerHTML = msg;
+    if(consoleElement.childElementCount > 1000 ) {
+        consoleElement.removeChild(consoleElement.lastChild);
+    }
+    consoleElement.insertBefore(messageElement, consoleElement.firstChild);
+}
 
 var getJSON = function(url, callback) {
     var xhr = new XMLHttpRequest();
@@ -102,7 +113,6 @@ function linechart(title, xvals, yvals) {
     });
     
 }
-var currents = {};
 
 function updateStats(url) {
     
@@ -238,18 +248,40 @@ function updateStats(url) {
 		yvals.push(currents[item]);
 	    });
 
-	    linechart("current connections", xvals, yvals);
+	    //linechart("current connections", xvals, yvals);
 	}
     });
 
 }
 
+function updateLogs(url) {
+    
+    getJSON(url+lastms, function(err, data) {	
+	if (err !== null) {
+	    alert('Something went wrong: ' + err);
+	} else {
+            data.forEach(function(item, index) {
+		//console.log(index);
+		if(item.Level < 6) {
+		    lastms = item.Ms;
+		    var date = new Date(lastms);
+		    var time = date.toLocaleString();
+		    addMessage(time + ": " + item.Entry);
+		}		
+	    })
+	}
+    })
+}
+
+
 function lb() {
     
     var url = window.location.href + 'stats/';
+    var log = window.location.href + 'log/';    
 
     function doevent() {
 	updateStats(url);
+	updateLogs(log);	
 	setTimeout(doevent, 3000);
     }
 

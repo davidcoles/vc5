@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"vc5/logger"
@@ -156,12 +158,23 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 
-		if j, err := json.MarshalIndent(logs.Dump(), "", "  "); err != nil {
+		history := logs.Dump()
+
+		re := regexp.MustCompile("^/log/([0-9]+)$")
+		match := re.FindStringSubmatch(r.RequestURI)
+
+		if match != nil && len(match) == 2 {
+			n, _ := strconv.ParseUint(match[1], 10, 64)
+			history = logs.Since(uint64(n))
+		}
+
+		if j, err := json.MarshalIndent(history, "", "  "); err != nil {
 			w.Write([]byte("{}"))
 		} else {
 			w.Write(j)
 		}
 		w.Write([]byte("\n"))
+
 	})
 
 	http.HandleFunc("/log/text/", func(w http.ResponseWriter, r *http.Request) {

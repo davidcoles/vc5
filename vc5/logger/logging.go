@@ -61,8 +61,17 @@ func NewLogger() *Logger {
 	return &logger
 }
 
-func (l *Logger) Dump() interface{} {
+func (l *Logger) Dump() []Logentry {
 	return l.history
+}
+
+func (l *Logger) Since(t uint64) []Logentry {
+	for i, v := range l.history {
+		if v.Ms > t {
+			return l.history[i:]
+		}
+	}
+	return []Logentry{}
 }
 
 func (l *Logger) Text(level uint8) []string {

@@ -45,7 +45,7 @@ libbpf:
 	if [ ! -d libbpf ]; then git clone https://github.com/libbpf/libbpf/ && cd libbpf && git checkout $(LIBBPF_VER); fi
 
 clean:
-	rm -f vc5/vc5 src/*.o src/*.ll bpf/*.go vc5.json vc5/bpf/*.ll vc5/bpf/*.o
+	rm -f vc5/vc5 vc5.json vc5/bpf/*.ll vc5/bpf/*.o
 
 distclean: clean
 	rm -rf libbpf

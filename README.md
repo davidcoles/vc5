@@ -17,7 +17,7 @@ It would be recommended to start out using a fresh virtual machine.
 
 First we need a development environment capable of building libbpf and Go binaries. Go 1.16 or later is needed due to using go:embed directives. On Ubuntu 20.04 this can be achieved with:
 
-  `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.16 libyaml-perl libjson-perl ethtool bridge-utils`
+  `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.16 libyaml-perl libjson-perl ethtool`
   
   `ln -s /usr/lib/go-1.16/bin/go /usr/local/bin/go`
 
@@ -87,10 +87,7 @@ A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical cores and an 
 The rhi section contains the AS number to use and a list of
 peers. Currently, the BGP4 implementation does not listen on
 port 179. The IP address specified on the command line will be used as
-the router ID. If the peer has a router ID higher than this IP then
-according to the RFC the connection should be abandoned, so this may
-not work in all situations. I'm unsure if using passive option in BIRD
-helps with this or not; YMMV. This will be addressed soon.
+the router ID.
 
 RHI will only advertise a service's IP address if all services on all ports using that IP address pass healthchecks. All healthchecks listed for a port (http/https/tcp) must pass if specified.
 

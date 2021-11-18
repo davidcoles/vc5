@@ -1,6 +1,14 @@
 <!DOCTYPE HTML>
 <html>
   <head>
+    <style>
+      #console {
+	  height: 150px;
+	  background: grey;
+	  overflow-x: hidden;
+	  overflow-x: auto;
+      }
+    </style>
     <script>
       window.onload = function() {
 	  lb();
@@ -9,20 +17,18 @@
   </head>
   <body>
 
-    <h1>VC5</h1>
-    <ul>
-      <li><a href="/stats/">stats</a></li>
-      <li><a href="/log/text/5">logs</a></li>
-      <li><a href="/log/text/7">debug logs</a></li>
-    </ul>
+    <a href="/stats/">stats</a> | <a href="/log/text/5">logs</a> | <a href="/log/text/7">debug logs</a>
 
-    
+
+    <h2>Logs</h2>
+    <div id="console"></div>
+
     <h2>VIP status</h2>
     <div id="rhi"></div>
     <h2>Global stats</h2>
     <div id="global"></div>
     <canvas id="doughnut" style="width:100%;max-width:500px"></canvas>
-    <canvas id="line" style="width:100%;max-width:500px"></canvas>    
+    <!-- <canvas id="line" style="width:100%;max-width:500px"></canvas>-->
 
     <h2>Services</h2>
     <div id="services"></div>
