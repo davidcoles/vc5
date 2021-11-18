@@ -71,6 +71,7 @@ type Service struct {
 
 type Config struct {
 	Multicast string            `json:"multicast"`
+	Webserver string            `json:"webserver"`
 	Learn     uint16            `json:"learn"`
 	Services  []Service         `json:"services"`
 	Peers     []string          `json:"peers"`

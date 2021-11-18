@@ -33,8 +33,6 @@ import (
 	"time"
 	"unsafe"
 
-	//"bpf"
-
 	"vc5/bgp4"
 	"vc5/config"
 	"vc5/core"
@@ -46,6 +44,9 @@ import (
 )
 
 //go:embed bpf/simple.o
+var SIMPLE_O []byte
+
+//go:embed bpf/bpf.o
 var BPF_O []byte
 
 type IP4 = types.IP4
@@ -123,7 +124,11 @@ func main() {
 		b = nil
 	}
 
-	ss := stats.Server(":80", logs)
+	ws := ":80"
+	if config.Webserver != "" {
+		ws = config.Webserver
+	}
+	ss := stats.Server(ws, logs)
 
 	p := probes.Manage(c, logs)
 
@@ -363,7 +368,7 @@ func parseIP(ip string) ([4]byte, bool) {
 
 func simple() {
 	//x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
-	x, e := xdp.Simple("enp130s0f1", BPF_O, "xdp_main")
+	x, e := xdp.Simple("enp130s0f1", SIMPLE_O, "xdp_main")
 
 	type counter struct {
 		count uint64

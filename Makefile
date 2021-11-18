@@ -16,16 +16,10 @@ vc5.json: tools/config.pl vc5.yaml
 	tools/config.pl vc5.yaml >vc5.json
 
 wc: clean
-	wc */*.go */*.c */*.h
+	wc vc5/*.go vc5/*/*.go vc5/*/*.c vc5/*/*.h
 
-#vc5/vc5: */*.go */*.c bpf/bpf.go bpf/simple.go vc5/bpf/bpf.o
-vc5/vc5: */*.go obj
+vc5/vc5: vc5/bpf/bpf.o vc5/bpf/simple.o
 	cd vc5 && go build
-
-obj: vc5/bpf/bpf.o vc5/bpf/simple.o
-
-bpf/%.go: src/%.o
-	 go run tools/include.go BPF_$* src/$*.o >$@
 
 %.o: %.c libbpf/bpf
 	clang -S \
