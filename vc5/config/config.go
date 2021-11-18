@@ -51,12 +51,12 @@ type Checks struct {
 
 type Real struct {
 	Rip   IP4         `json:"rip"`
-	Http  []HttpCheck `json:"http"`
-	Https []HttpCheck `json:"https"`
-	Tcp   []TcpCheck  `json:"tcp"`
-	Nat   IP4
-	VLan  uint16
-	Src   IP4
+	Http  []HttpCheck `json:"http,omitempty"`
+	Https []HttpCheck `json:"https,omitempty"`
+	Tcp   []TcpCheck  `json:"tcp,omitempty"`
+	Nat   IP4         `json:"nat"`
+	VLan  uint16      `json:"vlan,omitempty"`
+	Src   IP4         `json:"src"`
 }
 
 type Service struct {

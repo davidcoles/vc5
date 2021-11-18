@@ -19,14 +19,22 @@
 package stats
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 
+	"vc5/logger"
 	"vc5/types"
 )
+
+//go:embed lb.html
+var LB_HTML string
+
+//go:embed lb.js
+var LB_JS string
 
 type scounters = types.Scounters
 type counters = types.Counters
@@ -52,9 +60,9 @@ type SServer struct {
 	countersc  chan counters
 }
 
-func Server(addr string) *SServer {
+func Server(addr string, logs *logger.Logger) *SServer {
 	ss := SServer{rhic: make(chan types.RHI, 100), scountersc: make(chan scounters, 100), countersc: make(chan counters, 100)}
-	go Server_(addr, ss.rhic, ss.scountersc, ss.countersc)
+	go Server_(addr, ss.rhic, ss.scountersc, ss.countersc, logs)
 	return &ss
 }
 
@@ -62,7 +70,7 @@ func (s *SServer) RHI() chan types.RHI       { return s.rhic }
 func (s *SServer) Counters() chan counters   { return s.countersc }
 func (s *SServer) Scounters() chan scounters { return s.scountersc }
 
-func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, countersc chan counters) {
+func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, countersc chan counters, logs *logger.Logger) {
 
 	var js []byte = []byte("{}")
 
@@ -114,7 +122,19 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write(index())
+		w.Write([]byte(LB_HTML))
+		//w.Write(index())
+	})
+
+	http.HandleFunc("/lb.html", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(LB_HTML))
+	})
+	http.HandleFunc("/lb.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(LB_JS))
 	})
 
 	http.HandleFunc("/stats/", func(w http.ResponseWriter, r *http.Request) {
@@ -136,24 +156,51 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.WriteHeader(http.StatusOK)
 
-		/*
-			if j, err := json.MarshalIndent(ctrl.logger.Dump(), "", "  "); err != nil {
-				w.Write([]byte("{}"))
-			} else {
-				w.Write(j)
-			}
-			w.Write([]byte("\n"))
-		*/
+		if j, err := json.MarshalIndent(logs.Dump(), "", "  "); err != nil {
+			w.Write([]byte("{}"))
+		} else {
+			w.Write(j)
+		}
+		w.Write([]byte("\n"))
 	})
 
-	http.HandleFunc("/log/text", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/log/text/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		/*
-			for _, t := range ctrl.logger.Text() {
-				w.Write([]byte(t))
+
+		var level uint8 = logger.LOG_NOTICE
+		if len(r.RequestURI) == 11 {
+			switch r.RequestURI[10] {
+			case '0':
+				level = 0
+			case '1':
+				level = 1
+			case '2':
+				level = 2
+			case '3':
+				level = 3
+			case '4':
+				level = 4
+			case '5':
+				level = 5
+			case '6':
+				level = 6
+			case '7':
+				level = 7
 			}
-		*/
+		}
+
+		txt := logs.Text(level)
+
+		x := 100
+		if len(txt) > x {
+			n := len(txt)
+			txt = txt[n-x:]
+		}
+
+		for _, t := range txt {
+			w.Write([]byte(t))
+		}
 	})
 
 	log.Fatal(http.ListenAndServe(addr, nil))
@@ -167,7 +214,8 @@ func index() []byte {
   <body>
     <h1>VC5</h1>
     <li><a href="/stats/">stats</a></li>
-    <li><a href="/log/text">logs</a></li>    
+    <li><a href="/log/text/5">logs</a></li>
+    <li><a href="/log/text/7">debug logs</a></li>
   </body>
 </html>
 `

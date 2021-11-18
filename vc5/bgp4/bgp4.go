@@ -204,7 +204,7 @@ func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool, done chan bool
 
 	defer conn.Close()
 
-	fmt.Println("CONNECTED:", b.peer)
+	//fmt.Println("CONNECTED:", b.peer)
 
 	var open bgpopen
 	open.version = 4
@@ -213,7 +213,7 @@ func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool, done chan bool
 	open.id = b.rid
 	open.opl = 0
 
-	fmt.Println(open)
+	//fmt.Println(open)
 
 	conn.Write(headerise(M_OPEN, open.data()))
 
@@ -236,7 +236,7 @@ func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool, done chan bool
 	for {
 		select {
 		case <-done: // program is exiting
-			fmt.Println("CLOSING", b.peer)
+			//fmt.Println("CLOSING", b.peer)
 			return
 
 		case <-keep:
@@ -258,7 +258,7 @@ func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool, done chan bool
 			case OPEN_SENT:
 				switch m.mtype {
 				case M_OPEN:
-					fmt.Println(m)
+					//fmt.Println(m)
 					conn.Write(headerise(M_KEEPALIVE, nil))
 					b.state = OPEN_CONFIRM
 				}
@@ -416,13 +416,13 @@ func BGP4ReadMessages(conn net.Conn, c chan bgpmessage, done chan bool) {
 
 		n, e := io.ReadFull(conn, header[:])
 		if n != len(header) || e != nil {
-			fmt.Println(n, e)
+			//fmt.Println(n, e)
 			return
 		}
 
 		for _, b := range header[0:16] {
 			if b != 0xff {
-				fmt.Println("header not all 1s")
+				//fmt.Println("header not all 1s")
 				return
 			}
 		}
@@ -433,7 +433,7 @@ func BGP4ReadMessages(conn net.Conn, c chan bgpmessage, done chan bool) {
 		//fmt.Println(header, length, mtype)
 
 		if length < 19 || length > 4096 {
-			fmt.Println("length out of bounds", length)
+			//fmt.Println("length out of bounds", length)
 		}
 
 		length -= 19
@@ -442,7 +442,7 @@ func BGP4ReadMessages(conn net.Conn, c chan bgpmessage, done chan bool) {
 
 		n, e = io.ReadFull(conn, body[:])
 		if n != len(body) || e != nil {
-			fmt.Println(n, e)
+			//fmt.Println(n, e)
 			return
 		}
 

@@ -18,8 +18,11 @@ vc5.json: tools/config.pl vc5.yaml
 wc: clean
 	wc */*.go */*.c */*.h
 
-vc5/vc5: */*.go */*.c bpf/bpf.go bpf/simple.go
+#vc5/vc5: */*.go */*.c bpf/bpf.go bpf/simple.go vc5/bpf/bpf.o
+vc5/vc5: */*.go obj
 	cd vc5 && go build
+
+obj: vc5/bpf/bpf.o vc5/bpf/simple.o
 
 bpf/%.go: src/%.o
 	 go run tools/include.go BPF_$* src/$*.o >$@
@@ -48,7 +51,7 @@ libbpf:
 	if [ ! -d libbpf ]; then git clone https://github.com/libbpf/libbpf/ && cd libbpf && git checkout $(LIBBPF_VER); fi
 
 clean:
-	rm -f vc5/vc5 src/*.o src/*.ll bpf/*.go vc5.json
+	rm -f vc5/vc5 src/*.o src/*.ll bpf/*.go vc5.json vc5/bpf/*.ll vc5/bpf/*.o
 
 distclean: clean
 	rm -rf libbpf

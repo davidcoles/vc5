@@ -1,0 +1,40 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <script>
+      window.onload = function() {
+	  lb();
+      }
+    </script>
+  </head>
+  <body>
+
+    <h1>VC5</h1>
+    <ul>
+      <li><a href="/stats/">stats</a></li>
+      <li><a href="/log/text/5">logs</a></li>
+      <li><a href="/log/text/7">debug logs</a></li>
+    </ul>
+
+    
+    <h2>VIP status</h2>
+    <div id="rhi"></div>
+    <h2>Global stats</h2>
+    <div id="global"></div>
+    <canvas id="doughnut" style="width:100%;max-width:500px"></canvas>
+    <canvas id="line" style="width:100%;max-width:500px"></canvas>    
+
+    <h2>Services</h2>
+    <div id="services"></div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
+    <script src="https://d3js.org/d3-color.v1.min.js"></script>
+    <script src="https://d3js.org/d3-interpolate.v1.min.js"></script>
+    <script src="https://d3js.org/d3-scale-chromatic.v1.min.js"></script>
+    <script type="module" src="lb.js"></script>
+
+    
+    
+  </body>
+</html>
+

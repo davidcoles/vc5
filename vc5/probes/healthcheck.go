@@ -27,6 +27,7 @@ import (
 
 	"vc5/config"
 	"vc5/core"
+	"vc5/logger"
 	"vc5/rendezvous"
 	"vc5/types"
 )
@@ -56,7 +57,13 @@ type update struct {
 	up  bool
 }
 
-func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters) {
+func (p *Probes) ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
+	go p.ManageVip(service, vs, sc)
+}
+
+func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters) {
+	c := p.control
+	logs := p.logger
 	vip := service.Vip
 	port := service.Port
 	backends := service.Rip
@@ -67,7 +74,7 @@ func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters
 	hashed, stats := rendezvous.Rendezvous(live)
 
 	c.SetBackends(vip, port, hashed, [12]byte{}, 0)
-	fmt.Println("initial", vip, port, live, up)
+	//fmt.Println("initial", vip, port, live, up)
 
 	name := fmt.Sprintf("%s:%d", vip, port)
 	ctr := make(map[IP4]counters)
@@ -86,8 +93,9 @@ func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters
 		checks.Tcp = r.Tcp
 		checks.Http = r.Http
 		checks.Https = r.Https
-		fmt.Println(r.Nat, r.Rip, checks)
-		go manageBackend(c, vip, port, r, countersc, checks)
+		//fmt.Println(r.Nat, r.Rip, checks)
+		logs.INFO(fmt.Sprint(r.Nat, r.Rip, checks))
+		go p.manageBackend(vip, port, r, countersc, checks)
 	}
 
 	time.Sleep(1 * time.Second)
@@ -126,7 +134,8 @@ func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters
 			live = new
 			hashed, stats = rendezvous.Rendezvous(live)
 			nalive = uint(len(live))
-			fmt.Println(vip, port, stats, live, nalive)
+			//fmt.Println(vip, port, stats, live, nalive)
+			logs.INFO(fmt.Sprint(vip, port, stats, live, nalive))
 		}
 
 		if service.Need > 0 {
@@ -138,7 +147,7 @@ func ManageVip(c *Control, service Service, vs chan vipstatus, sc chan scounters
 		c.SetBackends(vip, port, hashed, least, weight)
 
 		if was != up {
-			//c.Log(0, fmt.Sprint("VIP state change: ", vip, " -> ", ud(up)))
+			logs.NOTICE(fmt.Sprint("Service state change: ", vip, port, " -> ", ud(up)))
 			vs <- vipstatus{Port: port, Up: up}
 		}
 
@@ -260,10 +269,10 @@ func ud(b bool) string {
 	}
 	return "down"
 }
-func healthcheckBackend(c *Control, nat, rip IP4, checks Checks) chan bool {
+func (p *Probes) healthcheckBackend(vip IP4, port uint16, nat, rip IP4, checks Checks) chan bool {
 	updates := make(chan update, 100)
 	up := make(chan bool, 100)
-	go healthcheckBackend_(c, nat, rip, checks, updates)
+	go p.healthcheckBackend_(vip, port, nat, rip, checks, updates)
 	go func() {
 		for u := range updates {
 			up <- u.up
@@ -271,7 +280,8 @@ func healthcheckBackend(c *Control, nat, rip IP4, checks Checks) chan bool {
 	}()
 	return up
 }
-func healthcheckBackend_(c *Control, nat, rip IP4, checks Checks, updates chan update) {
+func (p *Probes) healthcheckBackend_(vip IP4, port uint16, nat, rip IP4, checks Checks, updates chan update) {
+	c := p.control
 	var mac MAC
 
 	alive := false
@@ -319,12 +329,13 @@ func healthcheckBackend_(c *Control, nat, rip IP4, checks Checks, updates chan u
 
 		if ok != alive {
 
-			fmt.Println(rip, "changed", alive, mac)
+			//fmt.Println(rip, "changed", alive, mac)
 
 			changed = true
 			alive = ok
 
 			//c.Log(0, fmt.Sprint("RIP state change: ", rip, " -> ", ud(alive)))
+			p.logger.NOTICE(fmt.Sprintf("Real server state change: %s:%d %s -> %s", vip, port, rip, ud(alive)))
 		}
 
 		if changed {
@@ -335,15 +346,16 @@ func healthcheckBackend_(c *Control, nat, rip IP4, checks Checks, updates chan u
 	}
 }
 
-func manageBackend(c *Control, vip IP4, port uint16, real config.Real, counters chan counters, checks Checks) {
+func (p *Probes) manageBackend(vip IP4, port uint16, real config.Real, counters chan counters, checks Checks) {
+	c := p.control
 
 	var up bool
 	var ac int64
 
 	rip := real.Rip
 
-	status := healthcheckBackend(c, real.Nat, rip, checks) // is backend up or down
-	active := c.VipRipPortConcurrents(vip, rip, port)      // number of active connections
+	status := p.healthcheckBackend(vip, port, real.Nat, rip, checks) // is backend up or down
+	active := c.VipRipPortConcurrents(vip, rip, port)                // number of active connections
 	prev := c.VipRipPortCounters(vip, rip, port, true)
 
 	for {
@@ -375,7 +387,21 @@ func ping(ip IP4) {
 	exec.Command("/bin/sh", "-c", command).Output()
 }
 
-func GlobalStats(c *Control, cchan chan types.Counters) {
+type Probes struct {
+	control *Control
+	logger  *logger.Logger
+}
+
+func Manage(c *Control, l *logger.Logger) *Probes {
+	p := Probes{control: c, logger: l}
+	return &p
+}
+
+func (p *Probes) GlobalStats(cchan chan types.Counters) {
+	go GlobalStats_(p.control, cchan, p.logger)
+}
+
+func GlobalStats_(c *Control, cchan chan types.Counters, l *logger.Logger) {
 	var prev counters
 	var avg []uint64
 
@@ -411,7 +437,9 @@ func GlobalStats(c *Control, cchan chan types.Counters) {
 		cchan <- count
 
 		if n%10 == 0 {
-			fmt.Printf(">>> %d pps, %d ns avg. latency\n", count.Pps, count.Latency)
+			fmt.Printf("%d pps, %d ns avg. latency\n", count.Pps, count.Latency)
+			//s := fmt.Sprintf(">>> %d pps, %d ns avg. latency", count.Pps, count.Latency)
+			//l.INFO(s)
 		}
 		prev = count
 	}

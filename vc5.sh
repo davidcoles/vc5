@@ -22,12 +22,6 @@ while true; do
     esac
 done
 
-#if [ "$1" = "-b" ]; then
-#    shift
-#    bridge="$1"
-#    shift
-#fi
-
 ip link del vc5_1 || true
 ip netns del vc5 || true
 ip link add vc5_1 type veth peer name vc5_2
@@ -72,13 +66,12 @@ if [ -f ./vc5 ]; then
     VC5=./vc5
 fi
 
-#if [ "$bridge" != ""  ]; then
-#    brctl addif "$bridge" vc5_1
-#    $VC5 -n vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
-#else
-#    $VC5 vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
-#fi
+TTY=
 
-$VC5 $native $bridge vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
+if tty >/dev/null 2>&1; then
+    TTY=-t
+fi
+
+$VC5 $TTY $native $bridge vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
 
 cleanup

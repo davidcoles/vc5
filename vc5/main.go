@@ -19,6 +19,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"log"
@@ -32,16 +33,20 @@ import (
 	"time"
 	"unsafe"
 
-	"bpf"
+	//"bpf"
 
 	"vc5/bgp4"
 	"vc5/config"
 	"vc5/core"
+	"vc5/logger"
 	"vc5/probes"
 	"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
+
+//go:embed bpf/simple.o
+var BPF_O []byte
 
 type IP4 = types.IP4
 type Control = core.Control
@@ -53,6 +58,9 @@ func main() {
 	//simple()
 	//return
 
+	logs := logger.NewLogger()
+
+	isatty := flag.Bool("t", false, "isatty")
 	native := flag.Bool("n", false, "native")
 	bridge := flag.String("b", "", "bridge")
 	flag.Parse()
@@ -99,10 +107,10 @@ func main() {
 	}
 
 	vip := IP4{10, 0, 0, 1}
-	c := core.New(ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
+	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {
-		go multicast_recv(c, c.IPAddr()[3], config.Multicast)
+		go multicast_recv(c, c.IPAddr()[3], config.Multicast, *isatty)
 	}
 
 	// Set up probe server - runs in other network namespace
@@ -115,22 +123,23 @@ func main() {
 		b = nil
 	}
 
-	ss := stats.Server(":80")
+	ss := stats.Server(":80", logs)
 
-	go probes.GlobalStats(c, ss.Counters())
+	p := probes.Manage(c, logs)
+
+	p.GlobalStats(ss.Counters())
 
 	ips := make(map[IP4]chan vipstatus)
 	for _, s := range config.Services {
-		fmt.Println("=========", s.Vip, s.Port)
-		fmt.Println(s)
+		logs.INFO(fmt.Sprint("Add service: ", s.Vip, s.Port))
+		logs.DEBUG(s)
 
 		ch, ok := ips[s.Vip]
 		if !ok {
-			ch = vip_status(c, s.Vip, veth, b, ss.RHI())
+			ch = vip_status(c, s.Vip, veth, b, ss.RHI(), logs)
 			ips[s.Vip] = ch
 		}
-
-		go probes.ManageVip(c, s, ch, ss.Scounters())
+		go p.ManageVIP(s, ch, ss.Scounters())
 	}
 
 	sig := make(chan os.Signal)
@@ -167,7 +176,14 @@ func main() {
 	}
 }
 
-func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.RHI) chan vipstatus {
+func ud(b bool) string {
+	if b {
+		return "up"
+	}
+	return "down"
+}
+
+func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.RHI, logs *logger.Logger) chan vipstatus {
 	vs := make(chan vipstatus, 100)
 	go func() {
 		up := false
@@ -186,7 +202,8 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.R
 			rhi <- types.RHI{Ip: ip, Up: up}
 
 			if up != was {
-				fmt.Println("***** CHANGED", v, up)
+				//fmt.Println("***** CHANGED", v, up)
+				logs.NOTICE(fmt.Sprintf("VIP status change: %s -> %s", ip, ud(up)))
 
 				if b != nil {
 					b.NLRI(ip, up)
@@ -203,7 +220,7 @@ func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.R
 	return vs
 }
 
-func multicast_recv(control *Control, instance byte, srvAddr string) {
+func multicast_recv(control *Control, instance byte, srvAddr string, isatty bool) {
 	maxDatagramSize := 1500
 
 	addr, err := net.ResolveUDPAddr("udp", srvAddr)
@@ -229,14 +246,18 @@ func multicast_recv(control *Control, instance byte, srvAddr string) {
 
 		//fmt.Println("RECEIVED", instance, buff)
 		if inst != instance {
-			fmt.Print(spin())
+			if isatty {
+				fmt.Print(spin())
+			}
 
 			for len(buff) >= core.FLOW_STATE {
 				control.UpdateFlow(buff)
 				buff = buff[core.FLOW_STATE:]
 			}
 		} else {
-			fmt.Print(pulse())
+			if isatty {
+				fmt.Print(pulse())
+			}
 		}
 
 	}
@@ -341,7 +362,8 @@ func parseIP(ip string) ([4]byte, bool) {
 }
 
 func simple() {
-	x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
+	//x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
+	x, e := xdp.Simple("enp130s0f1", BPF_O, "xdp_main")
 
 	type counter struct {
 		count uint64

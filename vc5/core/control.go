@@ -19,6 +19,7 @@
 package core
 
 import (
+	_ "embed"
 	"fmt"
 	"log"
 	"net"
@@ -26,7 +27,7 @@ import (
 	"time"
 	"unsafe"
 
-	"bpf"
+	//"bpf"
 	//"vc5/rendezvous"
 	//"vc5/stats"
 	"vc5/types"
@@ -181,7 +182,7 @@ func (c *Control) global_update() {
 
 }
 
-func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
+func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
 
 	var c Control
 
@@ -195,7 +196,7 @@ func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 		prog = "xdp_main_bridge"
 	}
 
-	x, e := xdp.LoadBpfFile(veth, bpf.BPF_bpf, prog, native, peth...)
+	x, e := xdp.LoadBpfFile(veth, bpf, prog, native, peth...)
 
 	if e != nil {
 		log.Fatal(e)
