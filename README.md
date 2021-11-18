@@ -18,6 +18,7 @@ It would be recommended to start out using a fresh virtual machine.
 First we need a development environment capable of building libbpf and Go binaries. Go 1.16 or later is needed due to using go:embed directives. On Ubuntu 20.04 this can be achieved with:
 
   `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.16 libyaml-perl libjson-perl ethtool bridge-utils`
+  
   `ln -s /usr/lib/go-1.16/bin/go /usr/local/bin/go`
 
 Copy the config.yaml file to vc5.yaml and edit appropriately for your routers/services/backends.
