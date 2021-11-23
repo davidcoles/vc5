@@ -126,6 +126,10 @@ struct interface {
 struct clocks {
     __u64 era;
     __u64 time;
+    __u32 ifindex;
+    __be32 ipaddr;
+    __u8 hwaddr[6];
+    __u8 pad[2];
 };
 
 struct vlan_hdr {
@@ -147,6 +151,7 @@ struct backend_rec {
     unsigned char hwaddr[6];
     __u16 vlan;
     __be32 rip;
+    __be32 pad;
 };
 
 /**********************************************************************/
@@ -192,12 +197,14 @@ struct bpf_map_def SEC("maps") interfaces = {
   .max_entries = 2,
 };
 
+/*
 struct bpf_map_def SEC("maps") service_backend = {
   .type        = BPF_MAP_TYPE_HASH,
   .key_size    = sizeof(struct service),
   .value_size  = sizeof(struct backend),
   .max_entries = MAX_SERVICES,
 };
+*/
 
 struct bpf_map_def SEC("maps") flows = {
   .type        = BPF_MAP_TYPE_LRU_HASH,
@@ -250,14 +257,14 @@ struct bpf_map_def SEC("maps") vip_rip_to_nat = {
 struct bpf_map_def SEC("maps") backend_recs = {
   .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
   .key_size    = sizeof(unsigned int),
-  .value_size  = 16,//sizeof(struct backend_rec),
+  .value_size  = sizeof(struct backend_rec),
   .max_entries = 256,
 };
 struct bpf_map_def SEC("maps") backend_idx = {
   .type        = BPF_MAP_TYPE_PERCPU_HASH,
   .key_size    = sizeof(struct service),
   .value_size  = (1<<IDX_BITS),
-  .max_entries = 256,
+  .max_entries = 16,
 };
 
 
@@ -366,7 +373,7 @@ static inline void push_flow_queue(struct flow *f, struct flow_state *s, struct 
       struct flow_state *fsp_fs = fsp+sizeof(struct flow);
       fsp_fs->era = 0;
       
-      if (bpf_map_push_elem(&flow_queue, &fs, 0) != 0) {
+      if ((bpf_map_push_elem(&flow_queue, &fs, 0) != 0) && statsp) {
         statsp->qfailed++;
        }
 }
@@ -447,7 +454,7 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     return bpf_map_lookup_elem(&backend_recs, &rec_idx);
 }
 
-static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip) {
+static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, int rx_bytes, int new) {
     struct vip_rip_port vrp;
     vrp.vip = ipv4->daddr;
     vrp.rip = rip;
@@ -456,10 +463,35 @@ static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *t
     
     struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
     if (counter) {
-	counter->new_flows++;
+	if(new) counter->new_flows++;
 	counter->rx_packets++;
 	counter->rx_bytes += rx_bytes;
     }
+}
+
+static __always_inline void save_state(struct iphdr *ipv4, struct tcphdr *tcp, struct backend_rec *rec) {
+    struct flow f;
+    f.src = ipv4->saddr;
+    f.dst = ipv4->daddr;
+    f.sport = tcp->source;
+    f.dport = tcp->dest;
+    
+    struct flow_state s;
+    memset(&s, 0, sizeof(s));
+    s.vlan = rec->vlan;
+    //s.era = era_now;
+    s.rip = rec->rip;
+    //s.time = wallclock_now;
+    maccpy(s.hwaddr, rec->hwaddr);
+    
+    bpf_map_update_elem(&flows, &f, &s, BPF_ANY);
+
+
+    struct flow_flow_state fs;
+    void *fsp = &fs;
+    memcpy(fsp, &f, sizeof(f));
+    memcpy(fsp+sizeof(f), &s, sizeof(s));       
+    //push_flow_queue(&f, &s, NULL);
 }
 
 
@@ -470,10 +502,18 @@ __u64 era_last = 0;
 __u64 wallclock = 0;
 const __u32 index0 = 0;
 
+//DEFCON1: will switch traffic without referring to state
+//DEFCON2: will switch traffic referencing existing state
+//DEFCON3: will create new state if syn|rst|fin flag not set
+//DEFCON4: will multicast state
+//DEFCON5: 
+const __u8 DEFCON = 5;
+
 static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 {
+    if(DEFCON == 0) return XDP_PASS; // C'est ne pas une load-balancer
+    
     __u64 start = bpf_ktime_get_ns();
-
     void *data_end = (void *)(long)ctx->data_end;
     void *data     = (void *)(long)ctx->data;
     int rx_bytes = data_end - data;
@@ -493,6 +533,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
     
     __u64 era_now = 0;
     __u64 wallclock_now = 0;
+
+
     if((era_last + 1000000000) < start) {
 	// 1s has passed since last era update - check for a new era
 	//__u64 *ts = bpf_map_lookup_elem(&clock, &index0);
@@ -512,7 +554,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	era_now = era;
 	wallclock_now = wallclock;
     }
-	  
     
     struct ethhdr *eth_hdr = data;
     __u32 nh_off = sizeof(struct ethhdr);
@@ -586,54 +627,10 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	return XDP_DROP;
     }
 
-
-    struct backend_rec *rec = NULL;
+    if(DEFCON <= 2) goto new_flow;
     
-    goto check_flow;
-    
-    rec = lookup_backend(ipv4, tcp);
-    if(rec) {
-	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-	maccpy(eth_hdr->h_dest, rec->hwaddr);
-
-	/*
-	struct vip_rip_port vrp;
-	vrp.vip = ipv4->daddr;
-	vrp.rip = rec->rip;
-	vrp.port = bpf_ntohs(tcp->dest);
-	vrp.pad = 0;
-	
-	struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
-	if (counter) {
-	    counter->new_flows++;
-	    counter->rx_packets++;
-	    counter->rx_bytes += rx_bytes;
-	}
-	*/
-	
-	statsp->fp_count++;
-	statsp->fp_time += (bpf_ktime_get_ns()-start);
-	
-	return XDP_TX;
-    }
-    goto nat_stuff;
-    
-        
-    struct flow f;
-    goto check_flow;
- check_flow:
-    
-    
-
-
-    f.src = ipv4->saddr;
-    f.dst = ipv4->daddr;
-    f.sport = tcp->source;
-    f.dport = tcp->dest;
-    //f.pad = 0;
-
+    struct flow f = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = tcp->source, .dport = tcp->dest };
     struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
-    
     if (fs) {
 	
 	// If we receive a SYN then we should start a new flow
@@ -645,198 +642,154 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	if (tcp->syn == 1) {
 	    //bpf_map_delete_elem(&flows, &f);
 	    //goto new_flow;
-	  if ((fs->time + 60) < wallclock_now) {
-	      bpf_map_delete_elem(&flows, &f);
-	      goto new_flow;
-	  }
-	  // otherwise clear conn tracking fields
-	  fs->era = era_now - 1;
-	  fs->finrst = 0;
-	  statsp->new_flows++;
-      }
-
-      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-      maccpy(eth_hdr->h_dest, fs->hwaddr);
-
-      if(tag != NULL) {
-	  tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (fs->vlan & bpf_htons(0x0fff));	  
-      }
-      
-      struct vip_rip_port vrp;
-      vrp.vip = ipv4->daddr;
-      vrp.rip = fs->rip;
-      vrp.port = bpf_ntohs(tcp->dest);
-      vrp.pad = 0; // must be 0 for regular counters
-          
-      struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
-      if (counter) {
-	  counter->rx_packets++;
-	  counter->rx_bytes += rx_bytes;
-	  if (tcp->syn == 1) {
-	      counter->new_flows++;
-	  }
-      }
-
-      // reuse pad field for concurrency counter selection
-      vrp.pad = era_now % 2;
-      
-      if (fs->finrst == 0 && ((tcp->rst == 1) || (tcp->fin == 1))) {
-	  fs->finrst = 10;
-      } else {
-	  if (fs->finrst > 0) {
-	      (fs->finrst)--;
-	  }
-      }
-
-      __s32 *concurrent = NULL;      
-      if (fs->era != era_now) {
-	  if((fs->era + 1) != era_now) {
-	      // probably transferred from a peer lb - correct it
-	      fs->era = era_now;
-	  } else {		  
-	      fs->era = era_now;
-	      
-	      switch(fs->finrst) {
-	      case 10:
-		  break;
-	      case 0:
-		  concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
-		  if(concurrent) (*concurrent)++;
-		  break;
-	      }
-	  }
-      } else {
-	  switch(fs->finrst) {
-	  case 10:
-	      concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
-	      if(concurrent) (*concurrent)--;
-	      break;
-	  case 0:
-	      break;
-	  }
-      }
-      
-      
-      if (fs->time > wallclock_now) {
-	  fs->time = wallclock_now - (tcp->ack_seq % 11);
-      } else if ((fs->time + 60) <  wallclock_now) {
-	  fs->time = wallclock_now - (tcp->ack_seq % 7);
-	  push_flow_queue(&f, fs, statsp);	      
-      }
-      
-      statsp->fp_count++;
-      statsp->fp_time += (bpf_ktime_get_ns()-start);
-
-      return XDP_TX;      
-  }
+	    if ((fs->time + 60) < wallclock_now) {
+		bpf_map_delete_elem(&flows, &f);
+		goto new_flow;
+	    }
+	    // otherwise clear conn tracking fields
+	    fs->era = era_now - 1;
+	    fs->finrst = 0;
+	    statsp->new_flows++;
+	}
+	
+	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+	maccpy(eth_hdr->h_dest, fs->hwaddr);
+	
+	if(tag != NULL) {
+	    tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (fs->vlan & bpf_htons(0x0fff));	  
+	}
+	
+	struct vip_rip_port vrp;
+	vrp.vip = ipv4->daddr;
+	vrp.rip = fs->rip;
+	vrp.port = bpf_ntohs(tcp->dest);
+	vrp.pad = 0; // must be 0 for regular counters
+	
+	struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
+	if (counter) {
+	    counter->rx_packets++;
+	    counter->rx_bytes += rx_bytes;
+	    if (tcp->syn == 1) {
+		counter->new_flows++;
+	    }
+	}
+	
+	// reuse pad field for concurrency counter selection
+	vrp.pad = era_now % 2;
+	
+	if (fs->finrst == 0 && ((tcp->rst == 1) || (tcp->fin == 1))) {
+	    fs->finrst = 10;
+	} else {
+	    if (fs->finrst > 0) {
+		(fs->finrst)--;
+	    }
+	}
+	
+	__s32 *concurrent = NULL;      
+	if (fs->era != era_now) {
+	    if((fs->era + 1) != era_now) {
+		// probably transferred from a peer lb - correct it
+		fs->era = era_now;
+	    } else {		  
+		fs->era = era_now;
+		
+		switch(fs->finrst) {
+		case 10:
+		    break;
+		case 0:
+		    concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+		    if(concurrent) (*concurrent)++;
+		    break;
+		}
+	    }
+	} else {
+	    switch(fs->finrst) {
+	    case 10:
+		concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+		if(concurrent) (*concurrent)--;
+		break;
+	    case 0:
+		break;
+	    }
+	}
+	
+	
+	if (fs->time > wallclock_now) {
+	    fs->time = wallclock_now - (tcp->ack_seq % 11);
+	} else if ((fs->time + 60) <  wallclock_now) {
+	    fs->time = wallclock_now - (tcp->ack_seq % 7);
+	    if(DEFCON > 4) push_flow_queue(&f, fs, statsp);	      
+	}
+	
+	statsp->fp_count++;
+	statsp->fp_time += (bpf_ktime_get_ns()-start);
+	
+	return XDP_TX;      
+    }
+    
   
-  struct backend *b;
-  struct service s;
+    //struct backend *b;
+    //struct service s;
+    struct backend_rec *rec;    
+
  new_flow:
-  s.vip = ipv4->daddr;
-  s.port = tcp->dest;
-  s.pad = 0;
+    
+    rec = lookup_backend(ipv4, tcp);
+    if(rec) {
+	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+	maccpy(eth_hdr->h_dest, rec->hwaddr);
+	
+	// if tagged with a vlan, update it
+	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));
+	
+	if(DEFCON >= 4) save_state(ipv4, tcp, rec);
+	
+	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4));
+	
+	if(DEFCON >= 4) statsp->new_flows++;
+	statsp->fp_count++;
+	statsp->fp_time += (bpf_ktime_get_ns()-start);
+	
+	return XDP_TX;
+    }
+    goto nat_stuff;
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   
-  b = bpf_map_lookup_elem(&service_backend, &s);
-  if (b) {
-      struct tuple t;
-      t.src = ipv4->saddr;
-      t.dst = ipv4->daddr;
-      t.sport = tcp->source;
-      t.dport = tcp->dest;
-      t.protocol = IPPROTO_TCP;
-      t.pad[0] = 0;
-      t.pad[1] = 0;
-      t.pad[2] = 0;      
-      
-      __u16 n = sdbm((unsigned char*) &t, sizeof(t));
-
-      n = n & ((1<<IDX_BITS)-1);
-      /*
-      __u8 *foo = bpf_map_lookup_elem(&backend_idx, &s);
-      if(foo != NULL) {
-	  __u16 y = n & 0x1fff;
-	  __u8 c = foo[y];
-	  y = c;
-      }
-      */
-      
-      struct mac *m = (struct mac *) b->hwaddr[n];
-      __be32 *rip = (__be32 *) (b->hwaddr[n] + 6);
-      __be16 *vlan = (__be16 *) (b->hwaddr[n] + 10);
-
-      // test for a "least-conns" type backend predictor
-      if((n % 256) < (b->weight)) {
-	  m = (struct mac *) b->least;
-	  rip = (__be32 *) (b->least + 6);
-	  vlan = (__be16 *) (b->least + 10);
-      }
-      
-      if (!maccmp((unsigned char *)m, nulmac)) {
-	  return XDP_DROP;
-      }
-
-      // rewrite ethernet header
-      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-      maccpy(eth_hdr->h_dest, (unsigned char *) m);
-
-      // if tagged with a vlan, update it
-      if(tag != NULL) {
-	  //tag->h_tci = *vlan;
-	  tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (*vlan & bpf_htons(0x0fff));
-      }
-
-      struct flow f;
-      f.src = ipv4->saddr;
-      f.dst = ipv4->daddr;
-      f.sport = tcp->source;
-      f.dport = tcp->dest;
-      
-      struct flow_state s;
-      memset(&s, 0, sizeof(s));
-      s.vlan = *vlan;
-      s.era = era_now;
-      s.rip = *rip;
-      s.time = wallclock_now;
-      maccpy(s.hwaddr, (unsigned char *) m);      
-
-      struct vip_rip_port vrp;
-      vrp.vip = ipv4->daddr;
-      vrp.rip = *rip;
-      vrp.port = bpf_ntohs(tcp->dest);
-      vrp.pad = 0;
-
-      struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
-      if (counter) {
-	  counter->new_flows++;
-	  counter->rx_packets++;
-	  counter->rx_bytes += rx_bytes;
-      }
-
-      vrp.pad = era_now % 2;
-      __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
-      if(concurrent) (*concurrent)++;
-      
-      //maccpy(s.hwaddr, (unsigned char *) m);
-
-      bpf_map_update_elem(&flows, &f, &s, BPF_ANY);
-      
-      //////////////////////////////////////////////////////////////////////
-      
-      struct flow_flow_state fs;
-      void *fsp = &fs;
-      memcpy(fsp, &f, sizeof(f));
-      memcpy(fsp+sizeof(f), &s, sizeof(s)); 
-      
-      push_flow_queue(&f, &s, statsp);
-
-      statsp->new_flows++;
-      statsp->fp_count++;
-      statsp->fp_time += (bpf_ktime_get_ns()-start);
-
-      return XDP_TX;
-  }
-
 
   __be32 *rip = NULL;
 
@@ -954,3 +907,105 @@ struct xdp_md {
 	__u32 rx_queue_index;  // rxq->queue_index
 };
 */
+
+
+
+
+/* old new flow code */
+  /*
+  s.vip = ipv4->daddr;
+  s.port = tcp->dest;
+  s.pad = 0;
+  
+  b = bpf_map_lookup_elem(&service_backend, &s);
+  if (b) {
+      struct tuple t;
+      t.src = ipv4->saddr;
+      t.dst = ipv4->daddr;
+      t.sport = tcp->source;
+      t.dport = tcp->dest;
+      t.protocol = IPPROTO_TCP;
+      t.pad[0] = 0;
+      t.pad[1] = 0;
+      t.pad[2] = 0;      
+      
+      __u16 n = sdbm((unsigned char*) &t, sizeof(t));
+
+      //n = n & ((1<<IDX_BITS)-1);
+      
+      struct mac *m = (struct mac *) b->hwaddr[n];
+      __be32 *rip = (__be32 *) (b->hwaddr[n] + 6);
+      __be16 *vlan = (__be16 *) (b->hwaddr[n] + 10);
+
+      // test for a "least-conns" type backend predictor
+      if((n % 256) < (b->weight)) {
+	  m = (struct mac *) b->least;
+	  rip = (__be32 *) (b->least + 6);
+	  vlan = (__be16 *) (b->least + 10);
+      }
+      
+      if (!maccmp((unsigned char *)m, nulmac)) {
+	  return XDP_DROP;
+      }
+
+      // rewrite ethernet header
+      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+      maccpy(eth_hdr->h_dest, (unsigned char *) m);
+
+      // if tagged with a vlan, update it
+      if(tag != NULL) {
+	  //tag->h_tci = *vlan;
+	  tag->h_tci = (tag->h_tci & bpf_htons(0xf000)) | (*vlan & bpf_htons(0x0fff));
+      }
+
+      struct flow f;
+      f.src = ipv4->saddr;
+      f.dst = ipv4->daddr;
+      f.sport = tcp->source;
+      f.dport = tcp->dest;
+      
+      struct flow_state s;
+      memset(&s, 0, sizeof(s));
+      s.vlan = *vlan;
+      s.era = era_now;
+      s.rip = *rip;
+      s.time = wallclock_now;
+      maccpy(s.hwaddr, (unsigned char *) m);      
+
+      struct vip_rip_port vrp;
+      vrp.vip = ipv4->daddr;
+      vrp.rip = *rip;
+      vrp.port = bpf_ntohs(tcp->dest);
+      vrp.pad = 0;
+
+      struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
+      if (counter) {
+	  counter->new_flows++;
+	  counter->rx_packets++;
+	  counter->rx_bytes += rx_bytes;
+      }
+
+      vrp.pad = era_now % 2;
+      __s32 *concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+      if(concurrent) (*concurrent)++;
+      
+      //maccpy(s.hwaddr, (unsigned char *) m);
+
+      bpf_map_update_elem(&flows, &f, &s, BPF_ANY);
+      
+      //////////////////////////////////////////////////////////////////////
+      
+      struct flow_flow_state fs;
+      void *fsp = &fs;
+      memcpy(fsp, &f, sizeof(f));
+      memcpy(fsp+sizeof(f), &s, sizeof(s)); 
+      
+      push_flow_queue(&f, &s, statsp);
+
+      statsp->new_flows++;
+      statsp->fp_count++;
+      statsp->fp_time += (bpf_ktime_get_ns()-start);
+
+      return XDP_TX;
+  }
+  */

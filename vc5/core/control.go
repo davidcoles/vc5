@@ -161,8 +161,12 @@ func (c *Control) global_update() {
 	c.era = 0
 
 	type clocks struct {
-		era  uint64
-		time uint64
+		era     uint64
+		time    uint64
+		ifindex uint32
+		ipaddr  IP4
+		mac     MAC
+		pad     [2]byte
 	}
 
 	var clock clocks
@@ -207,11 +211,11 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.xdp = x
 
 	c.interfaces = c.find_map("interfaces", 4, 16)
-	c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
+	//c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
-	c.clocks = c.find_map("clocks", 4, 16)
+	c.clocks = c.find_map("clocks", 4, 32)
 	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", 12, 8*6)
 	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", 12, 4)
 	c.stats = c.find_map("stats", 4, 8*6)
@@ -249,13 +253,6 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 //vip/rip->nat
 
 func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint8) {
-	/*
-		type rec struct {
-			mac  MAC
-			vlan uint16
-			rip  IP4
-		}
-	*/
 	type rec = [16]byte
 	i := uint32(idx)
 
@@ -323,19 +320,21 @@ func (c *Control) SetRip(rip IP4) {
 }
 
 func (c *Control) SetBackends(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
-	var s service
-	s.vip = vip
-	s.port[0] = byte((port >> 8) & 0xff)
-	s.port[1] = byte(port & 0xff)
+	if false {
+		var s service
+		s.vip = vip
+		s.port[0] = byte((port >> 8) & 0xff)
+		s.port[1] = byte(port & 0xff)
 
-	type bes struct {
-		backends [65536][12]byte
-		least    [12]byte
-		weight   byte
+		type bes struct {
+			backends [65536][12]byte
+			least    [12]byte
+			weight   byte
+		}
+
+		be := bes{backends: backends, least: least, weight: weight}
+		xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&be), xdp.BPF_ANY)
 	}
-
-	be := bes{backends: backends, least: least, weight: weight}
-	xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&be), xdp.BPF_ANY)
 }
 
 func (c *Control) ReadMAC(ip IP4) *MAC {
