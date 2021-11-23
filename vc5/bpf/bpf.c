@@ -447,6 +447,22 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     return bpf_map_lookup_elem(&backend_recs, &rec_idx);
 }
 
+static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip) {
+    struct vip_rip_port vrp;
+    vrp.vip = ipv4->daddr;
+    vrp.rip = rip;
+    vrp.port = bpf_ntohs(tcp->dest);
+    vrp.pad = 0;
+    
+    struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
+    if (counter) {
+	counter->new_flows++;
+	counter->rx_packets++;
+	counter->rx_bytes += rx_bytes;
+    }
+}
+
+
 unsigned char nulmac[6] = {0,0,0,0,0,0};
 
 __u64 era = 0;
@@ -579,7 +595,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
     if(rec) {
 	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
 	maccpy(eth_hdr->h_dest, rec->hwaddr);
-	
+
+	/*
 	struct vip_rip_port vrp;
 	vrp.vip = ipv4->daddr;
 	vrp.rip = rec->rip;
@@ -592,6 +609,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	    counter->rx_packets++;
 	    counter->rx_bytes += rx_bytes;
 	}
+	*/
 	
 	statsp->fp_count++;
 	statsp->fp_time += (bpf_ktime_get_ns()-start);
