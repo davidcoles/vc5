@@ -57,6 +57,13 @@ type update struct {
 	up  bool
 }
 
+type hwaddr struct {
+	idx  uint16
+	mac  MAC
+	vlan uint16
+	rip  IP4
+}
+
 func (p *Probes) ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
 	go p.ManageVip(service, vs, sc)
 }
@@ -136,6 +143,20 @@ func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters
 			nalive = uint(len(live))
 			//fmt.Println(vip, port, stats, live, nalive)
 			logs.INFO(fmt.Sprint(vip, port, stats, live, nalive))
+
+			ips := make(map[[4]byte]uint8)
+			for _, b := range live {
+				m := MAC{b[0], b[1], b[2], b[3], b[4], b[5]}
+				r := IP4{b[6], b[7], b[8], b[9]}
+				if i, ok := p.backend[r]; ok {
+					fmt.Println(r, m, i)
+					c.SetBackendRec(r, m, 0, i)
+					ips[r] = i
+				}
+			}
+			x, s := rendezvous.RipIndex(ips)
+			fmt.Println(s, x[0:32])
+			c.SetBackendIdx(vip, port, x)
 		}
 
 		if service.Need > 0 {
@@ -390,10 +411,11 @@ func ping(ip IP4) {
 type Probes struct {
 	control *Control
 	logger  *logger.Logger
+	backend map[IP4]uint8
 }
 
-func Manage(c *Control, l *logger.Logger) *Probes {
-	p := Probes{control: c, logger: l}
+func Manage(c *Control, l *logger.Logger, b map[IP4]uint8) *Probes {
+	p := Probes{control: c, logger: l, backend: b}
 	return &p
 }
 

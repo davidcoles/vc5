@@ -12,6 +12,11 @@ type IP4 [4]byte
 type IP6 [16]byte
 type MAC [6]byte
 
+//type IP4s []IP4
+//func (h IP4s) Len() int           { return len(h) }
+//func (h IP4s) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+//func (h IP4s) Less(i, j int) bool { return cmpb12(h[i], h[j]) == -1 }
+
 type RHI struct {
 	Ip IP4
 	Up bool

@@ -130,7 +130,11 @@ func main() {
 	}
 	ss := stats.Server(ws, logs)
 
-	p := probes.Manage(c, logs)
+	for r, i := range config.Reals {
+		c.SetBackendRec(r, [6]byte{}, 0, i)
+	}
+
+	p := probes.Manage(c, logs, config.Reals)
 
 	p.GlobalStats(ss.Counters())
 

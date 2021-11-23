@@ -73,7 +73,7 @@ func (c *raw_counters) add(r raw_counters) {
 const FLOW = 12
 const STATE = 32
 const FLOW_STATE = FLOW + STATE
-const MAX_CPU = 256
+const MAX_CPU = 32
 const INTERVAL = 5
 
 type Control struct {
@@ -92,6 +92,8 @@ type Control struct {
 	stats                   int
 	flow_queue              int
 	flows                   int
+	backend_recs            int
+	backend_idx             int
 
 	//// logger *logger
 
@@ -215,6 +217,8 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.stats = c.find_map("stats", 4, 8*6)
 	c.flow_queue = c.find_map("flow_queue", 0, FLOW_STATE)
 	c.flows = c.find_map("flows", FLOW, STATE)
+	c.backend_recs = c.find_map("backend_recs", 4, 16)
+	c.backend_idx = c.find_map("backend_idx", 8, 8192)
 
 	if p, err := net.InterfaceByName(peth[0]); err != nil {
 		fmt.Println(peth, err)
@@ -243,6 +247,49 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 
 //nat->vip/rip
 //vip/rip->nat
+
+func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint8) {
+	/*
+		type rec struct {
+			mac  MAC
+			vlan uint16
+			rip  IP4
+		}
+	*/
+	type rec = [16]byte
+	i := uint32(idx)
+
+	//r := rec{mac: mac, vlan: vlan, rip: rip}
+	var r rec
+	copy(r[0:], mac[:])
+	copy(r[8:], rip[:])
+
+	var recs [MAX_CPU * 16]byte
+
+	for n := 0; n < MAX_CPU; n++ {
+		copy(recs[(n*16):], r[:])
+	}
+
+	if xdp.BpfMapUpdateElem(c.backend_recs, uP(&i), uP(&recs), xdp.BPF_ANY) != 0 {
+		panic("c.backend_recs")
+	}
+}
+
+func (c *Control) SetBackendIdx(vip IP4, port uint16, idx [8192]uint8) {
+	var s service
+	s.vip = vip
+	s.port[0] = byte((port >> 8) & 0xff)
+	s.port[1] = byte(port & 0xff)
+
+	var idxs [MAX_CPU][8192]uint8
+
+	for n := 0; n < len(idxs); n++ {
+		idxs[n] = idx
+	}
+	if xdp.BpfMapUpdateElem(c.backend_idx, uP(&s), uP(&idxs), xdp.BPF_ANY) != 0 {
+		panic("c.backend_idx")
+	}
+}
 
 func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16) {
 

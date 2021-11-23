@@ -143,6 +143,12 @@ struct vip_rip_src_if {
     __be16 vlan;
 };
 
+struct backend_rec {
+    unsigned char hwaddr[6];
+    __u16 vlan;
+    __be32 rip;
+};
+
 /**********************************************************************/
 /* MAPS */
 /**********************************************************************/
@@ -238,6 +244,22 @@ struct bpf_map_def SEC("maps") vip_rip_to_nat = {
         .max_entries = 1024,
         .map_flags = 0,
 };
+
+
+#define IDX_BITS 13
+struct bpf_map_def SEC("maps") backend_recs = {
+  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
+  .key_size    = sizeof(unsigned int),
+  .value_size  = 16,//sizeof(struct backend_rec),
+  .max_entries = 256,
+};
+struct bpf_map_def SEC("maps") backend_idx = {
+  .type        = BPF_MAP_TYPE_PERCPU_HASH,
+  .key_size    = sizeof(struct service),
+  .value_size  = (1<<IDX_BITS),
+  .max_entries = 256,
+};
+
 
 /*
 struct bpf_map_def SEC("maps") tx_port = {
@@ -400,6 +422,31 @@ static __always_inline int vlan_pop(struct xdp_md *ctx) {
     return 0;
 }
 
+static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, struct tcphdr *tcp) {
+    struct service serv;
+    serv.vip = ipv4->daddr;
+    serv.port = tcp->dest;
+    serv.pad = 0;
+    
+    __u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
+    if(!idx) {
+	return NULL;
+    }
+    struct tuple t;
+    t.src = ipv4->saddr;
+    t.dst = ipv4->daddr;
+    t.sport = tcp->source;
+    t.dport = tcp->dest;
+    t.protocol = IPPROTO_TCP;
+    t.pad[0] = 0;
+    t.pad[1] = 0;
+    t.pad[2] = 0;      
+    __u16 n = sdbm((unsigned char*) &t, sizeof(t));
+    
+    unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
+    return bpf_map_lookup_elem(&backend_recs, &rec_idx);
+}
+
 unsigned char nulmac[6] = {0,0,0,0,0,0};
 
 __u64 era = 0;
@@ -522,15 +569,51 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
     if (data + nh_off > data_end) {
 	return XDP_DROP;
     }
+
+
+    struct backend_rec *rec = NULL;
     
+    goto check_flow;
+    
+    rec = lookup_backend(ipv4, tcp);
+    if(rec) {
+	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+	maccpy(eth_hdr->h_dest, rec->hwaddr);
+	
+	struct vip_rip_port vrp;
+	vrp.vip = ipv4->daddr;
+	vrp.rip = rec->rip;
+	vrp.port = bpf_ntohs(tcp->dest);
+	vrp.pad = 0;
+	
+	struct counter *counter = bpf_map_lookup_elem(&vip_rip_port_counters, &vrp);
+	if (counter) {
+	    counter->new_flows++;
+	    counter->rx_packets++;
+	    counter->rx_bytes += rx_bytes;
+	}
+	
+	statsp->fp_count++;
+	statsp->fp_time += (bpf_ktime_get_ns()-start);
+	
+	return XDP_TX;
+    }
+    goto nat_stuff;
+    
+        
     struct flow f;
+    goto check_flow;
+ check_flow:
+    
+    
+
+
     f.src = ipv4->saddr;
     f.dst = ipv4->daddr;
     f.sport = tcp->source;
     f.dport = tcp->dest;
     //f.pad = 0;
-    
-    
+
     struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
     
     if (fs) {
@@ -649,6 +732,17 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
       t.pad[2] = 0;      
       
       __u16 n = sdbm((unsigned char*) &t, sizeof(t));
+
+      n = n & ((1<<IDX_BITS)-1);
+      /*
+      __u8 *foo = bpf_map_lookup_elem(&backend_idx, &s);
+      if(foo != NULL) {
+	  __u16 y = n & 0x1fff;
+	  __u8 c = foo[y];
+	  y = c;
+      }
+      */
+      
       struct mac *m = (struct mac *) b->hwaddr[n];
       __be32 *rip = (__be32 *) (b->hwaddr[n] + 6);
       __be16 *vlan = (__be16 *) (b->hwaddr[n] + 10);
@@ -726,16 +820,20 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
   }
 
 
+  __be32 *rip = NULL;
+
+  goto nat_stuff;
+  nat_stuff:
+ 
+  
+  rip = bpf_map_lookup_elem(&mac_to_rip, &(eth_hdr->h_source));
+
 
   struct interface *virif = bpf_map_lookup_elem(&interfaces, &index0);
   if (!virif || !maccmp(virif->hwaddr, nulmac)) {
       return XDP_PASS;
   }
 
-  //nat_stuff:
-
-  
-  __be32 *rip = bpf_map_lookup_elem(&mac_to_rip, &(eth_hdr->h_source));
   if (rip) {
       struct viprip vr0;
       vr0.vip = ipv4->saddr;

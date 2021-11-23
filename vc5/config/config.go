@@ -20,6 +20,7 @@ package config
 
 import (
 	"encoding/json"
+	//"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -57,6 +58,7 @@ type Real struct {
 	Nat   IP4         `json:"nat"`
 	VLan  uint16      `json:"vlan,omitempty"`
 	Src   IP4         `json:"src"`
+	Idx   uint8
 }
 
 type Service struct {
@@ -77,6 +79,7 @@ type Config struct {
 	Peers     []string          `json:"peers"`
 	RHI       RHI               `json:"rhi"`
 	VLans     map[string]uint16 `json:"vlans"`
+	Reals     map[IP4]uint8
 }
 
 type RHI struct {
@@ -135,7 +138,9 @@ func fix_vlan(config *Config) {
 
 func fix_nat(config *Config) {
 	// fix up nat addresses - assign a unique nat address for each vip/nat tuple
-	i := 0
+	var i uint16
+	config.Reals = make(map[IP4]uint8)
+
 	vr_to_n := make(map[[8]byte][4]byte)
 
 	for _, s := range config.Services {
@@ -152,8 +157,13 @@ func fix_nat(config *Config) {
 				vr_to_n[vr] = nat
 				i++
 			}
+
+			if _, ok := config.Reals[rip]; !ok {
+				config.Reals[rip] = uint8(len(config.Reals))
+			}
 		}
 	}
+
 }
 
 func parseIP(ip string) ([4]byte, bool) {
