@@ -321,7 +321,8 @@ func (p *Probes) healthcheckBackend_(vip IP4, port uint16, nat, rip IP4, checks 
 		}
 
 		for _, c := range checks.Https {
-			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), "") {
+			fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
+			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
 				ok = false
 			}
 		}
