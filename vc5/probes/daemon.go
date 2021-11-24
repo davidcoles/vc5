@@ -179,6 +179,7 @@ func httpget(scheme string, address string, port string, url string, expect stri
 
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, y, z string) (net.Conn, error) {
+			fmt.Println("dial:", conn, hostname, uri)
 			return net.Dial("tcp", address+":"+port)
 		},
 		Dial: (&net.Dialer{
@@ -203,7 +204,7 @@ func httpget(scheme string, address string, port string, url string, expect stri
 		uri = fmt.Sprintf("%s://%s:%s/%s", scheme, hostname, port, url)
 	}
 
-	fmt.Println(hostname, uri)
+	fmt.Println("get: ", hostname, uri)
 
 	resp, err := client.Get(uri)
 
