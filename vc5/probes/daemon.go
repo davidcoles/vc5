@@ -109,8 +109,8 @@ func check_client(c *check) bool {
 
 func Serve(netns string) {
 	for {
-		//exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH).Output()
-		exec.Command("/bin/sh", "-c", "ip netns exec vc5 ./vc5 /run/vc5.sock >/tmp/vc5.log 2>&1").Output()
+		exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH).Output()
+		//exec.Command("/bin/sh", "-c", "ip netns exec vc5 ./vc5 /run/vc5.sock >/tmp/vc5.log 2>&1").Output()
 		time.Sleep(1 * time.Second)
 	}
 }
