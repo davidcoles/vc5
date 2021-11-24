@@ -233,6 +233,9 @@ func ___httpget(scheme string, address string, port string, url string, expect s
 		client = &http.Client{
 			Timeout:   time.Second * 3,
 			Transport: transport,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		}
 	}
 
