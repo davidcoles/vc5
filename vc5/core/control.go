@@ -80,7 +80,9 @@ type Control struct {
 	xdp      *xdp.XDP_
 	era      uint64
 	interval uint8
+	defcon   uint8
 
+	settings                int
 	interfaces              int
 	service_backend         int
 	rip_to_mac              int
@@ -156,20 +158,46 @@ func (c *Control) find_map(name string, ks int, rs int) int {
 	return m
 }
 
+func (c *Control) Defcon(d uint8) uint8 {
+	if d != 0 {
+		c.defcon = d
+	}
+	return c.defcon
+}
+
 func (c *Control) global_update() {
 	var zero uint32 = 0
 	c.era = 0
 
+	type settings struct {
+		era    uint64  //__u64 era;
+		time   uint64  //__u64 time;
+		pad    [7]byte //__u8 pad[7];
+		defcon uint8   //__u8 defcon;
+	}
+
+	go func() {
+		for {
+			var s settings
+			s.defcon = c.defcon
+			var settings [MAX_CPU]settings
+			for i, _ := range settings {
+				settings[i] = s
+			}
+			xdp.BpfMapUpdateElem(c.settings, uP(&zero), uP(&settings), xdp.BPF_ANY)
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
 	type clocks struct {
-		era     uint64
-		time    uint64
-		ifindex uint32
-		ipaddr  IP4
-		mac     MAC
-		pad     [2]byte
+		era    uint64
+		time   uint64
+		defcon uint8
+		pad    [7]byte
 	}
 
 	var clock clocks
+	clock.defcon = 1
 
 	go func() {
 		for {
@@ -209,13 +237,15 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	}
 
 	c.xdp = x
+	c.defcon = 5
 
+	c.settings = c.find_map("settings", 4, 24)
 	c.interfaces = c.find_map("interfaces", 4, 16)
 	//c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
-	c.clocks = c.find_map("clocks", 4, 32)
+	c.clocks = c.find_map("clocks", 4, 24)
 	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", 12, 8*6)
 	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", 12, 4)
 	c.stats = c.find_map("stats", 4, 8*6)

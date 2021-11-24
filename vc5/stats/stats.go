@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"strings"
 
+	"vc5/core"
 	"vc5/logger"
 	"vc5/types"
 )
@@ -62,9 +63,9 @@ type SServer struct {
 	countersc  chan counters
 }
 
-func Server(addr string, logs *logger.Logger) *SServer {
+func Server(addr string, logs *logger.Logger, c *core.Control) *SServer {
 	ss := SServer{rhic: make(chan types.RHI, 100), scountersc: make(chan scounters, 100), countersc: make(chan counters, 100)}
-	go Server_(addr, ss.rhic, ss.scountersc, ss.countersc, logs)
+	go Server_(addr, ss.rhic, ss.scountersc, ss.countersc, logs, c)
 	return &ss
 }
 
@@ -72,7 +73,7 @@ func (s *SServer) RHI() chan types.RHI       { return s.rhic }
 func (s *SServer) Counters() chan counters   { return s.countersc }
 func (s *SServer) Scounters() chan scounters { return s.scountersc }
 
-func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, countersc chan counters, logs *logger.Logger) {
+func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, countersc chan counters, logs *logger.Logger, c *core.Control) {
 
 	var js []byte = []byte("{}")
 
@@ -151,6 +152,28 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 		w.Write(metrics)
+	})
+
+	http.HandleFunc("/defcon/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+
+		if len(r.RequestURI) == 9 {
+			switch r.RequestURI[8] {
+			case '1':
+				c.Defcon(1)
+			case '2':
+				c.Defcon(2)
+			case '3':
+				c.Defcon(3)
+			case '4':
+				c.Defcon(4)
+			case '5':
+				c.Defcon(5)
+			}
+		}
+
+		w.Write([]byte(fmt.Sprintln("DEFCON:", c.Defcon(0))))
 	})
 
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {

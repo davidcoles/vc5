@@ -128,7 +128,7 @@ func main() {
 	if config.Webserver != "" {
 		ws = config.Webserver
 	}
-	ss := stats.Server(ws, logs)
+	ss := stats.Server(ws, logs, c)
 
 	for r, i := range config.Reals {
 		c.SetBackendRec(r, [6]byte{}, 0, i)

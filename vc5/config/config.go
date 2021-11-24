@@ -38,6 +38,7 @@ type HttpCheck struct {
 	Path   string `json:"path"`
 	Port   uint16 `json:"port"'`
 	Expect uint32 `json:"expect"`
+	Host   string `json:"host"`
 }
 
 type TcpCheck struct {

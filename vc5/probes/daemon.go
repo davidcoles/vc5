@@ -44,19 +44,19 @@ type result struct {
 
 const PATH = "/run/vc5.sock"
 
-func HTTPCheck(ip IP4, port uint16, path string, expect int) bool {
-	return _HTTPCheck("http", ip, port, path, expect)
+func HTTPCheck(ip IP4, port uint16, path string, expect int, host string) bool {
+	return _HTTPCheck("http", ip, port, path, expect, host)
 }
 
-func HTTPSCheck(ip IP4, port uint16, path string, expect int) bool {
-	return _HTTPCheck("https", ip, port, path, expect)
+func HTTPSCheck(ip IP4, port uint16, path string, expect int, host string) bool {
+	return _HTTPCheck("https", ip, port, path, expect, host)
 }
 
-func _HTTPCheck(scheme string, ip IP4, port uint16, path string, expect int) bool {
+func _HTTPCheck(scheme string, ip IP4, port uint16, path string, expect int, host string) bool {
 	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 	p := fmt.Sprintf("%d", port)
 	r := fmt.Sprintf("%d", expect)
-	c := &check{Type: scheme, Args: []string{a, p, path, r}}
+	c := &check{Type: scheme, Args: []string{a, p, path, r, host}}
 	return check_client(c)
 }
 
@@ -137,9 +137,9 @@ func Daemon(path string) {
 
 		switch c.Type {
 		case "http":
-			ok = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3])
+			ok = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
 		case "https":
-			ok = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3])
+			ok = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
 		case "tcp":
 			ok = tcpdial(c.Args[0], c.Args[1])
 		}
@@ -174,7 +174,49 @@ func tcpdial(addr string, port string) bool {
 	return true
 }
 
-func httpget(scheme string, address string, port string, url string, expect string) bool {
+func httpget(scheme string, address string, port string, url string, expect string, hostname string) bool {
+
+	transport := &http.Transport{
+		DialContext: func(_ context.Context, y, z string) (net.Conn, error) {
+			return net.Dial("tcp", address+":"+port)
+		},
+		Dial: (&net.Dialer{
+			Timeout: 2 * time.Second,
+		}).Dial,
+		TLSHandshakeTimeout: 1 * time.Second,
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client := &http.Client{
+		Timeout:   time.Second * 3,
+		Transport: transport,
+	}
+
+	client.CloseIdleConnections()
+
+	uri := fmt.Sprintf("%s://%s:%s/%s", scheme, address, port, url)
+	if hostname != "" {
+		uri = fmt.Sprintf("%s://%s:%s/%s", scheme, hostname, port, url)
+	}
+
+	resp, err := client.Get(uri)
+
+	if err != nil {
+		return false
+	}
+
+	defer resp.Body.Close()
+
+	sc := fmt.Sprintf("%d", resp.StatusCode)
+
+	if sc != expect {
+		return false
+	}
+
+	return true
+}
+
+func ___httpget(scheme string, address string, port string, url string, expect string) bool {
 
 	if client == nil {
 		transport := &http.Transport{

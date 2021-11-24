@@ -79,13 +79,15 @@ sub services {
 		    my $url = $c->{'path'};
 		    my $exp = defined $c->{'expect'} ? $c->{'expect'} : 200;
 		    my $prt = defined $c->{'port'} ? $c->{'port'} : $port;
-		    push(@http, {'method' => 'GET', 'path' => $url, 'expect' => $exp+0, 'port' => $prt+0});
+		    my $hst = defined $c->{'host'} ? $c->{'host'} : "";
+		    push(@http, {'method' => 'GET', 'path' => $url, 'expect' => $exp+0, 'port' => $prt+0, 'host' => $hst});
 		}
 		when ('https') {
 		    my $url = $c->{'path'};
 		    my $exp = defined $c->{'expect'} ? $c->{'expect'} : 200;
 		    my $prt = defined $c->{'port'} ? $c->{'port'} : $port;
-		    push(@https, {'method' => 'GET', 'path' => $url, 'expect' => $exp+0, 'port' => $prt+0});
+		    my $hst = defined $c->{'host'} ? $c->{'host'} : "";
+		    push(@https, {'method' => 'GET', 'path' => $url, 'expect' => $exp+0, 'port' => $prt+0, 'host' => $hst});
 		}
 		when ('tcp') {
 		    my $prt = defined $c->{'port'} ? $c->{'port'} : $port;

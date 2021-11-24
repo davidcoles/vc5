@@ -123,13 +123,18 @@ struct interface {
     unsigned char pad[2];
 };
 
+struct settings {
+    __u64 era;
+    __u64 time;
+    __u8 pad[7];
+    __u8 defcon;
+};
+
 struct clocks {
     __u64 era;
     __u64 time;
-    __u32 ifindex;
-    __be32 ipaddr;
-    __u8 hwaddr[6];
-    __u8 pad[2];
+    __u8 defcon;
+    __u8 pad[7];
 };
 
 struct vlan_hdr {
@@ -174,6 +179,13 @@ struct bpf_map_def SEC("maps") clocks = {
   .key_size    = sizeof(unsigned int),
   .value_size  = sizeof(struct clocks),
   .max_entries = 2,
+};
+
+struct bpf_map_def SEC("maps") settings = {
+  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
+  .key_size    = sizeof(unsigned int),
+  .value_size  = sizeof(struct settings),
+  .max_entries = 1,
 };
 
 struct bpf_map_def SEC("maps") vip_rip_port_counters = {
@@ -507,13 +519,21 @@ const __u32 index0 = 0;
 //DEFCON3: will create new state if syn|rst|fin flag not set
 //DEFCON4: will multicast state
 //DEFCON5: 
-const __u8 DEFCON = 5;
-
 static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 {
+    __u64 start = bpf_ktime_get_ns();
+    __u8 DEFCON = 0;
+
+    {
+	struct settings *setting = bpf_map_lookup_elem(&settings, &index0);
+	if(!setting) {
+	    return XDP_PASS;
+	}
+	DEFCON = setting->defcon;
+    }
+    
     if(DEFCON == 0) return XDP_PASS; // C'est ne pas une load-balancer
     
-    __u64 start = bpf_ktime_get_ns();
     void *data_end = (void *)(long)ctx->data_end;
     void *data     = (void *)(long)ctx->data;
     int rx_bytes = data_end - data;
