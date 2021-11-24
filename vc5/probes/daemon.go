@@ -132,7 +132,7 @@ func Daemon(path string) {
 
 		json.Unmarshal(body, &c)
 
-		fmt.Println("got:", c)
+		//fmt.Println("got:", c)
 
 		var ok bool
 
@@ -179,7 +179,7 @@ func httpget(scheme string, address string, port string, url string, expect stri
 
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, y, z string) (net.Conn, error) {
-			fmt.Println("dial:", conn, hostname, uri)
+			//fmt.Println("dial:", address+":"+port, hostname, y, z)
 			return net.Dial("tcp", address+":"+port)
 		},
 		Dial: (&net.Dialer{
@@ -197,6 +197,10 @@ func httpget(scheme string, address string, port string, url string, expect stri
 		},
 	}
 
+	if len(url) > 0 && url[0] == '/' {
+		url = url[1:]
+	}
+
 	client.CloseIdleConnections()
 
 	uri := fmt.Sprintf("%s://%s:%s/%s", scheme, address, port, url)
@@ -204,9 +208,9 @@ func httpget(scheme string, address string, port string, url string, expect stri
 		uri = fmt.Sprintf("%s://%s:%s/%s", scheme, hostname, port, url)
 	}
 
-	fmt.Println("get: ", hostname, uri)
-
 	resp, err := client.Get(uri)
+
+	//fmt.Println("get: ", hostname, uri, err, resp)
 
 	if err != nil {
 		return false
