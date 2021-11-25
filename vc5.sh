@@ -40,6 +40,12 @@ ip r replace 10.1.0.0/16 via 10.0.0.2 dev vc5_2
 ethtool -K vc5_2 tx off >/dev/null
 EOF
 
+vc5=$1
+shift
+
+json=$1
+shift
+
 ip4=$1
 shift
 
@@ -60,22 +66,12 @@ cleanup() {
 
 trap cleanup INT
 
-VC5=vc5
-
-if [ -f vc5/vc5 ]; then
-    VC5=vc5/vc5
-fi
-
-if [ -f ./vc5 ]; then
-    VC5=./vc5
-fi
-
-TTY=
+tty=
 
 if tty >/dev/null 2>&1; then
-    TTY=-t
+    TTY=-t			# 
 fi
 
-$VC5 $TTY $native $bridge vc5.json vc5 vc5_1 $hwaddr $ip4 $@ || true
+$vc5 $tty $native $bridge $json vc5 vc5_1 $hwaddr $ip4 $@ || true
 
 cleanup

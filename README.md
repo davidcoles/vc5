@@ -25,9 +25,9 @@ Copy the config.yaml file to vc5.yaml and edit appropriately for your routers/se
 
 Run `make`. This will build the binary and transform the YAML config file to an more verbose JSON config.
 
-Run the vc5.sh shell script with arguments of your IP address and network interface name, eg.:
+Run the vc5.sh shell script with arguments of the binary, json file, your IP address and network interface name, eg.:
 
-  `./vc5.sh 10.10.100.200 ens192`
+  `./vc5.sh vc5/vc5 vc5.json 10.10.100.200 ens192`
 
 If this doesn't bomb out then you should have a load balancer up and running, although by default it will wait for around one minute to learn from other instances via multicast before healthchecking backends and advertising routes. You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exists (use Ctrl-C).
 
