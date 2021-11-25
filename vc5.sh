@@ -60,7 +60,11 @@ cleanup() {
 
 trap cleanup INT
 
-VC5=vc5/vc5
+VC5=vc5
+
+if [ -f vc5/vc5 ]; then
+    VC5=vc5/vc5
+fi
 
 if [ -f ./vc5 ]; then
     VC5=./vc5
