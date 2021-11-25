@@ -149,13 +149,13 @@ func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters
 				m := MAC{b[0], b[1], b[2], b[3], b[4], b[5]}
 				r := IP4{b[6], b[7], b[8], b[9]}
 				if i, ok := p.backend[r]; ok {
-					fmt.Println(r, m, i)
+					//fmt.Println(r, m, i)
 					c.SetBackendRec(r, m, 0, i)
 					ips[r] = i
 				}
 			}
 			x, s := rendezvous.RipIndex(ips)
-			fmt.Println(s, x[0:32])
+			fmt.Println(vip, port, s, x[0:32])
 			c.SetBackendIdx(vip, port, x)
 		}
 
@@ -315,14 +315,14 @@ func (p *Probes) healthcheckBackend_(vip IP4, port uint16, nat, rip IP4, checks 
 		time.Sleep(1 * time.Second)
 
 		for _, c := range checks.Http {
-			fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
+			//fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
 			if !HTTPCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
 				ok = false
 			}
 		}
 
 		for _, c := range checks.Https {
-			fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
+			//fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
 			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
 				ok = false
 			}

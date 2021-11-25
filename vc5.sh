@@ -69,7 +69,7 @@ trap cleanup INT
 tty=
 
 if tty >/dev/null 2>&1; then
-    TTY=-t			# 
+    TTY=-t
 fi
 
 $vc5 $tty $native $bridge $json vc5 vc5_1 $hwaddr $ip4 $@ || true

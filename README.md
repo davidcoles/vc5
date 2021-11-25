@@ -23,7 +23,7 @@ First we need a development environment capable of building libbpf and Go binari
 
 Copy the config.yaml file to vc5.yaml and edit appropriately for your routers/services/backends.
 
-Run `make`. This will build the binary and transform the YAML config file to an more verbose JSON config.
+Run `make`. This will build the binary and transform the YAML config file to a more verbose JSON config format.
 
 Run the vc5.sh shell script with arguments of the binary, json file, your IP address and network interface name, eg.:
 
@@ -112,6 +112,7 @@ A check consists of
 * type - http, https or tcp
 * port - the port that the check will be run against, optional if there is only one port listed in the service
 * path - the path to run http or https checks against, not needed for tcp
+* host - value to set for the Host: header in http/https checks
 
 
 ## Notes
