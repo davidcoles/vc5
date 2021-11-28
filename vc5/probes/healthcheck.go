@@ -63,6 +63,46 @@ type hwaddr struct {
 	rip  IP4
 }
 
+type service struct {
+	vip  IP4
+	port uint16
+	udp  bool
+}
+
+type message struct {
+	add bool
+	rip IP4
+}
+
+type Probes struct {
+	control *Control
+	logger  *logger.Logger
+	backend map[IP4]uint16
+	service map[service]chan message
+	count   uint16
+}
+
+func Manage(c *Control, l *logger.Logger) *Probes {
+	p := Probes{control: c, logger: l}
+	p.backend = make(map[IP4]uint16)
+	time.Sleep(3 * time.Second)
+	return &p
+}
+
+func (p *Probes) AddService(vip IP4, port uint16, udp bool) bool {
+	s := service{vip: vip, port: port, udp: udp}
+	if _, exists := p.service[s]; exists {
+		return false
+	}
+	c := make(chan message)
+
+}
+
+func (p *Probes) ManageService(s service, c chan message, vc chan vipstatus, sc chan scounters) {
+	var up bool
+
+}
+
 func (p *Probes) ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
 	go p._ManageVIP(service, vs, sc)
 }
@@ -314,20 +354,6 @@ func (p *Probes) manageBackend(vip IP4, port uint16, real config.Real, counters 
 func ping(ip IP4) {
 	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
 	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
-}
-
-type Probes struct {
-	control *Control
-	logger  *logger.Logger
-	backend map[IP4]uint16
-	count   uint16
-}
-
-func Manage(c *Control, l *logger.Logger) *Probes {
-	p := Probes{control: c, logger: l}
-	p.backend = make(map[IP4]uint16)
-	time.Sleep(3 * time.Second)
-	return &p
 }
 
 func (p *Probes) AddReal(r IP4, v uint16) bool {
