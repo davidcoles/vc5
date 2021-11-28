@@ -463,6 +463,11 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
     
     unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
+    
+    if(rec_idx == 0) {
+	return NULL;
+    }
+    
     return bpf_map_lookup_elem(&backend_recs, &rec_idx);
 }
 
@@ -672,6 +677,10 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
 	    statsp->new_flows++;
 	}
 	
+
+	if (!maccmp(fs->hwaddr, nulmac)) {
+	    return XDP_DROP;
+	}
 	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
 	maccpy(eth_hdr->h_dest, fs->hwaddr);
 	
@@ -756,6 +765,9 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge)
     
     rec = lookup_backend(ipv4, tcp);
     if(rec) {
+	if (!maccmp(rec->hwaddr, nulmac)) {
+	    return XDP_DROP;
+	}
 	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
 	maccpy(eth_hdr->h_dest, rec->hwaddr);
 	

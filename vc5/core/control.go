@@ -282,7 +282,7 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 //nat->vip/rip
 //vip/rip->nat
 
-func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint8) {
+func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16) {
 	type rec = [16]byte
 	i := uint32(idx)
 
@@ -349,7 +349,7 @@ func (c *Control) SetRip(rip IP4) {
 	go ping(rip)
 }
 
-func (c *Control) SetBackends(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
+func (c *Control) _SetBackends(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
 	if false {
 		var s service
 		s.vip = vip

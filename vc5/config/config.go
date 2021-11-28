@@ -80,7 +80,7 @@ type Config struct {
 	Peers     []string          `json:"peers"`
 	RHI       RHI               `json:"rhi"`
 	VLans     map[string]uint16 `json:"vlans"`
-	Reals     map[IP4]uint8
+	Reals     map[IP4]uint16
 }
 
 type RHI struct {
@@ -140,7 +140,7 @@ func fix_vlan(config *Config) {
 func fix_nat(config *Config) {
 	// fix up nat addresses - assign a unique nat address for each vip/nat tuple
 	var i uint16
-	config.Reals = make(map[IP4]uint8)
+	config.Reals = make(map[IP4]uint16)
 
 	vr_to_n := make(map[[8]byte][4]byte)
 
@@ -160,7 +160,7 @@ func fix_nat(config *Config) {
 			}
 
 			if _, ok := config.Reals[rip]; !ok {
-				config.Reals[rip] = uint8(len(config.Reals))
+				config.Reals[rip] = uint16(len(config.Reals)) + 1
 			}
 		}
 	}

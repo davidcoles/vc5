@@ -20,7 +20,7 @@ package probes
 
 import (
 	"fmt"
-	"math"
+	//"math"
 	"os/exec"
 	"sort"
 	"time"
@@ -36,8 +36,7 @@ type Control = core.Control
 type IP4 = types.IP4
 type IP6 = types.IP6
 type MAC = types.MAC
-type B12s = types.B12s
-type B12 = types.B12
+type IP4s = types.IP4s
 
 type Service = config.Service
 type Checks = config.Checks
@@ -65,23 +64,18 @@ type hwaddr struct {
 }
 
 func (p *Probes) ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
-	go p.ManageVip(service, vs, sc)
+	go p._ManageVIP(service, vs, sc)
 }
 
-func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters) {
+func (p *Probes) _ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
 	c := p.control
 	logs := p.logger
 	vip := service.Vip
 	port := service.Port
 	backends := service.Rip
-	var live B12s
+	var live []IP4
 	var nalive uint
 	var up bool
-
-	hashed, stats := rendezvous.Rendezvous(live)
-
-	c.SetBackends(vip, port, hashed, [12]byte{}, 0)
-	//fmt.Println("initial", vip, port, live, up)
 
 	name := fmt.Sprintf("%s:%d", vip, port)
 	ctr := make(map[IP4]counters)
@@ -127,35 +121,27 @@ func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters
 		default:
 		}
 
-		new := build_list(ctr)
-		var least B12
-		var weight uint8
+		new := build_list2(ctr)
 
 		if service.LeastConns {
-			new, least, weight = least_conns(ctr)
+			//new, least, weight = least_conns(ctr)
 		}
 
 		was := up
 
-		if setsDiffer(live, new) {
+		if setsDiffer2(live, new) {
 			live = new
-			hashed, stats = rendezvous.Rendezvous(live)
 			nalive = uint(len(live))
-			//fmt.Println(vip, port, stats, live, nalive)
-			logs.INFO(fmt.Sprint(vip, port, stats, live, nalive))
 
-			ips := make(map[[4]byte]uint8)
+			ips := make(map[[4]byte]uint16)
 			for _, b := range live {
-				m := MAC{b[0], b[1], b[2], b[3], b[4], b[5]}
-				r := IP4{b[6], b[7], b[8], b[9]}
-				if i, ok := p.backend[r]; ok {
-					//fmt.Println(r, m, i)
-					c.SetBackendRec(r, m, 0, i)
-					ips[r] = i
+				if i, ok := p.backend[b]; ok {
+					ips[b] = i
 				}
 			}
 			x, s := rendezvous.RipIndex(ips)
 			fmt.Println(vip, port, s, x[0:32])
+			logs.INFO(fmt.Sprint(vip, port, s, x[0:64]))
 			c.SetBackendIdx(vip, port, x)
 		}
 
@@ -164,8 +150,6 @@ func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters
 		} else {
 			up = nalive > 0
 		}
-
-		c.SetBackends(vip, port, hashed, least, weight)
 
 		if was != up {
 			logs.NOTICE(fmt.Sprint("Service state change: ", vip, port, " -> ", ud(up)))
@@ -177,11 +161,11 @@ func (p *Probes) ManageVip(service Service, vs chan vipstatus, sc chan scounters
 
 }
 
-func build_list(ctr map[IP4]counters) B12s {
-	var new B12s
+func build_list2(ctr map[IP4]counters) IP4s {
+	var new IP4s
 	for r, c := range ctr {
 		if c.Up && types.Cmpmac(c.MAC, MAC{}) != 0 {
-			new = append(new, makeB12(c.MAC, r, c.Vlan))
+			new = append(new, r)
 		}
 	}
 	return new
@@ -200,88 +184,10 @@ func avg_pps(c map[IP4]counters) uint64 {
 	return pps
 }
 
-func least_conns(c map[IP4]counters) (B12s, B12, uint8) {
-	ctr := make(map[IP4]counters)
-
-	// filter backends that are not up
-	for k, v := range c {
-		if v.Up {
-			ctr[k] = v
-		}
-	}
-
-	if len(ctr) < 2 {
-		return build_list(ctr), B12{}, 0
-	}
-
-	var min counters
-	var max counters
-	var ok bool
-	for _, v := range ctr {
-		if min.Rx_pps == 0 && v.Rx_pps != 0 {
-			min = v
-			ok = true
-		}
-		if max.Rx_pps == 0 {
-			max = v
-		}
-		if v.Rx_pps < min.Rx_pps {
-			min = v
-		}
-		if v.Rx_pps > max.Rx_pps {
-			max = v
-		}
-	}
-
-	ctr2 := make(map[IP4]counters)
-	for k, v := range ctr {
-		if k != max.Ip {
-			ctr2[k] = v
-		}
-	}
-
-	ctr3 := make(map[IP4]counters)
-	for k, v := range ctr {
-		if k != min.Ip {
-			ctr3[k] = v
-		}
-	}
-
-	pps := avg_pps(ctr)
-	pps2 := avg_pps(ctr2)
-	pps3 := avg_pps(ctr3)
-
-	if pps < 50000 {
-		return build_list(ctr), B12{}, 0
-	}
-
-	if max.Rx_pps > ((pps2 * 5) / 4) {
-		delete(ctr, max.Ip)
-	}
-
-	if ok && min.Rx_pps < ((pps3*9)/10) {
-
-		//weight := uint8(255 * (float64((pps3 - min.Rx_pps)) / float64(pps3)))
-
-		weight := uint8(math.Log(255*(float64((pps3-min.Rx_pps))/float64(pps3))) * 42)
-
-		fmt.Println(min.Ip, min.Rx_pps, pps, weight)
-		return build_list(ctr), makeB12(min.MAC, min.Ip, 0), weight
-	}
-
-	return build_list(ctr), B12{}, 0
-}
-
-func makeB12(m MAC, i IP4, v uint16) B12 {
-	h := uint8(v >> 8)
-	l := uint8(v & 0xff)
-	return [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], i[0], i[1], i[2], i[3], h, l}
-}
-
-func setsDiffer(a, b B12s) bool {
+func setsDiffer2(a, b IP4s) bool {
 	sort.Sort(a)
 	sort.Sort(b)
-	return !types.CmpB12s(a, b)
+	return !types.CmpIP4s(a, b)
 }
 
 func ud(b bool) string {
@@ -310,7 +216,7 @@ func (p *Probes) healthcheckBackend_(vip IP4, port uint16, nat, rip IP4, checks 
 	for {
 		ok := true
 
-		go ping(rip)
+		//go ping(rip)
 
 		time.Sleep(1 * time.Second)
 
@@ -406,19 +312,60 @@ func (p *Probes) manageBackend(vip IP4, port uint16, real config.Real, counters 
 }
 
 func ping(ip IP4) {
-	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-	exec.Command("/bin/sh", "-c", command).Output()
+	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
+	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
 }
 
 type Probes struct {
 	control *Control
 	logger  *logger.Logger
-	backend map[IP4]uint8
+	backend map[IP4]uint16
+	count   uint16
 }
 
-func Manage(c *Control, l *logger.Logger, b map[IP4]uint8) *Probes {
-	p := Probes{control: c, logger: l, backend: b}
+func Manage(c *Control, l *logger.Logger) *Probes {
+	p := Probes{control: c, logger: l}
+	p.backend = make(map[IP4]uint16)
+	time.Sleep(3 * time.Second)
 	return &p
+}
+
+func (p *Probes) AddReal(r IP4, v uint16) bool {
+	if _, exists := p.backend[r]; exists {
+		return false
+	}
+
+	p.count++
+	i := p.count
+
+	if i > 255 {
+		panic("Backend index out of range")
+	}
+
+	p.backend[r] = i
+
+	p.control.SetBackendRec(r, MAC{}, v, i)
+
+	go func() {
+		var m MAC
+		for {
+			ping(r)
+
+			time.Sleep(2 * time.Second)
+
+			n := p.control.ReadMAC(r)
+
+			if n != nil && m != *n {
+				m = *n
+				fmt.Println(r, m, v, i)
+				p.control.SetBackendRec(r, m, v, i)
+			}
+
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
+	return true
 }
 
 func (p *Probes) GlobalStats(cchan chan types.Counters) {
@@ -468,3 +415,101 @@ func GlobalStats_(c *Control, cchan chan types.Counters, l *logger.Logger) {
 		prev = count
 	}
 }
+
+/*
+func build_list(ctr map[IP4]counters) B12s {
+	var new B12s
+	for r, c := range ctr {
+		if c.Up && types.Cmpmac(c.MAC, MAC{}) != 0 {
+			new = append(new, makeB12(c.MAC, r, c.Vlan))
+		}
+	}
+	return new
+}
+*/
+/*
+func least_conns(c map[IP4]counters) (B12s, B12, uint8) {
+	ctr := make(map[IP4]counters)
+
+	// filter backends that are not up
+	for k, v := range c {
+		if v.Up {
+			ctr[k] = v
+		}
+	}
+
+	if len(ctr) < 2 {
+		return build_list(ctr), B12{}, 0
+	}
+
+	var min counters
+	var max counters
+	var ok bool
+	for _, v := range ctr {
+		if min.Rx_pps == 0 && v.Rx_pps != 0 {
+			min = v
+			ok = true
+		}
+		if max.Rx_pps == 0 {
+			max = v
+		}
+		if v.Rx_pps < min.Rx_pps {
+			min = v
+		}
+		if v.Rx_pps > max.Rx_pps {
+			max = v
+		}
+	}
+
+	ctr2 := make(map[IP4]counters)
+	for k, v := range ctr {
+		if k != max.Ip {
+			ctr2[k] = v
+		}
+	}
+
+	ctr3 := make(map[IP4]counters)
+	for k, v := range ctr {
+		if k != min.Ip {
+			ctr3[k] = v
+		}
+	}
+
+	pps := avg_pps(ctr)
+	pps2 := avg_pps(ctr2)
+	pps3 := avg_pps(ctr3)
+
+	if pps < 50000 {
+		return build_list(ctr), B12{}, 0
+	}
+
+	if max.Rx_pps > ((pps2 * 5) / 4) {
+		delete(ctr, max.Ip)
+	}
+
+	if ok && min.Rx_pps < ((pps3*9)/10) {
+
+		//weight := uint8(255 * (float64((pps3 - min.Rx_pps)) / float64(pps3)))
+
+		weight := uint8(math.Log(255*(float64((pps3-min.Rx_pps))/float64(pps3))) * 42)
+
+		fmt.Println(min.Ip, min.Rx_pps, pps, weight)
+		return build_list(ctr), makeB12(min.MAC, min.Ip, 0), weight
+	}
+
+	return build_list(ctr), B12{}, 0
+}
+
+func makeB12(m MAC, i IP4, v uint16) B12 {
+	h := uint8(v >> 8)
+	l := uint8(v & 0xff)
+	return [12]byte{m[0], m[1], m[2], m[3], m[4], m[5], i[0], i[1], i[2], i[3], h, l}
+}
+
+func setsDiffer(a, b B12s) bool {
+	sort.Sort(a)
+	sort.Sort(b)
+	return !types.CmpB12s(a, b)
+}
+
+*/

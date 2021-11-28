@@ -12,10 +12,37 @@ type IP4 [4]byte
 type IP6 [16]byte
 type MAC [6]byte
 
-//type IP4s []IP4
-//func (h IP4s) Len() int           { return len(h) }
-//func (h IP4s) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-//func (h IP4s) Less(i, j int) bool { return cmpb12(h[i], h[j]) == -1 }
+type IP4s []IP4
+
+func (h IP4s) Len() int           { return len(h) }
+func (h IP4s) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h IP4s) Less(i, j int) bool { return cmpip4(h[i], h[j]) == -1 }
+
+func cmpip4(a, b [4]byte) int {
+	for n := 0; n < len(a); n++ {
+		if a[n] < b[n] {
+			return -1
+		}
+		if a[n] > b[n] {
+			return 1
+		}
+	}
+	return 0
+}
+
+func CmpIP4s(a, b IP4s) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := 0; i < len(a); i++ {
+		if cmpip4(a[i], b[i]) != 0 {
+			return false
+		}
+	}
+
+	return true
+}
 
 type RHI struct {
 	Ip IP4
