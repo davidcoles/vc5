@@ -130,7 +130,7 @@ func main() {
 	}
 	ss := stats.Server(ws, logs, c)
 
-	p := probes.Manage(c, logs)
+	p := probes.Manage(c, logs, ss.Scounters())
 
 	for r, _ := range config.Reals {
 		if !p.AddReal(r, 0) {
@@ -150,7 +150,7 @@ func main() {
 			ch = vip_status(c, s.Vip, veth, b, ss.RHI(), logs)
 			ips[s.Vip] = ch
 		}
-		go p.ManageVIP(s, ch, ss.Scounters())
+		go p.ManageVIP(s, ch)
 	}
 
 	sig := make(chan os.Signal)

@@ -70,20 +70,22 @@ type service struct {
 }
 
 type message struct {
-	add bool
-	rip IP4
+	add    bool
+	rip    IP4
+	checks Checks
 }
 
 type Probes struct {
-	control *Control
-	logger  *logger.Logger
-	backend map[IP4]uint16
-	service map[service]chan message
-	count   uint16
+	control  *Control
+	logger   *logger.Logger
+	counters chan scounters
+	backend  map[IP4]uint16
+	service  map[service]chan message
+	count    uint16
 }
 
-func Manage(c *Control, l *logger.Logger) *Probes {
-	p := Probes{control: c, logger: l}
+func Manage(c *Control, l *logger.Logger, s chan scounters) *Probes {
+	p := Probes{control: c, logger: l, counters: s}
 	p.backend = make(map[IP4]uint16)
 	time.Sleep(3 * time.Second)
 	return &p
@@ -95,16 +97,96 @@ func (p *Probes) AddService(vip IP4, port uint16, udp bool) bool {
 		return false
 	}
 	c := make(chan message)
-
+	go p.ManageService(s, c, nil)
+	p.service[s] = c
+	return true
 }
 
-func (p *Probes) ManageService(s service, c chan message, vc chan vipstatus, sc chan scounters) {
-	var up bool
+func (p *Probes) ManageService(s service, c chan message, vc chan vipstatus) {
+	//var up bool
 
+	type status struct {
+		up bool
+		ch chan bool
+	}
+
+	updates := make(chan counters, 100)
+	reals := make(map[IP4]*status)
+
+	defer func() {
+		for _, c := range reals {
+			close(c.ch)
+		}
+	}()
+
+	for {
+		select {
+		case u := <-updates:
+			if r, e := reals[u.Ip]; e {
+				r.up = u.Up
+			}
+			//live, up, changed = p.calc_reals(reals, live)
+
+		case m, ok := <-c:
+			if !ok {
+				return
+			}
+
+			if ch, exists := reals[m.rip]; exists {
+				if !m.add {
+					close(ch.ch)
+					delete(reals, m.rip)
+				}
+			} else {
+				if m.add {
+					b := &status{ch: make(chan bool)}
+					//manageReal(m.rip, vip, nat, port, m.checks, updates)
+					reals[m.rip] = b
+				}
+			}
+		}
+	}
 }
 
-func (p *Probes) ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
-	go p._ManageVIP(service, vs, sc)
+func (p *Probes) manageReal(rip, vip, nat IP4, port uint16, checks Checks, updates chan update) {
+	up := false
+
+	for {
+		ok := true
+
+		for _, c := range checks.Http {
+			if !HTTPCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
+				ok = false
+			}
+		}
+
+		for _, c := range checks.Https {
+			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
+				ok = false
+			}
+		}
+
+		for _, c := range checks.Tcp {
+			if !TCPCheck(nat, c.Port) {
+				ok = false
+			}
+		}
+
+		if ok != up {
+
+			up = ok
+
+			p.logger.NOTICE(fmt.Sprintf("Real server state change: %s:%d %s -> %s", vip, port, rip, ud(up)))
+
+			updates <- update{rip: rip, up: up}
+		}
+
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func (p *Probes) ManageVIP(service Service, vs chan vipstatus) {
+	go p._ManageVIP(service, vs, p.counters)
 }
 
 func (p *Probes) _ManageVIP(service Service, vs chan vipstatus, sc chan scounters) {
