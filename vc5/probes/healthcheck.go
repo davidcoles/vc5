@@ -155,13 +155,15 @@ func (p *Probes) manageReal(rip, vip, nat IP4, port uint16, checks Checks, updat
 		ok := true
 
 		for _, c := range checks.Http {
-			if !HTTPCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
+			if s, _ := HTTPCheck(nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+				//fmt.Println(m)
 				ok = false
 			}
 		}
 
 		for _, c := range checks.Https {
-			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
+			if s, _ := HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+				//fmt.Println(m)
 				ok = false
 			}
 		}
@@ -344,14 +346,16 @@ func (p *Probes) healthcheckBackend_(vip IP4, port uint16, nat, rip IP4, checks 
 
 		for _, c := range checks.Http {
 			//fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
-			if !HTTPCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
+			if s, _ := HTTPCheck(nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+				//fmt.Println(m)
 				ok = false
 			}
 		}
 
 		for _, c := range checks.Https {
 			//fmt.Println(nat, c.Port, c.Path, int(c.Expect), c.Host)
-			if !HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host) {
+			if s, _ := HTTPSCheck(nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+				//fmt.Println(m)
 				ok = false
 			}
 		}

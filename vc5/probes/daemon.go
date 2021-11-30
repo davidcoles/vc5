@@ -40,19 +40,20 @@ type check struct {
 
 type result struct {
 	Success bool
+	Message string
 }
 
 const PATH = "/run/vc5.sock"
 
-func HTTPCheck(ip IP4, port uint16, path string, expect int, host string) bool {
+func HTTPCheck(ip IP4, port uint16, path string, expect int, host string) (bool, string) {
 	return _HTTPCheck("http", ip, port, path, expect, host)
 }
 
-func HTTPSCheck(ip IP4, port uint16, path string, expect int, host string) bool {
+func HTTPSCheck(ip IP4, port uint16, path string, expect int, host string) (bool, string) {
 	return _HTTPCheck("https", ip, port, path, expect, host)
 }
 
-func _HTTPCheck(scheme string, ip IP4, port uint16, path string, expect int, host string) bool {
+func _HTTPCheck(scheme string, ip IP4, port uint16, path string, expect int, host string) (bool, string) {
 	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 	p := fmt.Sprintf("%d", port)
 	r := fmt.Sprintf("%d", expect)
@@ -64,12 +65,13 @@ func TCPCheck(ip IP4, port uint16) bool {
 	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 	p := fmt.Sprintf("%d", port)
 	c := &check{Type: "tcp", Args: []string{a, p}}
-	return check_client(c)
+	s, _ := check_client(c)
+	return s
 }
 
 var client *http.Client
 
-func check_client(c *check) bool {
+func check_client(c *check) (bool, string) {
 	if client == nil {
 		client = &http.Client{
 			Transport: &http.Transport{
@@ -87,13 +89,13 @@ func check_client(c *check) bool {
 	response, err := client.Post("http://unix/check/", "application/octet-stream", buff)
 
 	if err != nil {
-		return false
+		return false, "AF_UNIX: " + err.Error()
 	}
 
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
-		return false
+		return false, fmt.Sprintf("AF_UNIX: %d", response.StatusCode)
 	}
 
 	body, err := ioutil.ReadAll(response.Body)
@@ -104,13 +106,13 @@ func check_client(c *check) bool {
 
 	//fmt.Println(c, s)
 
-	return s.Success
+	return s.Success, s.Message
 }
 
 func Serve(netns string) {
 	for {
 		exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH).Output()
-		//exec.Command("/bin/sh", "-c", "ip netns exec vc5 /usr/local/bin/vc5 /run/vc5.sock >/tmp/vc5.log 2>&1").Output()
+		//exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" >/tmp/vc5.log 2>&1").Output()
 		time.Sleep(1 * time.Second)
 	}
 }
@@ -135,19 +137,20 @@ func Daemon(path string) {
 		//fmt.Println("got:", c)
 
 		var ok bool
+		var msg string
 
 		switch c.Type {
 		case "http":
-			ok = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
+			ok, msg = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
 		case "https":
-			ok = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
+			ok, msg = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
 		case "tcp":
 			ok = tcpdial(c.Args[0], c.Args[1])
 		}
 
 		w.WriteHeader(http.StatusOK)
 
-		j, _ := json.Marshal(&result{Success: ok})
+		j, _ := json.Marshal(&result{Success: ok, Message: msg})
 
 		w.Write(j)
 
@@ -175,7 +178,14 @@ func tcpdial(addr string, port string) bool {
 	return true
 }
 
-func httpget(scheme string, address string, port string, url string, expect string, hostname string) bool {
+func httpget(scheme string, address string, port string, url string, expect string, hostname string) (bool, string) {
+
+	// having to create a whole new transport/client for each request
+	// maybe overkill and there's a better way to do it, but because
+	// connection needs to be made to the NAT address and simply overriding the
+	// Host header didn't seem to work with TLS/SNI on some IIS servers
+	// then overriding the DialContext seems be necessary
+	// remember to CloseIdleConnections() or the file descriptors build up
 
 	transport := &http.Transport{
 		DialContext: func(_ context.Context, y, z string) (net.Conn, error) {
@@ -197,11 +207,12 @@ func httpget(scheme string, address string, port string, url string, expect stri
 		},
 	}
 
+	defer transport.CloseIdleConnections()
+	defer client.CloseIdleConnections()
+
 	if len(url) > 0 && url[0] == '/' {
 		url = url[1:]
 	}
-
-	client.CloseIdleConnections()
 
 	uri := fmt.Sprintf("%s://%s:%s/%s", scheme, address, port, url)
 	if hostname != "" {
@@ -210,57 +221,28 @@ func httpget(scheme string, address string, port string, url string, expect stri
 
 	resp, err := client.Get(uri)
 
-	//fmt.Println("get: ", hostname, uri, err, resp)
+	// Doesn't seem to work ...
+	//req, err := http.NewRequest("GET", uri, nil)
+	//if hostname != "" {
+	//	req.Header.Del("Host")
+	//	req.Header.Add("Host", hostname)
+	//}
+	//resp, err := client.Do(req)
 
 	if err != nil {
-		return false
+		//fmt.Println("get: ", hostname, uri, err)
+		return false, fmt.Sprintf("GET: %s:%s %s %v", address, port, uri, resp)
 	}
+
+	//body, err := ioutil.ReadAll(r.Body)
 
 	defer resp.Body.Close()
 
 	sc := fmt.Sprintf("%d", resp.StatusCode)
 
 	if sc != expect {
-		return false
+		return false, fmt.Sprintf("%s: %s:%s %s %v", sc, address, port, uri, resp)
 	}
 
-	return true
-}
-
-func ___httpget(scheme string, address string, port string, url string, expect string) bool {
-
-	if client == nil {
-		transport := &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout: 2 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 1 * time.Second,
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		}
-
-		client = &http.Client{
-			Timeout:   time.Second * 3,
-			Transport: transport,
-		}
-	}
-
-	client.CloseIdleConnections()
-
-	uri := fmt.Sprintf("%s://%s:%s/%s", scheme, address, port, url)
-
-	resp, err := client.Get(uri)
-
-	if err != nil {
-		return false
-	}
-
-	defer resp.Body.Close()
-
-	sc := fmt.Sprintf("%d", resp.StatusCode)
-
-	if sc != expect {
-		return false
-	}
-
-	return true
+	return true, ""
 }
