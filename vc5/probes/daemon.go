@@ -82,7 +82,7 @@ func check_client(c *check) (bool, string) {
 		}
 	}
 
-	client.CloseIdleConnections()
+	defer client.CloseIdleConnections()
 
 	buff := new(bytes.Buffer)
 	json.NewEncoder(buff).Encode(c)
@@ -178,60 +178,46 @@ func tcpdial(addr string, port string) bool {
 	return true
 }
 
-func httpget(scheme string, address string, port string, url string, expect string, hostname string) (bool, string) {
+func httpget(scheme string, address string, port string, path string, expect string, hostname string) (bool, string) {
 
-	// having to create a whole new transport/client for each request
-	// maybe overkill and there's a better way to do it, but because
-	// connection needs to be made to the NAT address and simply overriding the
-	// Host header didn't seem to work with TLS/SNI on some IIS servers
-	// then overriding the DialContext seems be necessary
-	// remember to CloseIdleConnections() or the file descriptors build up
+	if client == nil {
 
-	transport := &http.Transport{
-		DialContext: func(_ context.Context, y, z string) (net.Conn, error) {
-			//fmt.Println("dial:", address+":"+port, hostname, y, z)
-			return net.Dial("tcp", address+":"+port)
-		},
-		Dial: (&net.Dialer{
-			Timeout: 2 * time.Second,
-		}).Dial,
-		TLSHandshakeTimeout: 1 * time.Second,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		transport := &http.Transport{
+			//DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			//	return net.Dial("tcp", address+":"+port)
+			//},
+			Dial: (&net.Dialer{
+				Timeout: 2 * time.Second,
+			}).Dial,
+			TLSHandshakeTimeout: 1 * time.Second,
+			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+		}
+
+		client = &http.Client{
+			Timeout:   time.Second * 3,
+			Transport: transport,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 
-	client := &http.Client{
-		Timeout:   time.Second * 3,
-		Transport: transport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
-
-	defer transport.CloseIdleConnections()
 	defer client.CloseIdleConnections()
 
-	if len(url) > 0 && url[0] == '/' {
-		url = url[1:]
+	if len(path) > 0 && path[0] == '/' {
+		path = path[1:]
 	}
 
-	uri := fmt.Sprintf("%s://%s:%s/%s", scheme, address, port, url)
+	url := fmt.Sprintf("%s://%s:%s/%s", scheme, address, port, path)
+	req, err := http.NewRequest("GET", url, nil)
 	if hostname != "" {
-		uri = fmt.Sprintf("%s://%s:%s/%s", scheme, hostname, port, url)
+		req.Host = hostname
 	}
-
-	resp, err := client.Get(uri)
-
-	// Doesn't seem to work ...
-	//req, err := http.NewRequest("GET", uri, nil)
-	//if hostname != "" {
-	//	req.Header.Del("Host")
-	//	req.Header.Add("Host", hostname)
-	//}
-	//resp, err := client.Do(req)
+	resp, err := client.Do(req)
 
 	if err != nil {
 		//fmt.Println("get: ", hostname, uri, err)
-		return false, fmt.Sprintf("GET: %s:%s %s %v", address, port, uri, resp)
+		return false, fmt.Sprintf("GET: %s:%s %s %v", address, port, url, resp)
 	}
 
 	//body, err := ioutil.ReadAll(r.Body)
@@ -241,7 +227,7 @@ func httpget(scheme string, address string, port string, url string, expect stri
 	sc := fmt.Sprintf("%d", resp.StatusCode)
 
 	if sc != expect {
-		return false, fmt.Sprintf("%s: %s:%s %s %v", sc, address, port, uri, resp)
+		return false, fmt.Sprintf("%s: %s:%s %s %v", sc, address, port, url, resp)
 	}
 
 	return true, ""
