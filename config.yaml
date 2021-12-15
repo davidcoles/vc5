@@ -1,10 +1,10 @@
 # VC5 L2DSR Load Balancer config
 ---
 
-# Listen for flow announcements for 70s, on "all hosts" port 9999
+# Listen for flow announcements for 10s, on "all hosts" port 9999
 # Run a web console on port 80, and announce VIPs to BGP peers
 
-learn: 70
+learn: 10
 multicast: 224.0.0.1:9999
 webserver: :80
 rhi:

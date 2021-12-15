@@ -1,6 +1,6 @@
 # VC5
 
-A distributed Layer 2 Direct Server Return (L2DSR) load balancer for Linux using XDP/eBPF
+A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
 This is very much a proof of concept at this stage - most everything is incomplete and poorly defined!
 
@@ -29,7 +29,11 @@ Run the vc5.sh shell script with arguments of the binary, json file, your IP add
 
   `./vc5.sh vc5/vc5 vc5.json 10.10.100.200 ens192`
 
-If this doesn't bomb out then you should have a load balancer up and running, although by default it will wait for around one minute to learn from other instances via multicast before healthchecking backends and advertising routes. You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exists (use Ctrl-C).
+If this doesn't bomb out then you should have a load balancer up and running. The webserver (running on port 80 by default) will display logs, statistics and backend status.
+
+![Console screenshow](console.jpg)
+
+You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exists (use Ctrl-C).
 
 If you don't have a routed environment then you can test with a client machine on the same VLAN. Either add a static route on the client machine pointing to the load balancer, or run BIRD/Quagga on client and add the client's IP address to the BGP section of the YAML config.
 
