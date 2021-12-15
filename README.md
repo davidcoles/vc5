@@ -31,7 +31,7 @@ Run the vc5.sh shell script with arguments of the binary, json file, your IP add
 
 If this doesn't bomb out then you should have a load balancer up and running. The webserver (running on port 80 by default) will display logs, statistics and backend status.
 
-![Console screenshow](console.jpg)
+![Console screenshot](console.jpg)
 
 You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exists (use Ctrl-C).
 
@@ -128,7 +128,7 @@ https://unix.stackexchange.com/questions/429077/how-to-do-nat-based-on-port-numb
 
 Set destination IP address on real server by DSCP - for L3 DSR
 
-`nft add table raw`
-`nft add chain raw prerouting { type filter hook prerouting priority raw \; }`
-`nft add rule raw prerouting ip dscp 0x04 ip daddr set 192.168.101.4 notrack`
+* `nft add table raw`
+* `nft add chain raw prerouting { type filter hook prerouting priority raw \; }`
+* `nft add rule raw prerouting ip dscp 0x04 ip daddr set 192.168.101.4 notrack`
 
