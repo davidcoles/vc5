@@ -21,7 +21,7 @@ First we need a development environment capable of building libbpf and Go binari
   
   `ln -s /usr/lib/go-1.16/bin/go /usr/local/bin/go`
 
-Copy the config.yaml file to vc5.yaml and edit appropriately for your routers/services/backends.
+Copy the [config.yaml](config.yaml) file to vc5.yaml and edit appropriately for your routers/services/backends.
 
 Run `make`. This will build the binary and transform the YAML config file to a more verbose JSON config format.
 
