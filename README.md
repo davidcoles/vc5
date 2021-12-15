@@ -33,7 +33,7 @@ If this doesn't bomb out then you should have a load balancer up and running. Th
 
 ![Console screenshot](console.jpg)
 
-You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exists (use Ctrl-C).
+You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exits (use Ctrl-C).
 
 If you don't have a routed environment then you can test with a client machine on the same VLAN. Either add a static route on the client machine pointing to the load balancer, or run BIRD/Quagga on client and add the client's IP address to the BGP section of the YAML config.
 
