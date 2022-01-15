@@ -24,7 +24,9 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
+	//"log"
 	"net"
 	"net/http"
 	"os"
@@ -170,12 +172,35 @@ func Daemon(path string) {
 
 func tcpdial(addr string, port string) bool {
 	d := net.Dialer{Timeout: 2 * time.Second}
-	conn, err := d.Dial("tcp", addr+":"+port)
+	c, err := d.Dial("tcp", addr+":"+port)
 	if err != nil {
 		return false
 	}
-	conn.Close()
-	return true
+	one := make([]byte, 1)
+	c.SetReadDeadline(time.Now().Add(1 * time.Second))
+	//c.SetReadDeadline(time.Now())
+	n, err := c.Read(one)
+	c.Close()
+
+	//log.Println(n, err)
+
+	if err == nil && n != 0 {
+		return true
+	}
+
+	if err == io.EOF {
+		return false
+	}
+
+	switch err := err.(type) {
+	case net.Error:
+		if err.Timeout() {
+			//log.Println("This was a net.Error with a Timeout")
+			return true
+		}
+	}
+
+	return false
 }
 
 func httpget(scheme string, address string, port string, path string, expect string, hostname string) (bool, string) {
