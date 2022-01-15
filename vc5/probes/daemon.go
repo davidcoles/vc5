@@ -71,6 +71,14 @@ func TCPCheck(ip IP4, port uint16) bool {
 	return s
 }
 
+func SYNCheck(ip IP4, port uint16) bool {
+	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
+	p := fmt.Sprintf("%d", port)
+	c := &check{Type: "syn", Args: []string{a, p}}
+	s, _ := check_client(c)
+	return s
+}
+
 var client *http.Client
 
 func check_client(c *check) (bool, string) {
@@ -119,9 +127,11 @@ func Serve(netns string) {
 	}
 }
 
-func Daemon(path string) {
+func Daemon(path, ipaddr string) {
 
 	os.Remove(path)
+
+	syn := Syn(ipaddr)
 
 	http.HandleFunc("/check/", func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
@@ -148,6 +158,8 @@ func Daemon(path string) {
 			ok, msg = httpget(c.Type, c.Args[0], c.Args[1], c.Args[2], c.Args[3], c.Args[4])
 		case "tcp":
 			ok = tcpdial(c.Args[0], c.Args[1])
+		case "syn":
+			ok = syn.ProbeS(c.Args[0], c.Args[1])
 		}
 
 		w.WriteHeader(http.StatusOK)

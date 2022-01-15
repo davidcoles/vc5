@@ -68,8 +68,10 @@ func main() {
 
 	args := flag.Args()
 
+	vip := IP4{10, 0, 0, 1}
+
 	if len(args) == 1 {
-		probes.Daemon(args[0])
+		probes.Daemon(args[0], vip.String())
 	}
 
 	fmt.Println(args)
@@ -107,7 +109,6 @@ func main() {
 		panic(err)
 	}
 
-	vip := IP4{10, 0, 0, 1}
 	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
 
 	if config.Multicast != "" {

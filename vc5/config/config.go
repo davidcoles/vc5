@@ -45,10 +45,15 @@ type TcpCheck struct {
 	Port uint16 `json:"port"'`
 }
 
+type SynCheck struct {
+	Port uint16 `json:"port"'`
+}
+
 type Checks struct {
 	Http  []HttpCheck `json:"http"`
 	Https []HttpCheck `json:"https"`
 	Tcp   []TcpCheck  `json:"tcp"`
+	Syn   []SynCheck  `json:"syn"`
 }
 
 type Real struct {
@@ -56,6 +61,7 @@ type Real struct {
 	Http  []HttpCheck `json:"http,omitempty"`
 	Https []HttpCheck `json:"https,omitempty"`
 	Tcp   []TcpCheck  `json:"tcp,omitempty"`
+	Syn   []SynCheck  `json:"syn,omitempty"`
 	Nat   IP4         `json:"nat"`
 	VLan  uint16      `json:"vlan,omitempty"`
 	Src   IP4         `json:"src"`

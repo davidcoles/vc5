@@ -70,6 +70,7 @@ sub services {
 	my @http;
 	my @https;
 	my @tcp;
+	my @syn;
 
 	my($port) = @port;
 
@@ -93,6 +94,10 @@ sub services {
 		    my $prt = defined $c->{'port'} ? $c->{'port'} : $port;
 		    push(@tcp, {'port' => $prt+0});
 		}
+		when ('syn') {
+		    my $prt = defined $c->{'port'} ? $c->{'port'} : $port;
+		    push(@syn, {'port' => $prt+0});
+		}
 	    }
 	}
 
@@ -115,7 +120,8 @@ sub services {
 		    $y->{'rip'} = lookup($r);
 		    $y->{'http'} = \@http if scalar(@http);
 		    $y->{'https'} = \@https if scalar(@https);
-		    $y->{'tcp'} = \@tcp if scalar(@tcp);		    
+		    $y->{'tcp'} = \@tcp if scalar(@tcp);
+		    $y->{'syn'} = \@syn if scalar(@syn);
 		    
 		    push(@rip, $y);
 		}

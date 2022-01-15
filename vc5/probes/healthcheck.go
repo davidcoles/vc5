@@ -174,6 +174,12 @@ func (p *Probes) manageReal(rip, vip, nat IP4, port uint16, checks Checks, updat
 			}
 		}
 
+		for _, c := range checks.Syn {
+			if !SYNCheck(nat, c.Port) {
+				ok = false
+			}
+		}
+
 		if ok != up {
 
 			up = ok
@@ -216,6 +222,7 @@ func (p *Probes) _ManageVIP(service Service, vs chan vipstatus, sc chan scounter
 
 		var checks Checks
 		checks.Tcp = r.Tcp
+		checks.Syn = r.Syn
 		checks.Http = r.Http
 		checks.Https = r.Https
 		//fmt.Println(r.Nat, r.Rip, checks)
@@ -362,6 +369,12 @@ func (p *Probes) healthcheckBackend_(vip IP4, port uint16, nat, rip IP4, checks 
 
 		for _, c := range checks.Tcp {
 			if !TCPCheck(nat, c.Port) {
+				ok = false
+			}
+		}
+
+		for _, c := range checks.Syn {
+			if !SYNCheck(nat, c.Port) {
 				ok = false
 			}
 		}
