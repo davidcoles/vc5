@@ -33,12 +33,13 @@ import (
 	"time"
 	"unsafe"
 
-	"vc5/bgp4"
+	//"vc5/bgp4"
 	"vc5/config"
 	"vc5/core"
 	"vc5/logger"
+	"vc5/manage"
 	"vc5/probes"
-	"vc5/stats"
+	//"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -50,8 +51,6 @@ var SIMPLE_O []byte
 var BPF_O []byte
 
 type IP4 = types.IP4
-type Control = core.Control
-type vipstatus = probes.Vipstatus
 
 func main() {
 	ulimit()
@@ -71,6 +70,13 @@ func main() {
 	vip := IP4{10, 0, 0, 1}
 
 	if len(args) == 1 {
+
+		hup := make(chan os.Signal)
+		signal.Notify(hup, os.Interrupt, syscall.SIGHUP)
+		go func() {
+			for _ = range hup {
+			}
+		}()
 		probes.Daemon(args[0], vip.String())
 	}
 
@@ -83,27 +89,19 @@ func main() {
 	ipv4 := args[4]
 	peth := args[5:]
 
-	//var ipaddr [4]byte
-	var hwaddr [6]byte
-
 	ipaddr, ok := parseIP(ipv4)
 	if !ok {
 		log.Fatal(ipv4)
 	}
 
-	//if ip := net.ParseIP(ipv4); ip == nil || len(ip) != 4 {
-	//	panic(ipv4)
-	//} else {
-	//	copy(ipaddr[:], ip[:])
-	//}
-
+	var hwaddr [6]byte
 	if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
 		panic(err)
 	} else {
 		copy(hwaddr[:], hw[:])
 	}
 
-	config, err := config.LoadConfigFile(conffile)
+	conf, err := config.LoadConfigFile(conffile, peth[0], ipaddr)
 
 	if err != nil {
 		panic(err)
@@ -111,48 +109,14 @@ func main() {
 
 	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
 
-	if config.Multicast != "" {
-		go multicast_recv(c, c.IPAddr()[3], config.Multicast, *isatty)
+	if conf.Multicast != "" {
+		go multicast_recv(c, c.IPAddr()[3], conf.Multicast, *isatty)
 	}
 
 	// Set up probe server - runs in other network namespace
 	go probes.Serve(netns)
 
-	// Set up BGP4 peer manager
-	fmt.Println(config.Peers)
-	b := bgp4.Manager(c.IPAddr(), config.RHI.RouterId, config.RHI.ASNumber, config.RHI.Peers)
-	if len(config.RHI.Peers) == 0 {
-		b = nil
-	}
-
-	ws := ":80"
-	if config.Webserver != "" {
-		ws = config.Webserver
-	}
-	ss := stats.Server(ws, logs, c)
-
-	p := probes.Manage(c, logs, ss.Scounters())
-
-	for r, _ := range config.Reals {
-		if !p.AddReal(r, 0) {
-			panic("p.AddReal(" + r.String() + ")")
-		}
-	}
-
-	p.GlobalStats(ss.Counters())
-
-	ips := make(map[IP4]chan vipstatus)
-	for _, s := range config.Services {
-		logs.INFO(fmt.Sprint("Add service: ", s.Vip, s.Port))
-		logs.DEBUG(s)
-
-		ch, ok := ips[s.Vip]
-		if !ok {
-			ch = vip_status(c, s.Vip, veth, b, ss.RHI(), logs)
-			ips[s.Vip] = ch
-		}
-		go p.ManageVIP(s, ch)
-	}
+	manager := manage.ApplyConfig(conf, c, logs)
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -161,11 +125,25 @@ func main() {
 		fmt.Println("Exiting ...")
 		exec.Command("ip", "link", "delete", veth).Run()
 		exec.Command("ip", "netns", "delete", netns).Run()
-		if b != nil {
-			b.Close()
-		}
-		time.Sleep(5 * time.Second)
+		close(manager)
+		time.Sleep(10 * time.Second)
 		os.Exit(1)
+	}()
+
+	hup := make(chan os.Signal)
+	signal.Notify(hup, os.Interrupt, syscall.SIGHUP)
+	go func() {
+		for _ = range hup {
+			fmt.Println("HUP")
+			// reload config and apply
+			new, err := conf.LoadNewConfigFile(conffile, peth[0], ipaddr)
+			if err != nil {
+				fmt.Println("Bad config")
+			} else {
+				conf = new
+				manager <- conf
+			}
+		}
 	}()
 
 	if *bridge != "" {
@@ -173,66 +151,18 @@ func main() {
 		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
 	}
 
-	if config.Learn > 0 {
-		time.Sleep(time.Duration(config.Learn) * time.Second)
+	if conf.Learn > 0 {
+		time.Sleep(time.Duration(conf.Learn) * time.Second)
 	}
 
-	if b != nil {
-		b.Start()
-	}
-
-	multicast_send(c, c.IPAddr()[3], config.Multicast)
+	multicast_send(c, c.IPAddr()[3], conf.Multicast)
 
 	for {
 		time.Sleep(1 * time.Second)
 	}
 }
 
-func ud(b bool) string {
-	if b {
-		return "up"
-	}
-	return "down"
-}
-
-func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.RHI, logs *logger.Logger) chan vipstatus {
-	vs := make(chan vipstatus, 100)
-	go func() {
-		up := false
-		m := make(map[uint16]bool)
-		for v := range vs {
-			m[v.Port] = v.Up
-			was := up
-			up = true
-
-			for _, v := range m {
-				if !v {
-					up = false
-				}
-			}
-
-			rhi <- types.RHI{Ip: ip, Up: up}
-
-			if up != was {
-				//fmt.Println("***** CHANGED", v, up)
-				logs.NOTICE(fmt.Sprintf("VIP status change: %s -> %s", ip, ud(up)))
-
-				if b != nil {
-					b.NLRI(ip, up)
-				} else {
-					if up {
-						exec.Command("ip", "a", "add", ip.String()+"/32", "dev", veth).Output()
-					} else {
-						exec.Command("ip", "a", "del", ip.String()+"/32", "dev", veth).Output()
-					}
-				}
-			}
-		}
-	}()
-	return vs
-}
-
-func multicast_recv(control *Control, instance byte, srvAddr string, isatty bool) {
+func multicast_recv(control *core.Control, instance byte, srvAddr string, isatty bool) {
 	maxDatagramSize := 1500
 
 	addr, err := net.ResolveUDPAddr("udp", srvAddr)
@@ -275,7 +205,7 @@ func multicast_recv(control *Control, instance byte, srvAddr string, isatty bool
 	}
 }
 
-func multicast_send(control *Control, instance byte, srvAddr string) {
+func multicast_send(control *core.Control, instance byte, srvAddr string) {
 	if srvAddr == "" {
 		for {
 			if _, ok := control.FlowQueue(); ok {
@@ -422,3 +352,49 @@ func simple() {
 		}
 	}
 }
+
+/*
+func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.RHI, logs *logger.Logger) chan vipstatus {
+	vs := make(chan vipstatus, 100)
+	go func() {
+		up := false
+		m := make(map[uint16]bool)
+		for v := range vs {
+			m[v.Port] = v.Up
+			was := up
+			up = true
+
+			for _, v := range m {
+				if !v {
+					up = false
+				}
+			}
+
+			rhi <- types.RHI{Ip: ip, Up: up}
+
+			if up != was {
+				//fmt.Println("***** CHANGED", v, up)
+				logs.NOTICE(fmt.Sprintf("VIP status change: %s -> %s", ip, ud(up)))
+
+				if b != nil {
+					b.NLRI(ip, up)
+				} else {
+					if up {
+						exec.Command("ip", "a", "add", ip.String()+"/32", "dev", veth).Output()
+					} else {
+						exec.Command("ip", "a", "del", ip.String()+"/32", "dev", veth).Output()
+					}
+				}
+			}
+		}
+	}()
+	return vs
+}
+
+func ud(b bool) string {
+	if b {
+		return "up"
+	}
+	return "down"
+}
+*/

@@ -85,6 +85,15 @@ type Scounters struct {
 	Backends map[string]Counters `json:"backends"`
 }
 
+func (c *Scounters) Sum() {
+	for _, b := range c.Backends {
+		c.New_flows += b.New_flows
+		c.Rx_packets += b.Rx_packets
+		c.Rx_bytes += b.Rx_bytes
+		c.Concurrent += b.Concurrent
+	}
+}
+
 func (i *IP4) UnmarshalJSON(d []byte) error {
 	l := len(d)
 	if l < 2 || d[0] != '"' || d[l-1] != '"' {

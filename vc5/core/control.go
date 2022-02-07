@@ -297,6 +297,8 @@ func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16) {
 		copy(recs[(n*16):], r[:])
 	}
 
+	//fmt.Println("SETBACKENDREC", rip, mac, vlan, idx)
+
 	if xdp.BpfMapUpdateElem(c.backend_recs, uP(&i), uP(&recs), xdp.BPF_ANY) != 0 {
 		panic("c.backend_recs")
 	}
@@ -313,11 +315,17 @@ func (c *Control) SetBackendIdx(vip IP4, port uint16, idx [8192]uint8) {
 	for n := 0; n < len(idxs); n++ {
 		idxs[n] = idx
 	}
+	//fmt.Println("SETBACKENDIDX", vip, port, idx[0:32])
 	if xdp.BpfMapUpdateElem(c.backend_idx, uP(&s), uP(&idxs), xdp.BPF_ANY) != 0 {
 		panic("c.backend_idx")
 	}
 }
 
+func (c *Control) DelNatVipRip(nat, vip, rip IP4) {
+	vr := vip_rip_src_if{vip: vip, rip: rip}
+	xdp.BpfMapLookupAndDeleteElem(c.vip_rip_to_nat, uP(&vr), uP(&nat))
+	xdp.BpfMapLookupAndDeleteElem(c.nat_to_vip_rip, uP(&nat), uP(&vr))
+}
 func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16) {
 
 	ifindex := c.ifindex
@@ -335,8 +343,8 @@ func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16
 		ipaddr = src
 		copy(hwaddr[:], i.HardwareAddr[:])
 	}
-
 	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr, vlan_hi: byte(vlan >> 8), vlan_lo: byte(vlan & 0xff)}
+	//fmt.Println("SETNATVIPRIP", vr)
 
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)
@@ -345,6 +353,7 @@ func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16
 
 func (c *Control) SetRip(rip IP4) {
 	var mac MAC
+	//fmt.Println("SETRIP", rip)
 	xdp.BpfMapUpdateElem(c.rip_to_mac, uP(&rip), uP(&mac), xdp.BPF_ANY)
 	go ping(rip)
 }
@@ -395,6 +404,12 @@ func (c *Control) ReadMAC(ip IP4) *MAC {
 func ping(ip IP4) {
 	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
 	exec.Command("/bin/sh", "-c", command).Output()
+}
+
+func (c *Control) VipRipPortCounters2(vip, rip IP4, port uint16, clear bool, curr uint64) counters {
+	count := c.VipRipPortCounters(vip, rip, port, clear)
+	count.Concurrent = int64(curr)
+	return count
 }
 
 func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16, clear bool) counters {
@@ -506,6 +521,47 @@ func (c *Control) VipRipPortConcurrents(vip, rip IP4, port uint16) chan int64 {
 					counters <- int64(conn)
 				}
 			}
+		}
+	}()
+
+	return counters
+}
+
+func (c *Control) VipRipPortConcurrents2(vip, rip IP4, port uint16, done chan bool) chan uint64 {
+
+	counters := make(chan uint64, 100)
+
+	go func() {
+
+		last, _ := c.Era()
+		conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
+		conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
+
+		ticker := time.NewTicker(1 * time.Second)
+
+		defer func() {
+			ticker.Stop()
+		}()
+
+		for {
+			select {
+			case <-ticker.C:
+
+				next, _ := c.Era()
+				if last != next {
+					conn = c.VipRipPortConcurrent(vip, rip, port, last)
+					last = next
+
+					if conn < 0 {
+						counters <- 0
+					} else {
+						counters <- uint64(conn)
+					}
+				}
+			case <-done:
+				return
+			}
+
 		}
 	}()
 

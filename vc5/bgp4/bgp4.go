@@ -120,11 +120,11 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 }
 
 func (b *BGP4) BGP4State(start chan bool, done chan bool) {
-
 	//time.Sleep(10 * time.Second)
 	<-start
 
-	d := net.Dialer{Timeout: 2 * time.Second}
+	//d := net.Dialer{Timeout: 2 * time.Second}
+	d := net.Dialer{Timeout: 5 * time.Second}
 
 	up := make(map[IP4]bool)
 	ok := make(chan bool)
@@ -181,6 +181,8 @@ func Manager(myip [4]byte, rid [4]byte, as uint16, peers []string) *Peers {
 }
 
 func (b *Peers) NLRI(ip [4]byte, up bool) {
+	fmt.Println(ip, up)
+
 	for _, p := range b.peers {
 		p.NLRI(ip, up)
 	}
@@ -197,6 +199,8 @@ func (b *BGP4) BGP4Conn(d net.Dialer, ri chan nlri, ok chan bool, done chan bool
 	b.state = CONNECT
 
 	conn, err := d.Dial("tcp", fmt.Sprintf("%s:%d", b.peer, b.port))
+
+	//fmt.Println("CONNECTION", err, b.peer, b.port)
 
 	if err != nil {
 		return

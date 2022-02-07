@@ -20,7 +20,7 @@ package config
 
 import (
 	"encoding/json"
-	//"fmt"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -65,7 +65,10 @@ type Real struct {
 	Nat   IP4         `json:"nat"`
 	VLan  uint16      `json:"vlan,omitempty"`
 	Src   IP4         `json:"src"`
-	Idx   uint8
+	Idx   uint16
+	Iface string
+	Port  uint16
+	Vip   IP4
 }
 
 type Service struct {
@@ -83,10 +86,10 @@ type Config struct {
 	Webserver string            `json:"webserver"`
 	Learn     uint16            `json:"learn"`
 	Services  []Service         `json:"services"`
-	Peers     []string          `json:"peers"`
 	RHI       RHI               `json:"rhi"`
 	VLans     map[string]uint16 `json:"vlans"`
 	Reals     map[IP4]uint16
+	Nats      map[[8]byte]uint16
 }
 
 type RHI struct {
@@ -95,7 +98,35 @@ type RHI struct {
 	Peers    []string `json:"peers"`
 }
 
-func LoadConfigFile(file string) (*Config, error) {
+func (old *Config) LoadNewConfigFile(file string, iface string, src IP4) (*Config, error) {
+	new, err := LoadConfigFile_(file)
+	if err != nil {
+		return nil, err
+	}
+
+	fix_nats(new, old)
+	fix_idx(new, old)
+	fix_vlan(new, iface, src)
+	fix_service(new)
+
+	return new, nil
+}
+func LoadConfigFile(file string, iface string, src IP4) (*Config, error) {
+	config, err := LoadConfigFile_(file)
+	if err != nil {
+		return nil, err
+	}
+
+	fix_nats(config, nil)
+	fix_idx(config, nil)
+
+	fix_vlan(config, iface, src)
+	fix_service(config)
+
+	return config, nil
+}
+
+func LoadConfigFile_(file string) (*Config, error) {
 	jf, err := os.Open(file)
 
 	if err != nil {
@@ -115,15 +146,23 @@ func LoadConfigFile(file string) (*Config, error) {
 
 	jf.Close()
 
-	fix_nat(&config)
-	fix_vlan(&config)
-
 	return &config, nil
 }
 
-func fix_vlan(config *Config) {
+func fix_service(config *Config) {
+	for _, s := range config.Services {
+		for r, _ := range s.Rip {
+			s.Rip[r].Port = s.Port
+			s.Rip[r].Vip = s.Vip
+		}
+	}
+}
+
+func fix_vlan(config *Config, iface string, src IP4) {
 	for _, s := range config.Services {
 		for r, R := range s.Rip {
+			s.Rip[r].Src = src
+			s.Rip[r].Iface = iface
 
 			for k, v := range config.VLans {
 				i, n, e := net.ParseCIDR(k)
@@ -148,7 +187,11 @@ func fix_nat(config *Config) {
 	var i uint16
 	config.Reals = make(map[IP4]uint16)
 
-	vr_to_n := make(map[[8]byte][4]byte)
+	natify := func(i uint16) IP4 {
+		return IP4{10, 1, byte((i >> 8) & 0xff), byte(i & 0xff)}
+	}
+	//vr_to_n := make(map[[8]byte][4]byte)
+	vr_to_i := make(map[[8]byte]uint16)
 
 	for _, s := range config.Services {
 		for r, R := range s.Rip {
@@ -156,12 +199,13 @@ func fix_nat(config *Config) {
 			rip := R.Rip
 			vr := [8]byte{vip[0], vip[1], vip[2], vip[3], rip[0], rip[1], rip[2], rip[3]}
 
-			if nat, ok := vr_to_n[vr]; ok {
-				s.Rip[r].Nat = nat
+			if n, ok := vr_to_i[vr]; ok {
+				s.Rip[r].Nat = natify(n)
+				s.Rip[r].Idx = n + 1
 			} else {
-				nat = IP4{10, 1, byte((i >> 8) & 0xff), byte(i & 0xff)}
-				s.Rip[r].Nat = nat
-				vr_to_n[vr] = nat
+				s.Rip[r].Nat = natify(i)
+				s.Rip[r].Idx = i + 1
+				vr_to_i[vr] = i
 				i++
 			}
 
@@ -188,4 +232,100 @@ func parseIP(ip string) ([4]byte, bool) {
 		addr[n] = byte(a)
 	}
 	return addr, true
+}
+
+func fix_idx(new, old *Config) {
+	type idx struct {
+		n uint16
+		u bool
+	}
+
+	newi := func(m map[IP4]idx) uint16 {
+		n := make(map[uint16]bool)
+		for _, v := range m {
+			n[v.n] = true
+		}
+
+		var i uint16 = 1
+	check_exists:
+		if _, ok := n[i]; ok {
+			i++
+			if i > 65000 {
+				panic("i > 65000")
+			}
+			goto check_exists
+		}
+
+		return i
+	}
+
+	reals := make(map[IP4]idx)
+
+	if old != nil {
+		// do some stuff
+		for k, v := range old.Reals {
+			reals[k] = idx{n: v, u: false}
+			//if v >= i {
+			//	i = v + 1
+			//}
+		}
+	}
+
+	for _, s := range new.Services {
+		for k, r := range s.Rip {
+			rip := r.Rip
+
+			if v, ok := reals[rip]; ok {
+				s.Rip[k].Idx = v.n
+				v.u = true
+				reals[rip] = v
+			} else {
+				i := newi(reals)
+				s.Rip[k].Idx = i
+				reals[rip] = idx{n: i, u: true}
+				fmt.Println("XXXX", rip, i)
+			}
+		}
+	}
+
+	new.Reals = make(map[IP4]uint16)
+
+	for k, v := range reals {
+		if v.u {
+			new.Reals[k] = v.n
+		}
+	}
+}
+
+func fix_nats(new, old *Config) {
+	// fix up nat addresses - assign a unique nat address for each vip/nat tuple
+	var i uint16 = 1
+
+	natify := func(i uint16) IP4 {
+		return IP4{10, 1, byte((i >> 8) & 0xff), byte(i & 0xff)}
+	}
+
+	if new != nil {
+
+	}
+
+	nats := make(map[[8]byte]uint16)
+
+	for _, s := range new.Services {
+		for r, R := range s.Rip {
+			vip := s.Vip
+			rip := R.Rip
+			viprip := [8]byte{vip[0], vip[1], vip[2], vip[3], rip[0], rip[1], rip[2], rip[3]}
+
+			if n, ok := nats[viprip]; ok {
+				s.Rip[r].Nat = natify(n)
+			} else {
+				s.Rip[r].Nat = natify(i)
+				nats[viprip] = i
+				i++
+			}
+		}
+	}
+
+	new.Nats = nats
 }

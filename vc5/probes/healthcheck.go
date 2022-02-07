@@ -19,16 +19,16 @@
 package probes
 
 import (
-	"fmt"
+	//"fmt"
 	//"math"
-	"os/exec"
-	"sort"
-	"time"
+	//"os/exec"
+	//"sort"
+	//"time"
 
-	"vc5/config"
+	//"vc5/config"
 	"vc5/core"
-	"vc5/logger"
-	"vc5/rendezvous"
+	//"vc5/logger"
+	//"vc5/rendezvous"
 	"vc5/types"
 )
 
@@ -38,6 +38,7 @@ type IP6 = types.IP6
 type MAC = types.MAC
 type IP4s = types.IP4s
 
+/*
 type Service = config.Service
 type Checks = config.Checks
 
@@ -83,6 +84,14 @@ type Probes struct {
 	service  map[service]chan message
 	count    uint16
 }
+
+/*
+
+func ping(ip IP4) {
+	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
+	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
+}
+
 
 func Manage(c *Control, l *logger.Logger, s chan scounters) *Probes {
 	p := Probes{control: c, logger: l, counters: s}
@@ -225,6 +234,7 @@ func ud(b bool) string {
 	}
 	return "down"
 }
+
 func (p *Probes) healthcheckBackend(vip IP4, port uint16, nat, rip IP4, checks Checks) chan bool {
 	updates := make(chan update, 100)
 	up := make(chan bool, 100)
@@ -346,11 +356,6 @@ func (p *Probes) manageBackend(vip IP4, port uint16, real config.Real, counters 
 		counters <- counter
 		prev = counter
 	}
-}
-
-func ping(ip IP4) {
-	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
 }
 
 func (p *Probes) AddReal(r IP4, v uint16) bool {
