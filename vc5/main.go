@@ -117,6 +117,7 @@ func main() {
 	go probes.Serve(netns)
 
 	manager := manage.ApplyConfig(conf, c, logs)
+	var closed bool
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -125,6 +126,7 @@ func main() {
 		fmt.Println("Exiting ...")
 		exec.Command("ip", "link", "delete", veth).Run()
 		exec.Command("ip", "netns", "delete", netns).Run()
+		closed = true
 		close(manager)
 		time.Sleep(10 * time.Second)
 		os.Exit(1)
@@ -141,7 +143,9 @@ func main() {
 				fmt.Println("Bad config")
 			} else {
 				conf = new
-				manager <- conf
+				if !closed {
+					manager <- conf
+				}
 			}
 		}
 	}()
@@ -149,10 +153,6 @@ func main() {
 	if *bridge != "" {
 		time.Sleep(3 * time.Second)
 		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
-	}
-
-	if conf.Learn > 0 {
-		time.Sleep(time.Duration(conf.Learn) * time.Second)
 	}
 
 	multicast_send(c, c.IPAddr()[3], conf.Multicast)

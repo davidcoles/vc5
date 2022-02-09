@@ -12,8 +12,8 @@ all: clean build
 
 build: vc5/vc5 vc5.json
 
-vc5.json: tools/config.pl vc5.yaml
-	tools/config.pl vc5.yaml >vc5.json
+vc5.json: tools/config2.pl vc5.yaml
+	tools/config2.pl vc5.yaml >vc5.json
 
 wc: clean
 	wc vc5/*.go vc5/*/*.go vc5/*/*.c vc5/*/*.h

@@ -508,7 +508,7 @@ static __always_inline void save_state(struct iphdr *ipv4, struct tcphdr *tcp, s
     void *fsp = &fs;
     memcpy(fsp, &f, sizeof(f));
     memcpy(fsp+sizeof(f), &s, sizeof(s));       
-    //push_flow_queue(&f, &s, NULL);
+    push_flow_queue(&f, &s, NULL);
 }
 
 

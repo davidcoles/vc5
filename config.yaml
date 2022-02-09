@@ -1,53 +1,47 @@
 # VC5 L2DSR Load Balancer config
 ---
-
-# Listen for flow announcements for 10s, on "all hosts" port 9999
-# Run a web console on port 80, and announce VIPs to BGP peers
-
-learn: 10
+learn: 80
 multicast: 224.0.0.1:9999
-webserver: :80
 rhi:
-  as_number: 65000
+  as_number: 65304
   peers:
     - 10.10.100.3
     - 10.10.100.4
 
 services:
 
+  # webservers on 2 VIPs, standard HTTP and HTTPs ports
   - name: nginx
-    desc: web server
-    addr: 192.168.101.1
-    port:
-      - 80
-      - 443
-    real: nginx
-    checks:
-      - name: http check
-        type: http
-        port: 80
-        path: /alive
-        host: foo.example.com
-      - name: https check
-        type: https
-        port: 443
-        path: /alive
-     
+    description: NGINX webserver
+    address:
+      - 192.168.101.1
+      - 192.168.101.2
+    servers:
+      - 10.10.100.120
+      - 10.10.100.121
+      - 10.10.100.122
+      - 10.10.100.123
+      - 10.10.100.124
+      - 10.10.100.125
+    host: foo.example.com
+    path: /alive
+    policy: webserver
+      http:
+      https:
+
+  # iperf server with port/healthcheck and server list declared separately
   - name: iperf
-    desc: bandwidth test
-    addr: 192.168.101.2
-    port: 5001
-    real: iperf
-    need: 1
-    checks:
-      - name: tcp check
-        type: tcp
+    description: bandwidth test
+    address: 192.168.101.3
+    servers: iperf
+    policy: iperf
 
-reals:
-  nginx:
-    - 10.10.100.10
-    - 10.10.100.11
+policy:
   iperf:
-    - 10.10.100.12
-    - 10.10.100.13
+    5001:
+      type: syn
 
+servers:
+  iperf:
+    - 10.10.100.130
+    - 10.10.100.131
