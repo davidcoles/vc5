@@ -3,14 +3,27 @@ package types
 import (
 	"errors"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"time"
 )
 
+type NIC struct {
+	Name  string
+	IP    net.IP
+	IPNet net.IPNet
+	Iface net.Interface
+}
+
 type IP4 [4]byte
 type IP6 [16]byte
 type MAC [6]byte
+
+type L4 struct {
+	Port uint16
+	Udp  bool
+}
 
 type IP4s []IP4
 
@@ -68,21 +81,18 @@ type Counters struct {
 	Vlan       uint16    `json:"-"`
 }
 type Scounters struct {
-	Sname       string `json:"-"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Up          bool   `json:"up"`
-	Nalive      uint   `json:"live_backends"`
-	Need        uint   `json:"need_backends"`
-	Concurrent  int64  `json:"current_connections"`
-	New_flows   uint64 `json:"total_connections"`
-	Rx_packets  uint64 `json:"rx_packets"`
-	Rx_bytes    uint64 `json:"rx_octets"`
-	//fp_count    uint64
-	//fp_time     uint64
-
-	//name     string
-	Backends map[string]Counters `json:"backends"`
+	Sname       string              `json:"-"`
+	Name        string              `json:"name"`
+	Description string              `json:"description"`
+	Up          bool                `json:"up"`
+	Nalive      uint                `json:"live_backends"`
+	Need        uint                `json:"need_backends"`
+	Concurrent  int64               `json:"current_connections"`
+	New_flows   uint64              `json:"total_connections"`
+	Rx_packets  uint64              `json:"rx_packets"`
+	Rx_bytes    uint64              `json:"rx_octets"`
+	Backends    map[string]Counters `json:"backends"`
+	Delete      bool
 }
 
 func (c *Scounters) Sum() {
@@ -141,6 +151,18 @@ func parseIP(ip string) ([4]byte, bool) {
 
 func (i IP4) String() string {
 	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
+}
+
+func (l L4) String() string {
+	if l.Udp {
+		return fmt.Sprint("udp:", l.Port)
+	}
+	return fmt.Sprint("tcp:", l.Port)
+
+}
+
+func (l L4) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + l.String() + `"`), nil
 }
 
 func (m MAC) String() string {

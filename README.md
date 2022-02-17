@@ -27,8 +27,8 @@ the packet with the address of one of the real servers in the
 load-balancing pool and then bounce the packet straight back out of
 the same interface on which it was received.
 
-When the real server receives the packet is sees the VIP which it has
-configured on a loopback interface and it's own MAC address, processes
+When the real server receives the packet it sees the VIP which it has
+configured on a loopback interface and its own MAC address, processes
 the packet appropriately and sends the reply directly back to the
 client, short-circuiting the load balancer. This is the Direct Server
 Return model of load-balancing. A similar layer-3 version of this is
@@ -48,7 +48,7 @@ second instance results in the same IP
 address being reachable from two different paths. If the router
 supports Equal Cost Multi-Path (ECMP) routing then the traffic to the
 VIP is balanced across both load balancing instances. Adding more
-instances with horizintally scale the amount of traffic which can be
+instances will horizintally scale the amount of traffic which can be
 handled.
 
 This is all good until something fails. With a basic hashing scheme
@@ -201,3 +201,6 @@ Set destination IP address on real server by DSCP - for L3 DSR
 * `nft add chain raw prerouting { type filter hook prerouting priority raw \; }`
 * `nft add rule raw prerouting ip dscp 0x04 ip daddr set 192.168.101.4 notrack`
 
+https://lpc.events/event/11/contributions/950/attachments/889/1704/lpc_from_xdp_to_socket_fb.pdf
+
+https://github.com/xdp-project/xdp-tutorial.git

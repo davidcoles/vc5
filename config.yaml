@@ -25,7 +25,7 @@ services:
       - 10.10.100.125
     host: foo.example.com
     path: /alive
-    policy: webserver
+    policy:
       http:
       https:
 

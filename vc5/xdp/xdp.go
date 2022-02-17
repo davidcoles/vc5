@@ -113,7 +113,10 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 	}
 
 	C.xdp_link_detach2(C.CString(veth))
-	C.load_bpf_section(o, C.CString(veth), C.CString(program), 0)
+	//C.load_bpf_section(o, C.CString(veth), C.CString(program), 0)
+	if C.load_bpf_section(o, C.CString(veth), C.CString(program), C.int(boolint(native))) != 0 {
+		panic("load_bpf_section veth")
+	}
 	xdp.p = o
 
 	if xdp.p == nil {
@@ -148,6 +151,10 @@ func BpfMapUpdateElem(i int, k, v unsafe.Pointer, flags uint64) int {
 
 func BpfMapLookupAndDeleteElem(i int, k, v unsafe.Pointer) int {
 	return int(C.bpf_map_lookup_and_delete_elem(C.int(i), k, v))
+}
+
+func BpfMapDeleteElem(i int, k unsafe.Pointer) int {
+	return int(C.bpf_map_delete_elem(C.int(i), k))
 }
 
 func BpfMapLookupElem(i int, k, v unsafe.Pointer) int {

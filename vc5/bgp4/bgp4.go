@@ -120,7 +120,6 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 }
 
 func (b *BGP4) BGP4State(start chan bool, done chan bool) {
-	//time.Sleep(10 * time.Second)
 	<-start
 
 	//d := net.Dialer{Timeout: 2 * time.Second}

@@ -157,6 +157,12 @@ function updateStats(url) {
 
 		ip.innerHTML = i + ": " + (up ? "up" : "down");
 	    }
+
+	    var newdiv = document.createElement("div");
+
+	    services.replaceWith(newdiv);
+
+	    newdiv.id = "services";
 	    
 	    for(var s in data.services) {
 		//console.log(s);
@@ -168,7 +174,9 @@ function updateStats(url) {
 		    sd = document.createElement("div");
 		    sd.id = s;
 		    sd.style = "line-height: 2em;";
-		    services.appendChild(sd);
+		    //services.appendChild(sd);
+		    newdiv.appendChild(sd);
+		    
 		}
 
 		var ih = s + ": " + sv.name + " (" + sv.description + ")";
@@ -266,7 +274,7 @@ function updateLogs(url) {
 		    lastms = item.Ms;
 		    var date = new Date(lastms);
 		    var time = date.toLocaleString();
-		    addMessage(time + ": " + item.Entry);
+		    addMessage(time + ": " + item.Entry.join(" "));
 		}		
 	    })
 	}

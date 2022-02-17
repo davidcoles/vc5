@@ -21,6 +21,8 @@ package logger
 import (
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"time"
 )
 
@@ -94,6 +96,10 @@ func (l *Logger) Text(level uint8) []string {
 }
 
 func (l *Logger) Append(e Logentry) {
+	_, ok := os.LookupEnv("DEBUG")
+	if ok {
+		log.Println(e.Entry)
+	}
 	l.channel <- e
 }
 
@@ -112,20 +118,23 @@ func (e *Logentry) String() string {
 	return s
 }
 
-func (l *Logger) Log(level uint8, entry interface{}) {
+func (l *Logger) Log(level uint8, entry ...interface{}) {
 	e := Logentry{Time: time.Now(), Level: level, Entry: entry}
+	if len(entry) == 1 {
+		e = Logentry{Time: time.Now(), Level: level, Entry: entry[0]}
+	}
 	//fmt.Println(e.String())
 	l.Append(e)
 }
 
-func (l *Logger) EMERG(e interface{})   { l.Log(LOG_EMERG, e) }
-func (l *Logger) ALERT(e interface{})   { l.Log(LOG_ALERT, e) }
-func (l *Logger) CRIT(e interface{})    { l.Log(LOG_CRIT, e) }
-func (l *Logger) ERR(e interface{})     { l.Log(LOG_ERR, e) }
-func (l *Logger) WARNING(e interface{}) { l.Log(LOG_WARNING, e) }
-func (l *Logger) NOTICE(e interface{})  { l.Log(LOG_NOTICE, e) }
-func (l *Logger) INFO(e interface{})    { l.Log(LOG_INFO, e) }
-func (l *Logger) DEBUG(e interface{})   { l.Log(LOG_DEBUG, e) }
+func (l *Logger) EMERG(e ...interface{})   { l.Log(LOG_EMERG, e) }
+func (l *Logger) ALERT(e ...interface{})   { l.Log(LOG_ALERT, e) }
+func (l *Logger) CRIT(e ...interface{})    { l.Log(LOG_CRIT, e) }
+func (l *Logger) ERR(e ...interface{})     { l.Log(LOG_ERR, e) }
+func (l *Logger) WARNING(e ...interface{}) { l.Log(LOG_WARNING, e) }
+func (l *Logger) NOTICE(e ...interface{})  { l.Log(LOG_NOTICE, e) }
+func (l *Logger) INFO(e ...interface{})    { l.Log(LOG_INFO, e) }
+func (l *Logger) DEBUG(e ...interface{})   { l.Log(LOG_DEBUG, e) }
 
 const (
 	LOG_EMERG   = 0 /* system is unusable */

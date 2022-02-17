@@ -33,6 +33,8 @@ import (
 	"time"
 	"unsafe"
 
+	"encoding/json"
+
 	//"vc5/bgp4"
 	"vc5/config"
 	"vc5/core"
@@ -89,6 +91,33 @@ func main() {
 	ipv4 := args[4]
 	peth := args[5:]
 
+	if false {
+		var nics []types.NIC
+
+		re := regexp.MustCompile(`:`)
+
+		for _, v := range peth {
+			split := re.Split(v, 2)
+			if len(split) != 2 {
+				panic("nope")
+			}
+
+			ip, ipnet, err := net.ParseCIDR(split[1])
+			if err != nil {
+				panic("ParseCIDR " + split[1])
+			}
+
+			ifc, err := net.InterfaceByName(split[0])
+			if err != nil {
+				panic("net.InterfaceByName " + split[0])
+			}
+
+			nics = append(nics, types.NIC{Name: split[0], IP: ip, IPNet: *ipnet, Iface: *ifc})
+		}
+
+		fmt.Println(nics)
+	}
+
 	ipaddr, ok := parseIP(ipv4)
 	if !ok {
 		log.Fatal(ipv4)
@@ -101,10 +130,27 @@ func main() {
 		copy(hwaddr[:], hw[:])
 	}
 
-	conf, err := config.LoadConfigFile(conffile, peth[0], ipaddr)
+	conf, err := config.LoadConfiguration(conffile, peth[0], ipaddr)
 
 	if err != nil {
 		panic(err)
+	}
+
+	if false {
+		j, err := json.MarshalIndent(conf, "", "\t")
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(string(j))
+
+		return
+	}
+
+	fmt.Println("")
+	for k, v := range conf.VIPs {
+		for x, y := range v {
+			fmt.Println(k, x, y)
+		}
 	}
 
 	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
@@ -116,7 +162,7 @@ func main() {
 	// Set up probe server - runs in other network namespace
 	go probes.Serve(netns)
 
-	manager := manage.ApplyConfig(conf, c, logs)
+	manager := manage.Bootstrap(conf, c, logs)
 	var closed bool
 
 	sig := make(chan os.Signal)
@@ -138,11 +184,12 @@ func main() {
 		for _ = range hup {
 			fmt.Println("HUP")
 			// reload config and apply
-			new, err := conf.LoadNewConfigFile(conffile, peth[0], ipaddr)
+			new, err := conf.ReloadConfiguration(conffile)
 			if err != nil {
-				fmt.Println("Bad config")
+				fmt.Println("Bad config", err)
 			} else {
 				conf = new
+				time.Sleep(1 * time.Second)
 				if !closed {
 					manager <- conf
 				}

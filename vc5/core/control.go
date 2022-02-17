@@ -96,8 +96,10 @@ type Control struct {
 	flows                   int
 	backend_recs            int
 	backend_idx             int
+	tx_port                 int
 
 	//// logger *logger
+	iface2u8 map[string]uint8
 
 	ipaddr  IP4
 	hwaddr  MAC
@@ -113,9 +115,10 @@ func (c *Control) IPAddr() [4]byte {
 }
 
 type service struct {
-	vip  IP4
-	port [2]byte
-	pad  [2]byte
+	vip   IP4
+	port  [2]byte
+	proto byte
+	pad   byte
 }
 
 type tuple struct {
@@ -253,6 +256,7 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.flows = c.find_map("flows", FLOW, STATE)
 	c.backend_recs = c.find_map("backend_recs", 4, 16)
 	c.backend_idx = c.find_map("backend_idx", 8, 8192)
+	c.tx_port = c.find_map("tx_port", 4, 4)
 
 	if p, err := net.InterfaceByName(peth[0]); err != nil {
 		fmt.Println(peth, err)
@@ -274,6 +278,14 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 		xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&virt), xdp.BPF_ANY)
 	}
 
+	/*
+		for i, n := range nics {
+			var k int32 = int32(i)
+			var v int32 = int32(n.Iface.Index)
+			xdp.BpfMapUpdateElem(c.tx_port, uP(&k), uP(&v), xdp.BPF_ANY)
+		}
+	*/
+
 	go c.global_update()
 
 	return &c
@@ -282,7 +294,7 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 //nat->vip/rip
 //vip/rip->nat
 
-func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16) {
+func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16, tx uint8) {
 	type rec = [16]byte
 	i := uint32(idx)
 
@@ -290,6 +302,7 @@ func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16) {
 	var r rec
 	copy(r[0:], mac[:])
 	copy(r[8:], rip[:])
+	r[12] = tx
 
 	var recs [MAX_CPU * 16]byte
 
@@ -304,11 +317,14 @@ func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16) {
 	}
 }
 
-func (c *Control) SetBackendIdx(vip IP4, port uint16, idx [8192]uint8) {
+func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8) {
 	var s service
 	s.vip = vip
 	s.port[0] = byte((port >> 8) & 0xff)
 	s.port[1] = byte(port & 0xff)
+	if udp {
+		s.proto = 1
+	}
 
 	var idxs [MAX_CPU][8192]uint8
 
@@ -320,29 +336,47 @@ func (c *Control) SetBackendIdx(vip IP4, port uint16, idx [8192]uint8) {
 		panic("c.backend_idx")
 	}
 }
+func (c *Control) DelBackendIdx(vip IP4, port uint16, udp bool) {
+	var s service
+	s.vip = vip
+	s.port[0] = byte((port >> 8) & 0xff)
+	s.port[1] = byte(port & 0xff)
+	if udp {
+		s.proto = 1
+	}
+
+	xdp.BpfMapDeleteElem(c.backend_idx, uP(&s))
+}
 
 func (c *Control) DelNatVipRip(nat, vip, rip IP4) {
 	vr := vip_rip_src_if{vip: vip, rip: rip}
 	xdp.BpfMapLookupAndDeleteElem(c.vip_rip_to_nat, uP(&vr), uP(&nat))
 	xdp.BpfMapLookupAndDeleteElem(c.nat_to_vip_rip, uP(&nat), uP(&vr))
 }
-func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16) {
+func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16, ifindex_ int, ifhw MAC) {
 
 	ifindex := c.ifindex
 	ipaddr := c.ipaddr
 	hwaddr := c.hwaddr
 
-	if iface != "" {
-		i, err := net.InterfaceByName(iface)
+	ifindex = uint32(ifindex_)
+	ipaddr = src
+	hwaddr = ifhw
 
-		if err != nil {
-			panic(iface + " not found")
+	/*
+		if iface != "" {
+			i, err := net.InterfaceByName(iface)
+
+			if err != nil {
+				panic(iface + " not found")
+			}
+
+			ifindex = uint32(i.Index)
+			ipaddr = src
+			copy(hwaddr[:], i.HardwareAddr[:])
 		}
+	*/
 
-		ifindex = uint32(i.Index)
-		ipaddr = src
-		copy(hwaddr[:], i.HardwareAddr[:])
-	}
 	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr, vlan_hi: byte(vlan >> 8), vlan_lo: byte(vlan & 0xff)}
 	//fmt.Println("SETNATVIPRIP", vr)
 
@@ -529,7 +563,7 @@ func (c *Control) VipRipPortConcurrents(vip, rip IP4, port uint16) chan int64 {
 
 func (c *Control) VipRipPortConcurrents2(vip, rip IP4, port uint16, done chan bool) chan uint64 {
 
-	counters := make(chan uint64, 100)
+	counters := make(chan uint64, 10)
 
 	go func() {
 
@@ -551,11 +585,13 @@ func (c *Control) VipRipPortConcurrents2(vip, rip IP4, port uint16, done chan bo
 				if last != next {
 					conn = c.VipRipPortConcurrent(vip, rip, port, last)
 					last = next
-
 					if conn < 0 {
-						counters <- 0
-					} else {
-						counters <- uint64(conn)
+						conn = 0
+					}
+
+					select {
+					case counters <- uint64(conn):
+					default:
 					}
 				}
 			case <-done:

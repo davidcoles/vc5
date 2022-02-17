@@ -94,7 +94,11 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 				g.RHI[r.Ip.String()] = r.Up
 
 			case c := <-scountersc:
-				g.Services[c.Sname] = c
+				if c.Delete {
+					delete(g.Services, c.Sname)
+				} else {
+					g.Services[c.Sname] = c
+				}
 
 			case c := <-countersc:
 				cooked = c
@@ -192,7 +196,8 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 		}
 
 		if j, err := json.MarshalIndent(history, "", "  "); err != nil {
-			w.Write([]byte("{}"))
+			log.Println(err)
+			w.Write([]byte(`[]`))
 		} else {
 			w.Write(j)
 		}
