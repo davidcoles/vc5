@@ -35,13 +35,12 @@ import (
 
 	"encoding/json"
 
-	//"vc5/bgp4"
 	"vc5/config"
 	"vc5/core"
 	"vc5/logger"
 	"vc5/manage"
 	"vc5/probes"
-	//"vc5/stats"
+	"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -153,16 +152,24 @@ func main() {
 		}
 	}
 
+	ws := ":80"
+	if conf.Webserver != "" {
+		ws = conf.Webserver
+	}
+	webserver := stats.Server(ws, logs)
+
+	time.Sleep(2 * time.Second) // will bomb if we can't bind to port
+
 	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
 
 	if conf.Multicast != "" {
-		go multicast_recv(c, c.IPAddr()[3], conf.Multicast, *isatty)
+		go multicast_recv(c, ipaddr[3], conf.Multicast, *isatty)
 	}
 
 	// Set up probe server - runs in other network namespace
 	go probes.Serve(netns)
 
-	manager := manage.Bootstrap(conf, c, logs)
+	manager := manage.Bootstrap(conf, c, logs, webserver)
 	var closed bool
 
 	sig := make(chan os.Signal)
@@ -202,7 +209,7 @@ func main() {
 		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
 	}
 
-	multicast_send(c, c.IPAddr()[3], conf.Multicast)
+	multicast_send(c, ipaddr[3], conf.Multicast)
 
 	for {
 		time.Sleep(1 * time.Second)
@@ -399,49 +406,3 @@ func simple() {
 		}
 	}
 }
-
-/*
-func vip_status(c *Control, ip IP4, veth string, b *bgp4.Peers, rhi chan types.RHI, logs *logger.Logger) chan vipstatus {
-	vs := make(chan vipstatus, 100)
-	go func() {
-		up := false
-		m := make(map[uint16]bool)
-		for v := range vs {
-			m[v.Port] = v.Up
-			was := up
-			up = true
-
-			for _, v := range m {
-				if !v {
-					up = false
-				}
-			}
-
-			rhi <- types.RHI{Ip: ip, Up: up}
-
-			if up != was {
-				//fmt.Println("***** CHANGED", v, up)
-				logs.NOTICE(fmt.Sprintf("VIP status change: %s -> %s", ip, ud(up)))
-
-				if b != nil {
-					b.NLRI(ip, up)
-				} else {
-					if up {
-						exec.Command("ip", "a", "add", ip.String()+"/32", "dev", veth).Output()
-					} else {
-						exec.Command("ip", "a", "del", ip.String()+"/32", "dev", veth).Output()
-					}
-				}
-			}
-		}
-	}()
-	return vs
-}
-
-func ud(b bool) string {
-	if b {
-		return "up"
-	}
-	return "down"
-}
-*/

@@ -1,6 +1,12 @@
 # VC5 L2DSR Load Balancer config
 ---
-learn: 80
+
+# 'rhi' (route health injection) specifies BGP peers and ASN to use to avertise VIPs 
+# 'learn' specifies how long to wait in seconds before adverising rhi to peers
+# 'multicast' is the address to use to announce/listen for flow state information
+# in a cluster. currently each flow gets announced every ~60s
+
+learn: 5
 multicast: 224.0.0.1:9999
 rhi:
   as_number: 65304
@@ -10,7 +16,10 @@ rhi:
 
 services:
 
-  # webservers on 2 VIPs, standard HTTP and HTTPs ports
+  # webservers on 2 VIPs, standard HTTP and HTTPs ports with standard checks
+  # At least 3 servers need to be alive for the service/vip to be advertised
+  # Setting the 'host' and 'path' options will cause http/http healthchecks
+  # to use those values for the Host header and resouce path that is queried
   - name: nginx
     description: NGINX webserver
     address:
@@ -25,23 +34,53 @@ services:
       - 10.10.100.125
     host: foo.example.com
     path: /alive
+    need: 3
     policy:
       http:
       https:
 
   # iperf server with port/healthcheck and server list declared separately
+  # If 'need' is not specified it will default to 1 by the Perl script
+  # If need be, you can explicitly set it to 0
   - name: iperf
     description: bandwidth test
     address: 192.168.101.3
     servers: iperf
     policy: iperf
 
+  # BIND DNS server - Both TCP and UDP services have the same checks
+  # There's no generic UDP checks yet, so make sure that BIND  is responding to SYN checks
+  # and that an HTTP 200 is returned for /inservice on port 80 - this allows servers to be
+  # gracefully taken out of service by removing the inservice file.
+  - name: bind
+    description: BIND DNS server
+    address: 192.168.101.4
+    servers: bind
+    path: /inservice
+    policy:
+      53:
+        checks:
+          - type: syn
+          - type: http
+            port: 80
+      53/udp:
+        checks:
+          - type: syn
+          - type: http
+            port: 80
+
+
+# labelled sets of policies as referred to above
 policy:
   iperf:
     5001:
-      type: syn
+      checks:
+        - type: syn
 
 servers:
   iperf:
     - 10.10.100.130
     - 10.10.100.131
+  bind:
+    - 10.10.100.140
+    - 10.10.100.141

@@ -23,14 +23,32 @@ import (
 	"time"
 
 	"vc5/config"
-	"vc5/rendezvous"
 	"vc5/types"
 )
 
 type L4 = types.L4
 type services = map[IP4]map[L4]config.Service
 
-func applyVips(s services) chan services {
+type status_t struct {
+	ip IP4
+	up bool
+}
+
+type l4status_t struct {
+	l4 L4
+	up bool
+}
+
+func wait_channel(wg *sync.WaitGroup) chan bool {
+	c := make(chan bool)
+	go func() {
+		wg.Wait()
+		close(c)
+	}()
+	return c
+}
+
+func virtuals(s services) chan services {
 	c := make(chan services)
 
 	go func() {
@@ -40,9 +58,12 @@ func applyVips(s services) chan services {
 		type state_t struct {
 			g uint64
 			c chan map[L4]config.Service
+			u bool
 		}
 
 		state := make(map[IP4]*state_t)
+
+		status_c := make(chan status_t, 1000)
 
 		var wg sync.WaitGroup
 
@@ -51,19 +72,30 @@ func applyVips(s services) chan services {
 			for _, v := range state {
 				close(v.c)
 			}
-			wg.Wait()
+
+			wait := wait_channel(&wg)
+
+		do_select:
+			select {
+			case <-status_c:
+				goto do_select
+			case <-wait:
+			}
+
 			logs.DEBUG("Quitting services")
 		}()
 
-		for {
+		//var reconfigure bool = true
+
+		reconfigure := func(s services) {
+			g++
 			for k, v := range s {
 				if x, ok := state[k]; ok {
 					x.g = g
 					x.c <- v
-					//state[k] = x
 				} else {
 					wg.Add(1)
-					state[k] = &state_t{g: g, c: applyVip(k, v, &wg)}
+					state[k] = &state_t{g: g, c: virtual(k, v, status_c, &wg)}
 				}
 			}
 
@@ -73,14 +105,28 @@ func applyVips(s services) chan services {
 					delete(state, k)
 				}
 			}
+		}
+
+		reconfigure(s)
+
+		for {
+			m := make(map[string]bool)
+			for k, v := range state {
+				m[k.String()] = v.u
+			}
+			webserver.VIPs() <- m
 
 			select {
+			case s := <-status_c:
+				if v, ok := state[s.ip]; ok {
+					v.u = s.up
+				}
+
 			case n, ok := <-c:
 				if !ok {
 					return
 				}
-				s = n
-				g++
+				reconfigure(n)
 			}
 		}
 	}()
@@ -88,7 +134,7 @@ func applyVips(s services) chan services {
 	return c
 }
 
-func applyVip(vip IP4, s map[L4]config.Service, w *sync.WaitGroup) chan map[L4]config.Service {
+func virtual(vip IP4, s map[L4]config.Service, vip_c chan status_t, w *sync.WaitGroup) chan map[L4]config.Service {
 	c := make(chan map[L4]config.Service)
 	go func() {
 		logs.DEBUG("Starting", vip)
@@ -104,243 +150,88 @@ func applyVip(vip IP4, s map[L4]config.Service, w *sync.WaitGroup) chan map[L4]c
 		l4status_c := make(chan l4status_t, 1000)
 
 		state := make(map[L4]*state_t)
-
-		ticker := time.NewTicker(2 * time.Second)
+		split := NewSplit(10*time.Second, 2*time.Second)
 
 		var wg sync.WaitGroup
 
 		defer func() {
-			NLRI(vip, false)
-			time.Sleep(2 * time.Second)
-			ticker.Stop()
+			advertise(vip, false)
+
+			vip_c <- status_t{ip: vip, up: false}
+
+			split.Stop()
+
 			for _, v := range state {
 				close(v.c)
 			}
-			wg.Wait()
-			w.Done()
-			logs.DEBUG("Quitting", vip)
-		}()
 
-		var reconf bool = true
-		var up bool
+			wait := wait_channel(&wg)
 
-		for {
-			// run a ping
-
-			if reconf {
-				reconf = false
-				for k, v := range s {
-					if x, ok := state[k]; ok {
-						x.g = g
-						x.c <- v
-						//current[k] = x
-					} else {
-						wg.Add(1)
-						state[k] = &state_t{g: g, c: applySvc(vip, k, v, &wg, l4status_c), u: true}
-						// start initially as true so as to not bring down other services on same VIP
-					}
-				}
-
-				for k, v := range state {
-					if v.g != g {
-						close(v.c)
-						delete(state, k)
-					}
-				}
-			}
-
-		do_select:
-			select {
-			case n, ok := <-c:
-				if !ok {
+			for {
+				select {
+				case <-l4status_c:
+				case <-wait:
+					w.Done()
+					logs.DEBUG("Quitting", vip)
 					return
 				}
-				s = n
-				g++
-				reconf = true
+			}
+		}()
 
-			case s := <-l4status_c:
-				if v, ok := state[s.l4]; ok {
-					v.u = s.up
-					//current[s.l4] = v
+		reconfigure := func(s map[L4]config.Service) {
+			g++
+			for k, v := range s {
+				if x, ok := state[k]; ok {
+					x.g = g
+					x.c <- v
+				} else {
+					wg.Add(1)
+					state[k] = &state_t{g: g, c: service(v, &wg, l4status_c), u: true}
+					// start initially as up so as to not bring down other services on same VIP
 				}
-				goto do_select
-
-			case <-ticker.C:
 			}
 
-			// recalculate VIP status + send if necc
+			for k, v := range state {
+				if v.g != g {
+					close(v.c)
+					delete(state, k)
+				}
+			}
+		}
+
+		var up bool = false
+		recalculate := func() {
 			var ok bool = true
 			for _, v := range state {
 				if !v.u {
 					ok = false
 				}
 			}
-
-			if up != ok {
+			if ok != up {
 				up = ok
-				NLRI(vip, up)
+				vip_c <- status_t{ip: vip, up: up}
+				advertise(vip, up)
 			}
-
-		}
-	}()
-	return c
-}
-
-type status_t struct {
-	ip IP4
-	up bool
-}
-
-type l4status_t struct {
-	l4 L4
-	up bool
-}
-
-func applySvc(vip IP4, svc L4, s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan config.Service {
-	c := make(chan config.Service)
-	go func() {
-		logs.DEBUG("Starting", vip, svc)
-
-		name := vip.String() + ":" + svc.String()
-
-		var wg sync.WaitGroup
-
-		type state_t struct {
-			g uint64
-			c chan config.Real
-			u bool
-			r config.Real
-			s types.Counters
 		}
 
-		var gen uint64
-
-		state := make(map[IP4]*state_t)
-
-		status_c := make(chan status_t, 1000)
-		stats_c := make(chan types.Counters, 1000)
-
-		defer func() {
-			sink <- types.Scounters{Sname: name, Delete: true}
-			for _, v := range state {
-				close(v.c)
-			}
-
-			select {
-			case l4 <- l4status_t{l4: svc, up: false}:
-			case <-time.After(1 * time.Second):
-			}
-			wg.Wait()
-			logs.DEBUG("Quitting", vip, svc)
-			w.Done()
-		}()
-
-		ticker := time.NewTicker(4 * time.Second)
-
-		var reconf bool = true
-		var recalc bool = true
-		var init bool
-
-		var up bool
+		reconfigure(s)
 
 		for {
-			if reconf {
-				reconf = false
-				recalc = true
-				for _, r := range s.Rip {
-					if v, ok := state[r.Rip]; ok {
-						v.g = gen
-						v.c <- r
-						v.r = r
-						//current[r.Rip] = v
-					} else {
-						wg.Add(1)
-						state[r.Rip] = &state_t{g: gen, c: applyRip(r, &wg, status_c, stats_c), r: r}
-					}
-				}
-
-				for k, v := range state {
-					if v.g != gen {
-						close(v.c)
-						delete(state, k)
-					}
-				}
-			}
-
-		do_select:
 			select {
 			case n, ok := <-c:
 				if !ok {
 					return
 				}
-				s = n
-				gen++
-				reconf = true
+				reconfigure(n)
 
-			case u := <-status_c:
-				if v, ok := state[u.ip]; ok {
-					// update status
-					v.u = u.up
-					//current[u.ip] = v
+			case s := <-l4status_c:
+				if v, ok := state[s.l4]; ok {
+					v.u = s.up
 				}
-				recalc = true
-				goto do_select
 
-			case s := <-stats_c:
-				if v, ok := state[s.Ip]; ok {
-					v.s = s
-					//current[s.Ip] = v
-				}
-				goto do_select
-
-			case <-ticker.C: // break out to do any recalc
+			case <-split.C:
+				recalculate()
 			}
-
-			if true {
-				be := make(map[string]types.Counters)
-				for k, v := range state {
-					v.s.Up = v.u
-					be[k.String()] = v.s
-				}
-
-				sc := types.Scounters{Name: s.Name, Description: s.Description, Sname: name, Up: up, Backends: be}
-				sc.Sum()
-				sink <- sc
-			}
-
-			if recalc {
-				recalc = false
-				var isup bool
-
-				alive := make(map[[4]byte]uint16)
-
-				for k, v := range state {
-					if v.u {
-						alive[k] = v.r.Idx
-					}
-				}
-
-				if len(alive) >= int(s.Need) {
-					isup = true
-				} else {
-					alive = make(map[[4]byte]uint16) // blank it
-				}
-
-				table, _ := rendezvous.RipIndex(alive)
-				logs.DEBUG(s.Vip, s.Port, len(alive), table[0:32])
-				ctrl.SetBackendIdx(s.Vip, s.Port, s.Udp, table)
-
-				// force update on first run - should have had time to do health checks
-				if isup != up || !init {
-					// send new status
-					init = true
-					up = isup
-					l4 <- l4status_t{l4: svc, up: up}
-					logs.NOTICE("Changed", vip, svc, "to", updown(up))
-				}
-			}
-
 		}
 	}()
 	return c

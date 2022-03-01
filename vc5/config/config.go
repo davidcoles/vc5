@@ -36,6 +36,9 @@ type IP6 = types.IP6
 type MAC = types.MAC
 type L4 = types.L4
 
+const TCP = types.TCP
+const UDP = types.UDP
+
 type HttpCheck struct {
 	Path   string `json:"path"`
 	Port   uint16 `json:"port"'`
@@ -76,6 +79,13 @@ type Real struct {
 	IfMAC   MAC
 }
 
+func (r *Real) Service() types.ThreeTuple {
+	if r.Udp {
+		return types.ThreeTuple{r.Vip, r.Port, UDP}
+	}
+	return types.ThreeTuple{r.Vip, r.Port, TCP}
+}
+
 type Service struct {
 	Vip         IP4             `json:"vip"`
 	Port        uint16          `json:"port"`
@@ -87,8 +97,30 @@ type Service struct {
 	Udp         bool            `json:"udp"`
 }
 
+func (s *Service) String() string {
+	t := s.Tuple()
+	return t.String()
+}
+
+func (s *Service) L4() types.L4 {
+	return L4{s.Port, s.Udp}
+}
+
+func (s *Service) Tuple() types.ThreeTuple {
+	if s.Udp {
+		return types.ThreeTuple{s.Vip, s.Port, UDP}
+	}
+	return types.ThreeTuple{s.Vip, s.Port, TCP}
+}
+func (s *Service) Protocol() types.Protocol {
+	if s.Udp {
+		return types.UDP
+	}
+	return types.TCP
+}
+
 type Service_ struct {
-	Rip         map[string]Real `json:"rip"`
+	Real        map[string]Real `json:"rips"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	LeastConns  bool            `json:"leastconns"`
@@ -129,6 +161,7 @@ func (old *Config) ReloadConfiguration(file string) (*Config, error) {
 	new.Interface = old.Interface
 	new.Address = old.Address
 	new.Hardware = old.Hardware
+	new.RHI.RouterId = old.RHI.RouterId
 
 	err = fix_new(new)
 	if err != nil {
@@ -147,6 +180,8 @@ func LoadConfiguration(file string, iface string, src IP4) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	config.RHI.RouterId = src
 
 	config.Interface = iface
 	config.Address = src
@@ -250,7 +285,7 @@ func fix_new(c *Config) error {
 			var s Service
 			s.Rip = make(map[string]Real)
 
-			for k, v := range s_.Rip {
+			for k, v := range s_.Real {
 				ip, ok := parseIP(k)
 				if !ok {
 					return errors.New("RIP '" + k + "' incorrect")

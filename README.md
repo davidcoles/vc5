@@ -77,9 +77,9 @@ When the VC5 binary is run, a small embedded eBPF program is loaded
 into the kernel with XDP. VC5 continues to run and populates XDP data
 structures from userspace according to the contents of the JSON
 configuration file. Healthchecks are run against backend servers and
-the results are written to XDP. The packet processing code in the
-kernel reads the XDP data structures and steers the traffic
-accordingly.
+the results are written to data structures in the kernel via XDP. The
+packet processing code in the kernel reads the XDP data structures and
+steers the traffic accordingly.
 
 ## Quickstart
 
@@ -99,11 +99,13 @@ Run the vc5.sh shell script with arguments of the binary, json file, your IP add
 
   `./vc5.sh vc5/vc5 vc5.json 10.10.100.200 ens192`
 
-If this doesn't bomb out then you should have a load balancer up and running. The webserver (running on port 80 by default) will display logs, statistics and backend status.
+If this doesn't bomb out then you should have a load balancer up and running. A virtual network device and net namespace will be created for performing healthchecks to VIPs on the backend servers. A webserver (running on port 80 by default) will display logs, statistics and backend status. There is Prometheus metric endpoint for collecting statistics.
 
 ![Console screenshot](console.jpg)
 
-You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected. You will see that an virtual ethernet device and a net namespace has been added. These should be removed when the binary exits (use Ctrl-C).
+To dynamically alter the services running on the load balancer, change the YAML file appropriately and regenerate the JSON file. Sending a HUP signal to the main process will cause it to reload the JSON configuration file and apply any changes. The new configuration will be reflected in the web console.
+
+You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected when services are healthy.
 
 If you don't have a routed environment then you can test with a client machine on the same VLAN. Either add a static route on the client machine pointing to the load balancer, or run BIRD/Quagga on client and add the client's IP address to the BGP section of the YAML config.
 
@@ -145,47 +147,18 @@ A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical cores and an 
 
 ## TODOs
 
-* Better check flexibility - eg. 3 out of 5
+* VLAN support
+* IPIP/GRE/DSCP L3 support
 * Least conns support / Take most loaded server out of pool
 * Multicast status to help last conns check
 * More complete BGP4 implementation
 * BFD implementation
-* VLAN support
-* IPIP/GRE/DSCP L3 support
 
 ## Configuration
 
-### Route Health Injection
+The [config.yaml](config.yaml) file should have a commentary detailing the structure. To see the underlying JSON structure, you can run `tools/config.pl config.yaml`. The JSON format is significantly more verbose and everything is explicitly specified.
 
-The rhi section contains the AS number to use and a list of
-peers. Currently, the BGP4 implementation does not listen on
-port 179. The IP address specified on the command line will be used as
-the router ID.
-
-RHI will only advertise a service's IP address if all services on all ports using that IP address pass healthchecks. All healthchecks listed for a port (http/https/tcp) must pass if specified.
-
-
-### Services
-
-A service consist of 
-
-* name - a string, the name of the service
-* desc - a string, a description of the service
-* addr - an VIP address, or list of VIP addresses, for the service
-* port - an integer or list of integers, that the service consist of
-* real - a name, or list of names, that references groups of real IP address in the "reals" section
-* need - number of real servers that need to be available for the service to be declared healthy (default: 1)
-* checks - a list of checks that must all pass for the service to be declared healthy.
-
-### Checks
-
-A check consists of
-
-* name - a string describing the check
-* type - http, https or tcp
-* port - the port that the check will be run against, optional if there is only one port listed in the service
-* path - the path to run http or https checks against, not needed for tcp
-* host - value to set for the Host: header in http/https checks
+The goal of the YAML format is to have a reasonably concise human-readable configuration which is then rendered into an explcit format. If the YAML format does not quite suit your needs then you can write your own generator (eg. an HAProxy L7 balancing layer behind the L4 layer, with a single config format used to generate both HAProxy and VC5 configurations).
 
 
 ## Notes
@@ -204,3 +177,4 @@ Set destination IP address on real server by DSCP - for L3 DSR
 https://lpc.events/event/11/contributions/950/attachments/889/1704/lpc_from_xdp_to_socket_fb.pdf
 
 https://github.com/xdp-project/xdp-tutorial.git
+

@@ -155,14 +155,15 @@ func (b *BGP4) BGP4State(start chan bool, done chan bool) {
 			ri <- u
 		}
 	}
-
 }
 
+/*
 type Peers struct {
 	start chan bool
 	done  chan bool
 	peers []*BGP4
 }
+
 
 func (p *Peers) Start() {
 	close(p.start)
@@ -186,6 +187,7 @@ func (b *Peers) NLRI(ip [4]byte, up bool) {
 		p.NLRI(ip, up)
 	}
 }
+*/
 
 type nlri struct {
 	ip IP4

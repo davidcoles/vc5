@@ -109,16 +109,6 @@ struct vip_rip_port {
     __u16 pad;
 };
 
-struct backend {
-    //__u8 hwaddr[65536][10];
-    // MAC + IPv4 + VLANID
-    __u8 hwaddr[65536][12];
-    __u8 least[12];
-    __u8 weight;
-    
-    
-};
-
 struct interface {
     unsigned int ifindex;
     __be32 ipaddr;
@@ -215,15 +205,6 @@ struct bpf_map_def SEC("maps") interfaces = {
   .max_entries = 2,
 };
 
-/*
-struct bpf_map_def SEC("maps") service_backend = {
-  .type        = BPF_MAP_TYPE_HASH,
-  .key_size    = sizeof(struct service),
-  .value_size  = sizeof(struct backend),
-  .max_entries = MAX_SERVICES,
-};
-*/
-
 struct bpf_map_def SEC("maps") flows = {
   .type        = BPF_MAP_TYPE_LRU_HASH,
   .key_size    = sizeof(struct flow),
@@ -295,6 +276,7 @@ struct bpf_map_def SEC("maps") tx_port = {
 
 /**********************************************************************/
 
+/*
 static inline unsigned short checksum(unsigned short *buf, int bufsz) {
     unsigned long sum = 0;
 
@@ -313,8 +295,101 @@ static inline unsigned short checksum(unsigned short *buf, int bufsz) {
 
     return ~sum;
 }
+*/
+static inline unsigned short checksum_sum(unsigned short *buf, int bufsz, unsigned long sum) {
+    //unsigned long sum = 0;
+
+    while (bufsz > 1) {
+        sum += *buf;
+        buf++;
+        bufsz -= 2;
+    }
+
+    if (bufsz == 1) {
+        sum += *(unsigned char *)buf;
+    }
+
+    sum = (sum & 0xffff) + (sum >> 16);
+    sum = (sum & 0xffff) + (sum >> 16);
+
+    return ~sum;
+}
+
+static inline unsigned short checksum_ptr(unsigned short *buf, void *end, unsigned long sum) {
+    return checksum_sum(buf, (end - (void *)buf)+1, sum);
+}
+static inline unsigned short checksum(unsigned short *buf, int bufsz) {
+    return checksum_ptr(buf, ((void *) buf) + (bufsz-1), 0);
+}
+
+
+
+
+
+
+
+
 
 #define MAX_TCP_SIZE 1480
+
+
+static inline unsigned short checksum2(unsigned short *buf, void *data_end,  unsigned long sum, int max) {
+    //unsigned long sum = 0;
+
+    for (int i = 0; i < max; i += 2) {
+	if ((void *)(buf + 1) > data_end)
+	    break;
+        sum += *buf;
+        buf++;
+    }
+
+    if((void *)buf +1 <= data_end) {
+	sum +=  bpf_htons((*((unsigned char *)buf)) << 8);
+    }
+
+    sum = (sum & 0xffff) + (sum >> 16);
+    sum = (sum & 0xffff) + (sum >> 16);
+    return ~sum;
+    
+    /*
+    if((void *)buf +1 > data_end) {
+	sum = (sum & 0xffff) + (sum >> 16);
+	sum = (sum & 0xffff) + (sum >> 16);
+	return ~sum;
+    }
+
+    unsigned char tmp[2];
+    tmp[0] = *((unsigned char *)buf);
+    tmp[1] = 0;
+    sum += *((unsigned short *)tmp);
+    
+    sum = (sum & 0xffff) + (sum >> 16);
+    sum = (sum & 0xffff) + (sum >> 16);
+
+    return ~sum;
+    */
+}
+
+
+static inline unsigned short ipv4_checksum(unsigned short *buf, void *data_end)
+{
+    return checksum2(buf, data_end, 0, sizeof(struct iphdr));
+}
+
+static inline __u16 caltcpcsum2(struct iphdr *iph, struct tcphdr *tcph, void *data_end)
+{
+    __u32 csum = 0;
+    csum += *((__u16 *) &(iph->saddr));
+    csum += *(((__u16 *) &(iph->saddr))+1);
+    csum += *((__u16 *) &(iph->daddr));
+    csum += *(((__u16 *) &(iph->daddr))+1);
+    csum += bpf_htons((__u16)iph->protocol);
+    csum += bpf_htons((__u16)(data_end - (void *)tcph));
+
+    //return (__u16) (data_end - (void *)iph); // 40 (data_end points to byte following last octet, not the last octet in the message)
+    return checksum2((unsigned short *) tcph, data_end, csum, MAX_TCP_SIZE);
+}
+
 /* All credit goes to FedeParola from https://github.com/iovisor/bcc/issues/2463 */
 __attribute__((__always_inline__))
 static inline __u16 caltcpcsum(struct iphdr *iph, struct tcphdr *tcph, void *data_end)
@@ -322,8 +397,6 @@ static inline __u16 caltcpcsum(struct iphdr *iph, struct tcphdr *tcph, void *dat
     __u32 csum_buffer = 0;
     __u16 *buf = (void *)tcph;
 
-
-    // Endianness issues - use bpf_* helpers? 
     // Compute pseudo-header checksum
     csum_buffer += (__u16)iph->saddr;
     csum_buffer += (__u16)(iph->saddr >> 16);
@@ -339,7 +412,7 @@ static inline __u16 caltcpcsum(struct iphdr *iph, struct tcphdr *tcph, void *dat
 		{
 		    break;
 		}
-
+	    
 	    csum_buffer += *buf;
 	    buf++;
 	}
@@ -347,10 +420,11 @@ static inline __u16 caltcpcsum(struct iphdr *iph, struct tcphdr *tcph, void *dat
     if ((void *)buf + 1 <= data_end) 
 	{
 	    // In case payload is not 2 bytes aligned
-	    csum_buffer += *(__u8 *)buf;
+	    csum_buffer += bpf_htons(*(__u8 *)buf);
 	}
 
     __u16 csum = (__u16)csum_buffer + (__u16)(csum_buffer >> 16);
+    csum = (__u16)csum_buffer + (__u16)(csum_buffer >> 16);
     csum = ~csum;
 
     return csum;
@@ -928,8 +1002,17 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
 	  ipv4->check = 0;
 	  ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
+
+	  ipv4->check = 0;
+	  ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
+	  
 	  tcp->check = 0;
-	  tcp->check = caltcpcsum(ipv4, tcp, data_end);
+
+	  if(0) {
+	      tcp->check = caltcpcsum(ipv4, tcp, data_end);
+	  } else {
+	      tcp->check = caltcpcsum2(ipv4, tcp, data_end);
+	  }
 	  
 	  /* if probe reply was received on a VLAN then remove the tag */
 	  if(tag != NULL) {
@@ -963,8 +1046,17 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
             
       ipv4->check = 0;
       ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
+      
+      ipv4->check = 0;
+      ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
+      
       tcp->check = 0;
-      tcp->check = caltcpcsum(ipv4, tcp, data_end);
+
+      if(0) {
+	  tcp->check = caltcpcsum(ipv4, tcp, data_end);
+      } else {
+	  tcp->check = caltcpcsum2(ipv4, tcp, data_end);
+      }
 
       // redirect probe packet out to either eth0, or vlanX
       return bpf_redirect(vr->ifindex, 0);

@@ -47,6 +47,13 @@ type result struct {
 
 const PATH = "/run/vc5.sock"
 
+func ptoa(p uint16) string {
+	return fmt.Sprintf("%d", p)
+}
+func itoa(i int) string {
+	return fmt.Sprintf("%d", i)
+}
+
 func Ping(ip IP4) {
 	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
 	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
@@ -61,27 +68,15 @@ func HTTPSCheck(ip IP4, port uint16, path string, expect int, host string) (bool
 }
 
 func _HTTPCheck(scheme string, ip IP4, port uint16, path string, expect int, host string) (bool, string) {
-	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
-	p := fmt.Sprintf("%d", port)
-	r := fmt.Sprintf("%d", expect)
-	c := &check{Type: scheme, Args: []string{a, p, path, r, host}}
-	return check_client(c)
+	return check_client(&check{Type: scheme, Args: []string{ip.String(), ptoa(port), path, itoa(expect), host}})
 }
 
-func TCPCheck(ip IP4, port uint16) bool {
-	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
-	p := fmt.Sprintf("%d", port)
-	c := &check{Type: "tcp", Args: []string{a, p}}
-	s, _ := check_client(c)
-	return s
+func TCPCheck(ip IP4, port uint16) (bool, string) {
+	return check_client(&check{Type: "tcp", Args: []string{ip.String(), ptoa(port)}})
 }
 
-func SYNCheck(ip IP4, port uint16) bool {
-	a := fmt.Sprintf("%d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
-	p := fmt.Sprintf("%d", port)
-	c := &check{Type: "syn", Args: []string{a, p}}
-	s, _ := check_client(c)
-	return s
+func SYNCheck(ip IP4, port uint16) (bool, string) {
+	return check_client(&check{Type: "syn", Args: []string{ip.String(), ptoa(port)}})
 }
 
 var client *http.Client
@@ -126,8 +121,8 @@ func check_client(c *check) (bool, string) {
 
 func Serve(netns string) {
 	for {
-		exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH).Output()
-		//exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" >/tmp/vc5.log 2>&1").Output()
+		//exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH).Output()
+		exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" >/tmp/vc5.log 2>&1").Output()
 		time.Sleep(1 * time.Second)
 	}
 }

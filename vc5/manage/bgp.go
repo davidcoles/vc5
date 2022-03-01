@@ -19,7 +19,6 @@
 package manage
 
 import (
-	"fmt"
 	"time"
 
 	"vc5/bgp4"
@@ -60,8 +59,8 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 	go func() {
 
 		defer func() {
-			for k, v := range state {
-				fmt.Println("closing bgp", k)
+			logs.DEBUG("Closing all BGP sessions")
+			for _, v := range state {
 				close(v.done)
 			}
 		}()
@@ -70,7 +69,7 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 			for _, s := range conf.Peers {
 				if v, ok := state[s]; !ok {
 					done := make(chan bool)
-					fmt.Println("starting bgp", s)
+					logs.DEBUG("Starting BGP session", s)
 					peer := bgp4.BGP4Start(s, addr, conf.RouterId, conf.ASNumber, start, done)
 					for k, v := range nlri {
 						peer.NLRI([4]byte(k), v)
@@ -85,7 +84,7 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 
 			for k, v := range state {
 				if v.gen != gen {
-					fmt.Println("closing bgp", k)
+					logs.DEBUG("Closing BGP session", k)
 					close(v.done)
 					delete(state, k)
 				}
@@ -94,19 +93,29 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 			select {
 			case r, ok := <-c:
 				if !ok {
-					fmt.Println("closing down bgp")
 					return
 				}
 				conf = r
 				gen++
 
 			case <-timer.C:
+				logs.DEBUG("Learn timer expired")
 				close(start)
 
 			case n := <-nlri_c:
+				var send bool = true
+
+				if v, ok := nlri[n.ip]; ok && v == n.up {
+					send = false // no change
+				}
+
 				nlri[n.ip] = n.up
-				for _, v := range state {
-					go v.peer.NLRI([4]byte(n.ip), n.up)
+
+				if send {
+					logs.DEBUG("Advertising RHI", n.ip, n.up)
+					for _, v := range state {
+						go v.peer.NLRI([4]byte(n.ip), n.up)
+					}
 				}
 
 			}
@@ -116,6 +125,6 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 	return c
 }
 
-func NLRI(ip IP4, up bool) {
+func advertise(ip IP4, up bool) {
 	nlri_c <- nlri_t{ip: ip, up: up}
 }

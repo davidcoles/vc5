@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	//"vc5/xdp"
 )
 
 type tuple struct {
@@ -207,8 +208,6 @@ func craftTCP(sourceIP, targetIP string, sourcePort, targetPort uint16) []byte {
 
 	wb[16] = byte(cs >> 8)
 	wb[17] = byte(cs & 0xff)
-
-	//fmt.Println(src, dst, cs, csum, wb)
 
 	return wb
 }

@@ -28,7 +28,7 @@ import (
 	"strconv"
 	"strings"
 
-	"vc5/core"
+	//"vc5/core"
 	"vc5/logger"
 	"vc5/types"
 )
@@ -58,22 +58,22 @@ type global struct {
 //func (ctrl *Control) stats_server() {
 
 type SServer struct {
-	rhic       chan types.RHI
+	vips       chan map[string]bool
 	scountersc chan scounters
 	countersc  chan counters
 }
 
-func Server(addr string, logs *logger.Logger, c *core.Control) *SServer {
-	ss := SServer{rhic: make(chan types.RHI, 100), scountersc: make(chan scounters, 100), countersc: make(chan counters, 100)}
-	go Server_(addr, ss.rhic, ss.scountersc, ss.countersc, logs, c)
-	return &ss
+func Server(addr string, logs *logger.Logger) *SServer {
+	ss := &SServer{scountersc: make(chan scounters, 100), countersc: make(chan counters, 100), vips: make(chan map[string]bool, 100)}
+	go ss.Server_(addr, logs)
+	return ss
 }
 
-func (s *SServer) RHI() chan types.RHI       { return s.rhic }
-func (s *SServer) Counters() chan counters   { return s.countersc }
-func (s *SServer) Scounters() chan scounters { return s.scountersc }
+func (s *SServer) VIPs() chan map[string]bool { return s.vips }
+func (s *SServer) Counters() chan counters    { return s.countersc }
+func (s *SServer) Scounters() chan scounters  { return s.scountersc }
 
-func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, countersc chan counters, logs *logger.Logger, c *core.Control) {
+func (ss *SServer) Server_(addr string, logs *logger.Logger) {
 
 	var js []byte = []byte("{}")
 
@@ -86,21 +86,30 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 		g.RHI = make(map[string]bool)
 		g.Services = make(map[string]scounters)
 
+		//var vips map[string]bool
+
 		var cooked counters
 
 		for {
 			select {
-			case r := <-rhic:
-				g.RHI[r.Ip.String()] = r.Up
+			case v := <-ss.vips:
+				g.RHI = v
 
-			case c := <-scountersc:
+			case c := <-ss.scountersc:
+
+				//key := fmt.Sprint(c.VIP, c.Port, c.UDP)
+				svc := c.Service()
+				key := svc.String()
+
 				if c.Delete {
-					delete(g.Services, c.Sname)
+					//delete(g.Services, c.Sname)
+					delete(g.Services, key)
 				} else {
-					g.Services[c.Sname] = c
+					//g.Services[c.Sname] = c
+					g.Services[key] = c
 				}
 
-			case c := <-countersc:
+			case c := <-ss.countersc:
 				cooked = c
 			}
 
@@ -158,27 +167,29 @@ func Server_(addr string, rhic chan types.RHI, scountersc chan scounters, counte
 		w.Write(metrics)
 	})
 
-	http.HandleFunc("/defcon/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
+	/*
+		http.HandleFunc("/defcon/", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
 
-		if len(r.RequestURI) == 9 {
-			switch r.RequestURI[8] {
-			case '1':
-				c.Defcon(1)
-			case '2':
-				c.Defcon(2)
-			case '3':
-				c.Defcon(3)
-			case '4':
-				c.Defcon(4)
-			case '5':
-				c.Defcon(5)
+			if len(r.RequestURI) == 9 {
+				switch r.RequestURI[8] {
+				case '1':
+					c.Defcon(1)
+				case '2':
+					c.Defcon(2)
+				case '3':
+					c.Defcon(3)
+				case '4':
+					c.Defcon(4)
+				case '5':
+					c.Defcon(5)
+				}
 			}
-		}
 
-		w.Write([]byte(fmt.Sprintln("DEFCON:", c.Defcon(0))))
-	})
+			w.Write([]byte(fmt.Sprintln("DEFCON:", c.Defcon(0))))
+		})
+	*/
 
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

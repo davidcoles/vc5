@@ -19,6 +19,7 @@
 package manage
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,14 +28,16 @@ import (
 	"vc5/types"
 )
 
-//func applyRip(r config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c chan stats_t) chan config.Real {
-func applyRip(r config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c chan types.Counters) chan config.Real {
+func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c chan types.Counters) chan config.Real {
 	c := make(chan config.Real)
 
 	go func() {
 
-		l4 := L4{Port: r.Port, Udp: r.Udp}
-		logs.DEBUG("Starting", r.Vip, l4, r.Rip)
+		history := []bool{false, false, true, true, true} // need 2/5 - first real check will determine the state
+
+		tt := real.Service()
+		svc := tt.String()
+		logs.DEBUG("Starting", svc, real.Rip)
 
 		// this *may* be a new real IP, wait a few seconds for MAC to be discovered
 		time.Sleep(3 * time.Second)
@@ -42,41 +45,53 @@ func applyRip(r config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c
 		done := make(chan bool)
 
 		var concurrent uint64
-		ctrl.VipRipPortCounters(r.Vip, r.Rip, r.Port, true)
-		ctrl.SetNatVipRip(r.Nat, r.Vip, r.Rip, r.Src, r.Iface, r.VLAN, r.IfIndex, r.IfMAC) // this can occur for multiple ports! need NVR manager
-		updates := ctrl.VipRipPortConcurrents2(r.Vip, r.Rip, r.Port, done)
+		ctrl.VipRipPortCounters(real.Vip, real.Rip, real.Port, true)
+		ctrl.SetNatVipRip(real.Nat, real.Vip, real.Rip, real.Src, real.Iface, real.VLAN, real.IfIndex, real.IfMAC)
+		// ^^^ this can occur for multiple ports! need NVR manager
+		updates := ctrl.VipRipPortConcurrents2(real.Vip, real.Rip, real.Port, done)
 
 		status_timer := time.NewTicker(5 * time.Second) // run healthchecks every 5s
 		stats_timer := time.NewTicker(1 * time.Second)  // update stats every 1s
 
 		defer func() {
-			logs.DEBUG("Quiting", r.Vip, l4, r.Rip)
+			logs.DEBUG("Quiting", svc, real.Rip)
 			close(done)
 			status_timer.Stop()
 			stats_timer.Stop()
 			wg.Done()
 		}()
 
-		var up bool
+		var state bool
 		var init bool
 
 		for {
-			s := doChecks(r)
+			history = append(history, doChecks(real, state))
 
-			// force a status upate after first check
-			if !init {
-				up = !s
-				init = true
+			for len(history) > 5 {
+				history = history[1:]
 			}
 
-			if up != s {
-				select {
-				case status_c <- status_t{ip: r.Rip, up: s}:
-					up = s
-				case <-time.After(1 * time.Second):
-					panic("timeout")
+			var failed int
+			for _, v := range history {
+				if !v {
+					failed++
 				}
-				logs.NOTICE("Changed", r.Vip, l4, r.Rip, "to", updown(up))
+			}
+
+			s := true
+			if failed > 1 {
+				s = false
+			}
+
+			if state != s || !init { // force a status upate after first check
+				select {
+				case status_c <- status_t{ip: real.Rip, up: s}:
+					state = s
+					init = true
+				case <-time.After(1 * time.Second):
+					// we don't update state here to cause a retry of the state change next time round
+				}
+				logs.NOTICE("Changed", svc, real.Rip, "to", updown(state), history)
 			}
 
 		do_select:
@@ -85,22 +100,20 @@ func applyRip(r config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c
 				goto do_select
 			case <-stats_timer.C:
 				// lookup and send stats with timeout
-
 				select {
 				//case stats_c <- stats_t{}:
-				case stats_c <- ctrl.VipRipPortCounters2(r.Vip, r.Rip, r.Port, false, concurrent):
+				case stats_c <- ctrl.VipRipPortCounters2(real.Vip, real.Rip, real.Port, false, concurrent):
 				case <-time.After(1 * time.Second):
-					panic("timeout")
+					//panic("timeout")
 				}
 				goto do_select
 
 			case <-status_timer.C:
-			case n, ok := <-c:
+			case r, ok := <-c:
 				if !ok {
 					return
 				}
-				r = n
-
+				real = r
 			}
 
 		}
@@ -109,28 +122,40 @@ func applyRip(r config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c
 	return c
 }
 
-func doChecks(real config.Real) bool {
+func doChecks(real config.Real, was bool) bool {
 
 	for _, c := range real.Syn {
-		if !probes.SYNCheck(real.Nat, c.Port) {
+		if s, e := probes.SYNCheck(real.Nat, c.Port); !s {
+			if was {
+				fmt.Println("syn", real, e)
+			}
 			return false
 		}
 	}
 
 	for _, c := range real.Tcp {
-		if !probes.TCPCheck(real.Nat, c.Port) {
+		if s, e := probes.TCPCheck(real.Nat, c.Port); !s {
+			if was {
+				fmt.Println("tcp", real, e)
+			}
 			return false
 		}
 	}
 
 	for _, c := range real.Http {
-		if s, _ := probes.HTTPCheck(real.Nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+		if s, e := probes.HTTPCheck(real.Nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+			if was {
+				fmt.Println("http", real, e)
+			}
 			return false
 		}
 	}
 
 	for _, c := range real.Https {
-		if s, _ := probes.HTTPSCheck(real.Nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+		if s, e := probes.HTTPSCheck(real.Nat, c.Port, c.Path, int(c.Expect), c.Host); !s {
+			if was {
+				fmt.Println("https", real, e)
+			}
 			return false
 		}
 	}

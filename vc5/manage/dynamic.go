@@ -45,16 +45,12 @@ func updown(b bool) string {
 	return "down"
 }
 
-func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger) chan *config.Config {
+func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *stats.SServer) chan *config.Config {
 
 	ctrl = ctl
 	logs = l
 
-	ws := ":80"
-	if conf.Webserver != "" {
-		ws = conf.Webserver
-	}
-	webserver = stats.Server(ws, logs, ctrl)
+	webserver = ws
 
 	go global_stats(ctrl, webserver.Counters(), logs)
 
@@ -64,8 +60,8 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger) chan *c
 
 	go func() {
 		bgp4 := do_bgp(conf.Address, conf.Learn, conf.RHI)
-		real := applyPing(conf.Reals)
-		vips := applyVips(conf.VIPs)
+		real := reals(conf.Reals)
+		vips := virtuals(conf.VIPs)
 
 		for n := range c {
 			real <- n.Reals
@@ -89,7 +85,7 @@ func get_tx(ip IP4, nics []types.NIC) uint8 {
 	return 0
 }
 
-func applyPing(reals map[IP4]uint16) chan map[IP4]uint16 {
+func reals(reals map[IP4]uint16) chan map[IP4]uint16 {
 	c := make(chan map[IP4]uint16)
 
 	go func() {
@@ -177,4 +173,56 @@ func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logge
 		}
 		prev = count
 	}
+}
+
+type Split struct {
+	C        chan bool
+	done     chan bool
+	timer    *time.Timer
+	ticker   *time.Ticker
+	duration time.Duration
+}
+
+func NewSplit(initial time.Duration, subsequent time.Duration) *Split {
+	s := &Split{C: make(chan bool), done: make(chan bool), timer: time.NewTimer(initial), duration: subsequent}
+	go func() {
+
+		defer func() {
+			if s.ticker != nil {
+				s.ticker.Stop()
+			}
+			s.timer.Stop()
+		}()
+
+		select {
+		case <-s.timer.C:
+			select {
+			case s.C <- true:
+			case <-s.done:
+				return
+			}
+		case <-s.done:
+			return
+		}
+
+		s.ticker = time.NewTicker(s.duration)
+
+		for {
+			select {
+			case <-s.ticker.C:
+				select {
+				case s.C <- true:
+				case <-s.done:
+					return
+				}
+			case <-s.done:
+				return
+			}
+		}
+	}()
+	return s
+}
+
+func (s *Split) Stop() {
+	close(s.done)
 }

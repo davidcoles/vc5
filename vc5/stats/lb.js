@@ -145,18 +145,19 @@ function updateStats(url) {
 	    
 	    global.innerHTML = data.average_latency_ns + "ns latency, " + data.packets_per_second + "pps, " + data.rx_octets + " rx_octets, " + data.rx_packets + " rx_packets, " + data.total_connections + " total_connections, " + data.current_connections + " current_connections";
 	    
+
+	    var newrhi = document.createElement("div");
 	    for(var i in data.route_health_injection) {
 		var up = data.route_health_injection[i];
-		var ip = document.getElementById(i);
-                if(!ip) {
-                    ip = document.createElement("div");
-		    ip.id = i;
-		    ip.style = "line-height: 1.5em;";
-		    rhi.appendChild(ip);
-		}
-
+                var ip = document.createElement("div");
+		ip.id = i;
+		ip.style = "line-height: 1.5em;";
 		ip.innerHTML = i + ": " + (up ? "up" : "down");
+		newrhi.appendChild(ip);
 	    }
+	    newrhi.id = "rhi";	    
+	    rhi.replaceWith(newrhi);
+
 
 	    var newdiv = document.createElement("div");
 

@@ -57,6 +57,63 @@ func CmpIP4s(a, b IP4s) bool {
 	return true
 }
 
+type Protocol bool
+
+const (
+	TCP Protocol = false
+	UDP          = true
+)
+
+/*
+func (p Protocol) String() string {
+	switch p {
+	case TCP:
+		return "tcp"
+	case UDP:
+		return "udp"
+	}
+	panic("undefined protocol")
+	return "undefined"
+}
+*/
+
+func (p Protocol) String() string {
+	if p {
+		return "udp"
+	}
+	return "tcp"
+}
+
+func (p Protocol) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + p.String() + `"`), nil
+}
+
+type ThreeTuple struct {
+	IP       IP4
+	Port     uint16
+	Protocol Protocol
+}
+
+func (t *ThreeTuple) L4() L4 {
+	if t.Protocol == UDP {
+		return L4{t.Port, true}
+	}
+	return L4{t.Port, false}
+}
+
+func (t *ThreeTuple) String() string {
+	return t.IP.String() + ":" + t.L4().String()
+}
+
+/*
+func (t *ThreeTuple) Protocol() Protocol {
+	if t.UDP {
+		return UDP
+	}
+	return TCP
+}
+*/
+
 type RHI struct {
 	Ip IP4
 	Up bool
@@ -81,7 +138,6 @@ type Counters struct {
 	Vlan       uint16    `json:"-"`
 }
 type Scounters struct {
-	Sname       string              `json:"-"`
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
 	Up          bool                `json:"up"`
@@ -92,7 +148,14 @@ type Scounters struct {
 	Rx_packets  uint64              `json:"rx_packets"`
 	Rx_bytes    uint64              `json:"rx_octets"`
 	Backends    map[string]Counters `json:"backends"`
-	Delete      bool
+	VIP         IP4                 `json:"vip"`
+	Port        uint16              `json:"port"`
+	Protocol    Protocol            `json:"protocol"`
+	Delete      bool                `json:"-"`
+}
+
+func (c *Scounters) Service() ThreeTuple {
+	return ThreeTuple{c.VIP, c.Port, c.Protocol}
 }
 
 func (c *Scounters) Sum() {
@@ -155,9 +218,9 @@ func (i IP4) String() string {
 
 func (l L4) String() string {
 	if l.Udp {
-		return fmt.Sprint("udp:", l.Port)
+		return fmt.Sprint(l.Port, "/udp")
 	}
-	return fmt.Sprint("tcp:", l.Port)
+	return fmt.Sprint(l.Port, "/tcp")
 
 }
 

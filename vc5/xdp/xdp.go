@@ -28,7 +28,9 @@ import "C"
 
 import (
 	"errors"
+	//"fmt"
 	"io/ioutil"
+	//"net"
 	"os"
 	"unsafe"
 )
@@ -160,7 +162,3 @@ func BpfMapDeleteElem(i int, k unsafe.Pointer) int {
 func BpfMapLookupElem(i int, k, v unsafe.Pointer) int {
 	return int(C.bpf_map_lookup_elem(C.int(i), k, v))
 }
-
-//func BpfMapUpdateElem_(i int, k, v unsafe.Pointer, flags uint64) int {
-//	return int(C.bpf_map_update_elem(C.int(i), k, v, C.ulonglong(flags)))
-//}
