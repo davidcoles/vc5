@@ -155,6 +155,22 @@ struct backend_rec {
     __u16 pad2;
 };
 
+
+struct arphdr {
+    __be16          ar_hrd;         /* format of hardware address   */
+    __be16          ar_pro;         /* format of protocol address   */
+    unsigned char   ar_hln;         /* length of hardware address   */
+    unsigned char   ar_pln;         /* length of protocol address   */
+    __be16          ar_op;          /* ARP opcode (command)         */
+    __u8         ar_sha[6];
+    __u8         ar_spa[4];
+    __u8         ar_tha[6];
+    __u8         ar_tpa[4];
+};
+
+
+
+
 /**********************************************************************/
 /* MAPS */
 /**********************************************************************/
@@ -216,6 +232,14 @@ struct bpf_map_def SEC("maps") flow_queue = {
   .type        = BPF_MAP_TYPE_QUEUE,
   .key_size    = 0,
   .value_size  = sizeof(struct flow_flow_state),  
+  .max_entries = 10000,
+};
+
+
+struct bpf_map_def SEC("maps") arp_queue = {
+  .type        = BPF_MAP_TYPE_QUEUE,
+  .key_size    = 0,
+  .value_size  = sizeof(struct arphdr),
   .max_entries = 10000,
 };
 
@@ -325,11 +349,6 @@ static inline unsigned short checksum(unsigned short *buf, int bufsz) {
 
 
 
-
-
-
-
-
 #define MAX_TCP_SIZE 1480
 
 
@@ -379,14 +398,12 @@ static inline unsigned short ipv4_checksum(unsigned short *buf, void *data_end)
 static inline __u16 caltcpcsum2(struct iphdr *iph, struct tcphdr *tcph, void *data_end)
 {
     __u32 csum = 0;
-    csum += *((__u16 *) &(iph->saddr));
-    csum += *(((__u16 *) &(iph->saddr))+1);
-    csum += *((__u16 *) &(iph->daddr));
-    csum += *(((__u16 *) &(iph->daddr))+1);
-    csum += bpf_htons((__u16)iph->protocol);
-    csum += bpf_htons((__u16)(data_end - (void *)tcph));
-
-    //return (__u16) (data_end - (void *)iph); // 40 (data_end points to byte following last octet, not the last octet in the message)
+    csum += *(((__u16 *) &(iph->saddr))+0); // 1st 2 bytes
+    csum += *(((__u16 *) &(iph->saddr))+1); // 2nd 2 bytes
+    csum += *(((__u16 *) &(iph->daddr))+0); // 1st 2 bytes
+    csum += *(((__u16 *) &(iph->daddr))+1); // 2nd 2 bytes
+    csum += bpf_htons((__u16)iph->protocol); // protocol is a u8
+    csum += bpf_htons((__u16)(data_end - (void *)tcph)); 
     return checksum2((unsigned short *) tcph, data_end, csum, MAX_TCP_SIZE);
 }
 
@@ -715,6 +732,57 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     }
     
     if (eth_proto != bpf_ntohs(ETH_P_IP)) {
+	if(eth_proto == bpf_ntohs(ETH_P_ARP)) {
+	    struct arphdr *arph = NULL;
+	    if(data + nh_off + sizeof(struct arphdr) > data_end) {
+		return XDP_PASS;
+	    }
+	    arph = data + nh_off;
+
+	    /*
+	        __be16          ar_hrd;          format of hardware address   
+		__be16          ar_pro;          format of protocol address   
+		unsigned char   ar_hln;          length of hardware address  
+		unsigned char   ar_pln;          length of protocol address   
+		__be16          ar_op;           ARP opcode (command)         
+		__u8         ar_sha[6];
+		__u8         ar_spa[4];
+		__u8         ar_tha[6];
+		__u8         ar_tpa[4];
+	    */
+	    
+	    if(arph->ar_hrd != bpf_htons(0x0001) ||
+	       arph->ar_pro != bpf_htons(0x0800) ||
+	       arph->ar_hln != 6 ||
+	       arph->ar_pln != 4) {
+		return XDP_PASS;
+	    }
+
+
+	    if(maccmp(arph->ar_sha, eth_hdr->h_source) != 0 ||
+	       maccmp(arph->ar_tha, eth_hdr->h_dest) != 0) {
+		return XDP_PASS;
+	    }
+		
+	    
+	    //unsigned char *newmac = (unsigned char *) &(arph->ar_sha);
+	    unsigned char *oldmac = bpf_map_lookup_elem(&rip_to_mac, &(arph->ar_spa)); // remote system IP
+	    
+	    /* TODO: check destination is my visible IP? */
+	    if(oldmac) {
+		/* if the current record for the real IP does not match this MAC */
+		/*
+		  if(maccmp(oldmac, newmac) != 0) {
+		  bpf_map_delete_elem(&mac_to_rip, oldmac); // delete old MAC to RIP record
+		  bpf_map_update_elem(&mac_to_rip, newmac, &(ipv4->saddr), BPF_ANY); // create new MAC to RIP record
+		  maccpy(m, s); // update RIP to MAC record in place
+		  }
+		*/
+		bpf_map_push_elem(&arp_queue, arph, 0);
+		
+	    }
+	}
+	
 	return XDP_PASS;
     }
     
