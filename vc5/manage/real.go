@@ -123,6 +123,10 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 }
 
 func doChecks(real config.Real, was bool) bool {
+	// fail fast
+	if mac := ctrl.ReadMAC(real.Rip); mac == nil {
+		return false
+	}
 
 	for _, c := range real.Syn {
 		if s, e := probes.SYNCheck(real.Nat, c.Port); !s {

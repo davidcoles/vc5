@@ -122,8 +122,17 @@ func (b *BGP4) NLRI(ip IP4, up bool) {
 func (b *BGP4) BGP4State(start chan bool, done chan bool) {
 	<-start
 
+	addr := b.myip
+	ipaddr := fmt.Sprintf("%d.%d.%d.%d", addr[0], addr[1], addr[2], addr[3])
+
 	//d := net.Dialer{Timeout: 2 * time.Second}
-	d := net.Dialer{Timeout: 5 * time.Second}
+	d := net.Dialer{
+		Timeout: 5 * time.Second,
+		LocalAddr: &net.TCPAddr{
+			IP:   net.ParseIP(ipaddr),
+			Port: 0,
+		},
+	}
 
 	up := make(map[IP4]bool)
 	ok := make(chan bool)

@@ -732,7 +732,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     }
     
     if (eth_proto != bpf_ntohs(ETH_P_IP)) {
-	if(eth_proto == bpf_ntohs(ETH_P_ARP)) {
+	if(eth_proto == bpf_ntohs(ETH_P_ARP) && 0) {
 	    struct arphdr *arph = NULL;
 	    if(data + nh_off + sizeof(struct arphdr) > data_end) {
 		return XDP_PASS;
@@ -765,19 +765,18 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	    }
 		
 	    
-	    //unsigned char *newmac = (unsigned char *) &(arph->ar_sha);
+	    unsigned char *newmac = (unsigned char *) &(arph->ar_sha);
 	    unsigned char *oldmac = bpf_map_lookup_elem(&rip_to_mac, &(arph->ar_spa)); // remote system IP
 	    
 	    /* TODO: check destination is my visible IP? */
 	    if(oldmac) {
 		/* if the current record for the real IP does not match this MAC */
-		/*
-		  if(maccmp(oldmac, newmac) != 0) {
-		  bpf_map_delete_elem(&mac_to_rip, oldmac); // delete old MAC to RIP record
-		  bpf_map_update_elem(&mac_to_rip, newmac, &(ipv4->saddr), BPF_ANY); // create new MAC to RIP record
-		  maccpy(m, s); // update RIP to MAC record in place
-		  }
-		*/
+		
+		if(maccmp(oldmac, newmac) != 0) {
+		    bpf_map_delete_elem(&mac_to_rip, oldmac); // delete old MAC to RIP record
+		    bpf_map_update_elem(&mac_to_rip, newmac, &(arph->ar_spa), BPF_ANY); // create new MAC to RIP record
+		    maccpy(oldmac, newmac); // update RIP to MAC record in place
+		}
 		bpf_map_push_elem(&arp_queue, arph, 0);
 		
 	    }
@@ -801,6 +800,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	}
 	
 	if (ipv4->protocol == IPPROTO_ICMP) {
+	    return XDP_PASS;
+
 	    
 	    unsigned char *s = (unsigned char *) &(eth_hdr->h_source);
 	    unsigned char *m = bpf_map_lookup_elem(&rip_to_mac, &(ipv4->saddr));
@@ -956,7 +957,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	}
 	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
 	maccpy(eth_hdr->h_dest, rec->hwaddr);
-	
+
 	// if tagged with a vlan, update it
 	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));
 	

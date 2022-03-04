@@ -23,13 +23,10 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os/exec"
+	//"os/exec"
 	"time"
 	"unsafe"
 
-	//"bpf"
-	//"vc5/rendezvous"
-	//"vc5/stats"
 	"vc5/types"
 	"vc5/xdp"
 )
@@ -86,6 +83,7 @@ type Control struct {
 	interfaces              int
 	service_backend         int
 	rip_to_mac              int
+	mac_to_rip              int
 	nat_to_vip_rip          int
 	vip_rip_to_nat          int
 	clocks                  int
@@ -248,6 +246,7 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.interfaces = c.find_map("interfaces", 4, 16)
 	//c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
+	c.mac_to_rip = c.find_map("mac_to_rip", 6, 4)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
 	c.clocks = c.find_map("clocks", 4, 24)
@@ -310,6 +309,9 @@ func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16, tx ui
 	copy(r[8:], rip[:])
 	r[12] = tx
 
+	r[6] = byte((vlan >> 8) & 0xff)
+	r[7] = byte(vlan & 0xff)
+
 	var recs [MAX_CPU * 16]byte
 
 	for n := 0; n < MAX_CPU; n++ {
@@ -369,22 +371,8 @@ func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16
 	ipaddr = src
 	hwaddr = ifhw
 
-	/*
-		if iface != "" {
-			i, err := net.InterfaceByName(iface)
-
-			if err != nil {
-				panic(iface + " not found")
-			}
-
-			ifindex = uint32(i.Index)
-			ipaddr = src
-			copy(hwaddr[:], i.HardwareAddr[:])
-		}
-	*/
-
 	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr, vlan_hi: byte(vlan >> 8), vlan_lo: byte(vlan & 0xff)}
-	//fmt.Println("SETNATVIPRIP", vr)
+	//fmt.Println("SETNATVIPRIP", vip, rip, src, iface, vlan)
 
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)
@@ -395,7 +383,22 @@ func (c *Control) SetRip(rip IP4) {
 	var mac MAC
 	//fmt.Println("SETRIP", rip)
 	xdp.BpfMapUpdateElem(c.rip_to_mac, uP(&rip), uP(&mac), xdp.BPF_ANY)
-	go ping(rip)
+	//go ping(rip)
+}
+
+func (c *Control) SetRipMac(rip IP4, mac MAC) {
+	xdp.BpfMapUpdateElem(c.rip_to_mac, uP(&rip), uP(&mac), xdp.BPF_ANY)
+
+	var nul MAC
+	if mac != nul {
+		xdp.BpfMapUpdateElem(c.mac_to_rip, uP(&mac), uP(&rip), xdp.BPF_ANY)
+	}
+}
+func (c *Control) DelMac(mac MAC) {
+	xdp.BpfMapDeleteElem(c.mac_to_rip, uP(&mac))
+}
+func (c *Control) DelRip(rip IP4) {
+	xdp.BpfMapDeleteElem(c.rip_to_mac, uP(&rip))
 }
 
 func (c *Control) _SetBackends(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
@@ -441,10 +444,10 @@ func (c *Control) ReadMAC(ip IP4) *MAC {
 	return &m
 }
 
-func ping(ip IP4) {
-	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-	exec.Command("/bin/sh", "-c", command).Output()
-}
+//func ping(ip IP4) {
+//	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
+//	exec.Command("/bin/sh", "-c", command).Output()
+//}
 
 func (c *Control) VipRipPortCounters2(vip, rip IP4, port uint16, clear bool, curr uint64) counters {
 	count := c.VipRipPortCounters(vip, rip, port, clear)
@@ -513,7 +516,7 @@ func (c *Control) ARPQueue() {
 		if xdp.BpfMapLookupAndDeleteElem(c.arp_queue, nil, uP(&entry)) != 0 {
 			time.Sleep(100 * time.Millisecond)
 		} else {
-			//fmt.Println(entry)
+			fmt.Println(entry)
 		}
 	}
 }

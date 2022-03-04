@@ -33,7 +33,11 @@ import (
 	"os/exec"
 	"time"
 	//"strings"
+
+	"vc5/types"
 )
+
+type IP4 = types.IP4
 
 type check struct {
 	Type string
@@ -54,10 +58,10 @@ func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
 }
 
-func Ping(ip IP4) {
-	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
-}
+//func _Ping(ip IP4) {
+//	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
+//	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
+//}
 
 func HTTPCheck(ip IP4, port uint16, path string, expect int, host string) (bool, string) {
 	return _HTTPCheck("http", ip, port, path, expect, host)

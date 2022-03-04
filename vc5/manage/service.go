@@ -125,13 +125,13 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 					alive = make(map[[4]byte]uint16) // blank it
 				}
 
-				table, _ := rendezvous.RipIndex(alive)
-				logs.DEBUG(s.String(), len(alive), table[0:32])
+				table, stats := rendezvous.RipIndex(alive)
+				logs.DEBUG(s.String(), len(alive), table[0:32], stats)
 				ctrl.SetBackendIdx(s.Vip, s.Port, s.Udp, table)
 
 				if init && isup != up { // send new status
-					l4 <- l4status_t{l4: s.L4(), up: up}
-					logs.NOTICE("Changed", s.String(), "to", updown(up))
+					l4 <- l4status_t{l4: s.L4(), up: isup}
+					logs.NOTICE("Changed", s.String(), "to", updown(isup))
 				}
 
 				up = isup

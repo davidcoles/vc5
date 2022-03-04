@@ -25,7 +25,7 @@ import (
 	"vc5/config"
 	"vc5/core"
 	"vc5/logger"
-	"vc5/probes"
+	//"vc5/probes"
 	"vc5/stats"
 	"vc5/types"
 )
@@ -60,11 +60,12 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *sta
 
 	go func() {
 		bgp4 := do_bgp(conf.Address, conf.Learn, conf.RHI)
-		real := reals(conf.Reals)
+		//real := reals(conf.Info)
+		real := arp(conf.Real)
 		vips := virtuals(conf.VIPs)
 
 		for n := range c {
-			real <- n.Reals
+			real <- n.Real
 			vips <- n.VIPs
 			bgp4 <- n.RHI
 		}
@@ -85,8 +86,9 @@ func get_tx(ip IP4, nics []types.NIC) uint8 {
 	return 0
 }
 
-func reals(reals map[IP4]uint16) chan map[IP4]uint16 {
-	c := make(chan map[IP4]uint16)
+/*
+func reals(reals map[IP4]config.Info) chan map[IP4]config.Info {
+	c := make(chan map[IP4]config.Info)
 
 	go func() {
 
@@ -94,7 +96,7 @@ func reals(reals map[IP4]uint16) chan map[IP4]uint16 {
 		defer ticker.Stop()
 
 		for r, i := range reals {
-			ctrl.SetBackendRec(r, MAC{}, 0, i, 0)
+			ctrl.SetBackendRec(r, MAC{}, i.VLAN, i.Index, 0)
 			ctrl.SetRip(r)
 		}
 
@@ -105,23 +107,27 @@ func reals(reals map[IP4]uint16) chan map[IP4]uint16 {
 				if !ok {
 					return
 				}
-				reals = r
-				for r, i := range reals {
-					ctrl.SetBackendRec(r, MAC{}, 0, i, 0)
-					ctrl.SetRip(r)
+
+				for r, i := range r {
+					if _, ok := reals[r]; !ok {
+						ctrl.SetBackendRec(r, MAC{}, i.VLAN, i.Index, 0)
+						ctrl.SetRip(r)
+					}
 				}
+
+				reals = r
+
 			}
 
 			for r, i := range reals {
-				go func(r IP4, i uint16) {
-					var v uint16
+				go func(r IP4, i config.Info) {
 					probes.Ping(r)
 					time.Sleep(2 * time.Second)
 
 					if ctrl != nil {
 						m := ctrl.ReadMAC(r)
 						if m != nil {
-							ctrl.SetBackendRec(r, *m, v, i, 0)
+							ctrl.SetBackendRec(r, *m, i.VLAN, i.Index, 0)
 						}
 					}
 
@@ -131,6 +137,7 @@ func reals(reals map[IP4]uint16) chan map[IP4]uint16 {
 	}()
 	return c
 }
+*/
 
 func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logger) {
 	var prev types.Counters
@@ -226,3 +233,7 @@ func NewSplit(initial time.Duration, subsequent time.Duration) *Split {
 func (s *Split) Stop() {
 	close(s.done)
 }
+
+//func ping(ip IP4) {
+//	probes.Ping(ip)
+//}
