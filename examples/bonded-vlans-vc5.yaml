@@ -1,7 +1,8 @@
 # VC5 L2DSR Load Balancer config
+# run with: ./vc5.sh vc5/vc5 vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
 ---
 
-learn: 10
+learn: 20
 multicast: 224.0.0.1:9999
 rhi:
   as_number: 65000
@@ -11,57 +12,23 @@ rhi:
 services:
 
   - name: nginx
-    desc: web server
-    addr: 192.168.101.1
-    port:
-      - 80
-    real: nginx
-    checks:
-      - name: http check
-        type: http
-        path: /alive
-
-reals:
-  nginx:
-    - 192.168.3.100
-    - 192.168.4.100
-    - 192.168.5.100
-
-# vc5 will assign a vlan-id to each real ip and source healthprobe
-# according to the cidr addresses listed below In a vlan setup the
-# main ip address is irrevent - nothing is sourced from it.
-
-# ./vc5.sh 1.2.3.4 enp3s4f0 enp3s4f1
-
-# If using native driver and it does not do bpf_rediect well then try:
-
-# ./vc5.sh -v -b br0 1.2.3.4 enp3s4f0 enp3s4f1
+    description: NGINX webserver
+    address:
+      - 192.168.101.1
+    servers:
+      - 192.168.2.12
+      - 192.168.3.34
+      - 192.168.4.56
+      - 192.168.5.78
+    host: foo.example.com
+    path: /alive
+    policy:
+      http:
 
 vlans:
-# 192.168.1.200/24: 1 # if no real servers on this vlan then it need not be specified
-# 192.168.2.200/24: 2 # if no real servers on this vlan then it need not be specified
-  192.168.3.200/24: 3  
-  192.168.4.200/24: 4
-  192.168.5.200/24: 5
+  2: 192.168.2.0/24
+  3: 192.168.3.0/24
+  4: 192.168.4.0/24
+  5: 192.168.5.0/24  
 
-# vlan interfaces currently must be named like vlan1, vlan200, etc.
-# will redo such that they can be specified on the command line with a
-# vlan flag, something like eg.:
-
-# ./vc5.sh -v enp3s4f0,enp3s4f1 vlan1,1,192.168.0.200/24 vlan2,2,192.168.2.200/24 vlan3,3,192.168.3.200/24 ...
-
-# pings to discover real server MAC addresses will be sourced (by the
-# linux kernel) from the vlan-local ipaddress. healthprobes to the vip
-# on the real server will be sourced from an internal nat address,
-# will be mapped to the right vip, mac and and source ip combination,
-# then bpf_redirected to the right interface for the vlan (ge. vlan3),
-# tagged by the linux vlan implementatin and sent out tagged via an
-# appropriate physical interface - which can involve the bonding
-# driver selecting a live nic
-
-# traffic from clients into the load balancer will be received from
-# the router, and must be tagged. the bpf progream will update the
-# vlan tag and mac addresses and bounce it out the receiving interface
-# (which will always be up in LACP, otherwise the packet would not
-# have been received). 
 

@@ -40,7 +40,8 @@
 #define lock_xadd(ptr, val) ((void) __sync_fetch_and_add(ptr, val))
 #endif
 
-#define SECOND 1000000000//nanoseconds
+// nanoseconds ...
+#define SECOND 1000000000
 
 struct counter {
     __u64 new_flows;
@@ -155,22 +156,6 @@ struct backend_rec {
     __u16 pad2;
 };
 
-
-struct arphdr {
-    __be16          ar_hrd;         /* format of hardware address   */
-    __be16          ar_pro;         /* format of protocol address   */
-    unsigned char   ar_hln;         /* length of hardware address   */
-    unsigned char   ar_pln;         /* length of protocol address   */
-    __be16          ar_op;          /* ARP opcode (command)         */
-    __u8         ar_sha[6];
-    __u8         ar_spa[4];
-    __u8         ar_tha[6];
-    __u8         ar_tpa[4];
-};
-
-
-
-
 /**********************************************************************/
 /* MAPS */
 /**********************************************************************/
@@ -236,13 +221,6 @@ struct bpf_map_def SEC("maps") flow_queue = {
 };
 
 
-struct bpf_map_def SEC("maps") arp_queue = {
-  .type        = BPF_MAP_TYPE_QUEUE,
-  .key_size    = 0,
-  .value_size  = sizeof(struct arphdr),
-  .max_entries = 10000,
-};
-
 struct bpf_map_def SEC("maps") rip_to_mac = {
         .type = BPF_MAP_TYPE_HASH,
         .key_size = 4,
@@ -301,25 +279,6 @@ struct bpf_map_def SEC("maps") tx_port = {
 /**********************************************************************/
 
 /*
-static inline unsigned short checksum(unsigned short *buf, int bufsz) {
-    unsigned long sum = 0;
-
-    while (bufsz > 1) {
-        sum += *buf;
-        buf++;
-        bufsz -= 2;
-    }
-
-    if (bufsz == 1) {
-        sum += *(unsigned char *)buf;
-    }
-
-    sum = (sum & 0xffff) + (sum >> 16);
-    sum = (sum & 0xffff) + (sum >> 16);
-
-    return ~sum;
-}
-*/
 static inline unsigned short checksum_sum(unsigned short *buf, int bufsz, unsigned long sum) {
     //unsigned long sum = 0;
 
@@ -338,21 +297,20 @@ static inline unsigned short checksum_sum(unsigned short *buf, int bufsz, unsign
 
     return ~sum;
 }
+*/
+//static inline unsigned short checksum_ptr(unsigned short *buf, void *end, unsigned long sum) {
+//    return checksum_sum(buf, (end - (void *)buf)+1, sum);
+//}
 
-static inline unsigned short checksum_ptr(unsigned short *buf, void *end, unsigned long sum) {
-    return checksum_sum(buf, (end - (void *)buf)+1, sum);
-}
+/*
 static inline unsigned short checksum(unsigned short *buf, int bufsz) {
     return checksum_ptr(buf, ((void *) buf) + (bufsz-1), 0);
 }
-
-
-
+*/
 
 #define MAX_TCP_SIZE 1480
 
-
-static inline unsigned short checksum2(unsigned short *buf, void *data_end,  unsigned long sum, int max) {
+static inline unsigned short generic_checksum(unsigned short *buf, void *data_end,  unsigned long sum, int max) {
     //unsigned long sum = 0;
 
     for (int i = 0; i < max; i += 2) {
@@ -369,33 +327,15 @@ static inline unsigned short checksum2(unsigned short *buf, void *data_end,  uns
     sum = (sum & 0xffff) + (sum >> 16);
     sum = (sum & 0xffff) + (sum >> 16);
     return ~sum;
-    
-    /*
-    if((void *)buf +1 > data_end) {
-	sum = (sum & 0xffff) + (sum >> 16);
-	sum = (sum & 0xffff) + (sum >> 16);
-	return ~sum;
-    }
-
-    unsigned char tmp[2];
-    tmp[0] = *((unsigned char *)buf);
-    tmp[1] = 0;
-    sum += *((unsigned short *)tmp);
-    
-    sum = (sum & 0xffff) + (sum >> 16);
-    sum = (sum & 0xffff) + (sum >> 16);
-
-    return ~sum;
-    */
 }
 
 
 static inline unsigned short ipv4_checksum(unsigned short *buf, void *data_end)
 {
-    return checksum2(buf, data_end, 0, sizeof(struct iphdr));
+    return generic_checksum(buf, data_end, 0, sizeof(struct iphdr));
 }
 
-static inline __u16 caltcpcsum2(struct iphdr *iph, struct tcphdr *tcph, void *data_end)
+static inline __u16 tcp_checksum(struct iphdr *iph, struct tcphdr *tcph, void *data_end)
 {
     __u32 csum = 0;
     csum += *(((__u16 *) &(iph->saddr))+0); // 1st 2 bytes
@@ -404,47 +344,7 @@ static inline __u16 caltcpcsum2(struct iphdr *iph, struct tcphdr *tcph, void *da
     csum += *(((__u16 *) &(iph->daddr))+1); // 2nd 2 bytes
     csum += bpf_htons((__u16)iph->protocol); // protocol is a u8
     csum += bpf_htons((__u16)(data_end - (void *)tcph)); 
-    return checksum2((unsigned short *) tcph, data_end, csum, MAX_TCP_SIZE);
-}
-
-/* All credit goes to FedeParola from https://github.com/iovisor/bcc/issues/2463 */
-__attribute__((__always_inline__))
-static inline __u16 caltcpcsum(struct iphdr *iph, struct tcphdr *tcph, void *data_end)
-{
-    __u32 csum_buffer = 0;
-    __u16 *buf = (void *)tcph;
-
-    // Compute pseudo-header checksum
-    csum_buffer += (__u16)iph->saddr;
-    csum_buffer += (__u16)(iph->saddr >> 16);
-    csum_buffer += (__u16)iph->daddr;
-    csum_buffer += (__u16)(iph->daddr >> 16);
-    csum_buffer += (__u16)iph->protocol << 8;
-    csum_buffer += bpf_htons((__u16)(data_end - (void *)tcph));
-
-    // Compute checksum on tcp header + payload
-    for (int i = 0; i < MAX_TCP_SIZE; i += 2) 
-	{
-	    if ((void *)(buf + 1) > data_end) 
-		{
-		    break;
-		}
-	    
-	    csum_buffer += *buf;
-	    buf++;
-	}
-
-    if ((void *)buf + 1 <= data_end) 
-	{
-	    // In case payload is not 2 bytes aligned
-	    csum_buffer += bpf_htons(*(__u8 *)buf);
-	}
-
-    __u16 csum = (__u16)csum_buffer + (__u16)(csum_buffer >> 16);
-    csum = (__u16)csum_buffer + (__u16)(csum_buffer >> 16);
-    csum = ~csum;
-
-    return csum;
+    return generic_checksum((unsigned short *) tcph, data_end, csum, MAX_TCP_SIZE);
 }
 
 /**********************************************************************/
@@ -649,6 +549,8 @@ __u64 era_last = 0;
 __u64 wallclock = 0;
 const __u32 index0 = 0;
 
+
+// POSSIBILITIES FOR DOS MITIGATION
 //DEFCON1: will switch traffic without referring to state
 //DEFCON2: will switch traffic referencing existing state
 //DEFCON3: will create new state if syn|rst|fin flag not set
@@ -690,7 +592,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     __u64 wallclock_now = 0;
 
 
-    if((era_last + 1000000000) < start) {
+    if((era_last + (1 * SECOND)) < start) {
+	//if((era_last + 1000000000) < start) {
 	// 1s has passed since last era update - check for a new era
 	//__u64 *ts = bpf_map_lookup_elem(&clock, &index0);
 	struct clocks *c = bpf_map_lookup_elem(&clocks, &index0);
@@ -731,57 +634,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	data += sizeof(struct vlan_hdr);
     }
     
-    if (eth_proto != bpf_ntohs(ETH_P_IP)) {
-	if(eth_proto == bpf_ntohs(ETH_P_ARP) && 0) {
-	    struct arphdr *arph = NULL;
-	    if(data + nh_off + sizeof(struct arphdr) > data_end) {
-		return XDP_PASS;
-	    }
-	    arph = data + nh_off;
-
-	    /*
-	        __be16          ar_hrd;          format of hardware address   
-		__be16          ar_pro;          format of protocol address   
-		unsigned char   ar_hln;          length of hardware address  
-		unsigned char   ar_pln;          length of protocol address   
-		__be16          ar_op;           ARP opcode (command)         
-		__u8         ar_sha[6];
-		__u8         ar_spa[4];
-		__u8         ar_tha[6];
-		__u8         ar_tpa[4];
-	    */
-	    
-	    if(arph->ar_hrd != bpf_htons(0x0001) ||
-	       arph->ar_pro != bpf_htons(0x0800) ||
-	       arph->ar_hln != 6 ||
-	       arph->ar_pln != 4) {
-		return XDP_PASS;
-	    }
-
-
-	    if(maccmp(arph->ar_sha, eth_hdr->h_source) != 0 ||
-	       maccmp(arph->ar_tha, eth_hdr->h_dest) != 0) {
-		return XDP_PASS;
-	    }
-		
-	    
-	    unsigned char *newmac = (unsigned char *) &(arph->ar_sha);
-	    unsigned char *oldmac = bpf_map_lookup_elem(&rip_to_mac, &(arph->ar_spa)); // remote system IP
-	    
-	    /* TODO: check destination is my visible IP? */
-	    if(oldmac) {
-		/* if the current record for the real IP does not match this MAC */
-		
-		if(maccmp(oldmac, newmac) != 0) {
-		    bpf_map_delete_elem(&mac_to_rip, oldmac); // delete old MAC to RIP record
-		    bpf_map_update_elem(&mac_to_rip, newmac, &(arph->ar_spa), BPF_ANY); // create new MAC to RIP record
-		    maccpy(oldmac, newmac); // update RIP to MAC record in place
-		}
-		bpf_map_push_elem(&arp_queue, arph, 0);
-		
-	    }
-	}
-	
+    if (eth_proto != bpf_ntohs(ETH_P_IP)) {	
 	return XDP_PASS;
     }
     
@@ -1069,19 +922,14 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	  ipv4->daddr = virif->ipaddr;
 	  maccpy(eth_hdr->h_dest, virif->hwaddr);
 
-	  ipv4->check = 0;
-	  ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
+	  //ipv4->check = 0;
+	  //ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
 
 	  ipv4->check = 0;
 	  ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
 	  
 	  tcp->check = 0;
-
-	  if(0) {
-	      tcp->check = caltcpcsum(ipv4, tcp, data_end);
-	  } else {
-	      tcp->check = caltcpcsum2(ipv4, tcp, data_end);
-	  }
+	  tcp->check = tcp_checksum(ipv4, tcp, data_end);
 	  
 	  /* if probe reply was received on a VLAN then remove the tag */
 	  if(tag != NULL) {
@@ -1113,19 +961,15 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
       maccpy(eth_hdr->h_dest, m);
       maccpy(eth_hdr->h_source,  vr->hwaddr);
             
-      ipv4->check = 0;
-      ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
+      //ipv4->check = 0;
+      //ipv4->check = checksum((unsigned short *) ipv4, (void *)tcp - (void *)ipv4);
       
       ipv4->check = 0;
       ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
       
       tcp->check = 0;
 
-      if(0) {
-	  tcp->check = caltcpcsum(ipv4, tcp, data_end);
-      } else {
-	  tcp->check = caltcpcsum2(ipv4, tcp, data_end);
-      }
+      tcp->check = tcp_checksum(ipv4, tcp, data_end);
 
       // redirect probe packet out to either eth0, or vlanX
       return bpf_redirect(vr->ifindex, 0);

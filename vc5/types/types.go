@@ -64,19 +64,6 @@ const (
 	UDP          = true
 )
 
-/*
-func (p Protocol) String() string {
-	switch p {
-	case TCP:
-		return "tcp"
-	case UDP:
-		return "udp"
-	}
-	panic("undefined protocol")
-	return "undefined"
-}
-*/
-
 func (p Protocol) String() string {
 	if p {
 		return "udp"

@@ -101,10 +101,8 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 			case <-stats_timer.C:
 				// lookup and send stats with timeout
 				select {
-				//case stats_c <- stats_t{}:
 				case stats_c <- ctrl.VipRipPortCounters2(real.Vip, real.Rip, real.Port, false, concurrent):
 				case <-time.After(1 * time.Second):
-					//panic("timeout")
 				}
 				goto do_select
 

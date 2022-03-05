@@ -90,33 +90,6 @@ func main() {
 	ipv4 := args[4]
 	peth := args[5:]
 
-	if false {
-		var nics []types.NIC
-
-		re := regexp.MustCompile(`:`)
-
-		for _, v := range peth {
-			split := re.Split(v, 2)
-			if len(split) != 2 {
-				panic("nope")
-			}
-
-			ip, ipnet, err := net.ParseCIDR(split[1])
-			if err != nil {
-				panic("ParseCIDR " + split[1])
-			}
-
-			ifc, err := net.InterfaceByName(split[0])
-			if err != nil {
-				panic("net.InterfaceByName " + split[0])
-			}
-
-			nics = append(nics, types.NIC{Name: split[0], IP: ip, IPNet: *ipnet, Iface: *ifc})
-		}
-
-		fmt.Println(nics)
-	}
-
 	ipaddr, ok := parseIP(ipv4)
 	if !ok {
 		log.Fatal(ipv4)

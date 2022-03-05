@@ -4,6 +4,8 @@ A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load balancer (L4LB) 
 
 This is very much a proof of concept at this stage - most everything is incomplete and poorly defined!
 
+If you think that this may be useful and have any questions/suggestions, feel free to contact me at d4v1dc0l3s@protonmail.com
+
 ## Homepage
 
 The code is hosted at GitHub, https://github.com/davidcoles/vc5
@@ -15,25 +17,25 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 
 This software is intended to replace the need for medium-to-large load
 balancing appliances handling tens-to-hundreds of Gbit/s levels of
-outbound traffic. Hundreds of thousands and, maybe, millions of
-concurrently connected clients is the target (depending on
-application).
+outbound traffic. Depending on application, hundreds of thousands, to
+millions, of concurrently connected clients is the target.
 
 VC5 uses a high-speed data path in the Linux kernel to switch traffic
 at somewhere near wire speed on 10Gbit/s interfaces. When a packet is
-received for a target service, a program (which is loaded into the
+received for a target service, a routine (which is loaded into the
 running kernel with XDP), will replace the destination MAC address of
 the packet with the address of one of the real servers in the
 load-balancing pool and then bounce the packet straight back out of
-the same interface on which it was received.
+the same interface on which it was received (changing VLAN tag, if
+necessary).
 
-When the real server receives the packet it sees the VIP which it has
-configured on a loopback interface and its own MAC address, processes
-the packet appropriately and sends the reply directly back to the
-client, short-circuiting the load balancer. This is the Direct Server
-Return model of load-balancing. A similar layer-3 version of this is
-possible too (eg. using GRE or IP-in-IP encapsulation), but this is
-not yet implemented.
+When the real server receives the packet it sees the VIP (which it has
+configured on a loopback interface) directed to its own MAC address,
+processes the packet appropriately and sends the reply directly back
+to the client, short-circuiting the load balancer. This is the Direct
+Server Return model of load-balancing. A similar layer-3 version of
+this is possible too (eg. using DSCP signalling, GRE or IP-in-IP
+encapsulation), but this is not yet implemented.
 
 The majority of traffic is likely to be asymmetric, with just a small
 amount of traffic being sent to the server as (eg.) an HTTP request
@@ -85,29 +87,49 @@ steers the traffic accordingly.
 
 It would be recommended to start out using a fresh virtual machine.
 
-First we need a development environment capable of building libbpf and Go binaries. Go 1.16 or later is needed due to using go:embed directives. On Ubuntu 20.04 this can be achieved with:
+First we need a development environment capable of building libbpf and
+Go binaries. Go 1.16 or later is needed due to using go:embed
+directives. On Ubuntu 20.04 this can be achieved with:
 
   `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.16 libyaml-perl libjson-perl ethtool`
   
   `ln -s /usr/lib/go-1.16/bin/go /usr/local/bin/go`
 
-Copy the [config.yaml](config.yaml) file to vc5.yaml and edit appropriately for your routers/services/backends.
+Copy the [config.yaml](config.yaml) file to vc5.yaml and edit
+appropriately for your routers/services/backends.
 
-Run `make`. This will build the binary and transform the YAML config file to a more verbose JSON config format.
+Run `make`. This will build the binary and transform the YAML config
+file to a more verbose JSON config format.
 
-Run the vc5.sh shell script with arguments of the binary, json file, your IP address and network interface name, eg.:
+Run the vc5.sh shell script with arguments of the binary, json file,
+your IP address and network interface name, eg.:
 
   `./vc5.sh vc5/vc5 vc5.json 10.10.100.200 ens192`
 
-If this doesn't bomb out then you should have a load balancer up and running. A virtual network device and net namespace will be created for performing healthchecks to VIPs on the backend servers. A webserver (running on port 80 by default) will display logs, statistics and backend status. There is Prometheus metric endpoint for collecting statistics.
+If this doesn't bomb out then you should have a load balancer up and
+running. A virtual network device and net namespace will be created
+for performing healthchecks to VIPs on the backend servers. A
+webserver (running on port 80 by default) will display logs,
+statistics and backend status. There is Prometheus metric endpoint for
+collecting statistics.
 
 ![Console screenshot](console.jpg)
 
-To dynamically alter the services running on the load balancer, change the YAML file appropriately and regenerate the JSON file. Sending a HUP signal to the main process will cause it to reload the JSON configuration file and apply any changes. The new configuration will be reflected in the web console.
+To dynamically alter the services running on the load balancer, change
+the YAML file appropriately and regenerate the JSON file (`make
+vc5.json`). Sending a HUP signal to the main process will cause it to
+reload the JSON configuration file and apply any changes. The new
+configuration will be reflected in the web console.
 
-You can add static routing to forward traffic for a VIP to the load balancer, or configure BGP peers in the YAML file to have routes automatically injected when services are healthy.
+You can add static routing to forward traffic for a VIP to the load
+balancer, or configure BGP peers in the YAML file to have routes
+automatically injected to your routing table when services are
+healthy.
 
-If you don't have a routed environment then you can test with a client machine on the same VLAN. Either add a static route on the client machine pointing to the load balancer, or run BIRD/Quagga on client and add the client's IP address to the BGP section of the YAML config.
+If you don't have a routed environment then you can test with a client
+machine on the same VLAN. Either add a static route on the client
+machine pointing to the load balancer, or run BIRD/Quagga on client
+and add the client's IP address to the BGP section of the YAML config.
 
 Sample bird.conf snippet:
 
@@ -131,23 +153,61 @@ protocol bgp loadbalancers {
 }
 ```
 
-If you enable ECMP on your router/client ("merge paths on;" in BIRD's kernel protocol) then you can load balance traffic to multiple load balancers. VC5 uses multicast to share a flow state table so peers will learn about each other's connections and take over in the case of one load balancer going down.
+If you enable ECMP on your router/client ("merge paths on;" in BIRD's
+kernel protocol) then you can load balance traffic to multiple load
+balancers. VC5 uses multicast to share a flow state table so peers
+will learn about each other's connections and take over in the case of
+one load balancer going down.
 
-To use native driver mode in XDP a slighly more involved network setup is needed at this stage. Run your physical interface in a bridge (see sample netplan config in bridge.yaml) and add the -b flag to vc5.sh as so:
+To use native driver mode in XDP a slighly more involved network setup
+is needed at this stage. Run your physical interface in a bridge (see
+sample netplan config in bridge.yaml) and add the -b flag to vc5.sh as
+so:
 
   `./vc5.sh -b br0 10.10.100.200 enp130s0f1`
 
+## Operation
+
+There are two modes of operation, simple and VLAN based. In simple
+mode all hosts must be on the same subnet as the primary address of
+the load balancer. In VLAN mode (enabled by declaring entries under
+the "vlan" section), all server entries must match a VLAN/CIDR subnet
+entry. VLAN tagged interfaces need to be created in the OS and have an
+IP address assigned within the subnet, and the interface names must be
+of the (printf) form "vlan%d" (vlan2, vlan53, vlan1356, etc.).
+
+Traffic into the load balancer needs to be on a tagged VLAN (no
+pushing or popping of 802.1Q is done). The IP address specified on the
+command line will be used to bind the connection to BGP peers, so
+should be on one of the VLAN tagged interfaces (with appropriate
+routing for BGP egress if the router is not on the same subnet,
+eg. route reflectors).
+
+Sample netplan and VC5 configurations are in the
+[examples/](examples/) directory.
+
+
 ## Performance
 
-This has mostly been tested using Icecast backend servers with clients pulling a mix of low and high bitrate streams (48kbps - 192kbps).
+This has mostly been tested using Icecast backend servers with clients
+pulling a mix of low and high bitrate streams (48kbps - 192kbps).
 
-It seems that a VMWare guest (4 core, 8GB) using the XDP generic driver will comfortably support 100K concurrent clients, 380Mbps/700Kpps through the load balancer and 8Gbps of traffic from the backends directly to the clients.
+It seems that a VMWare guest (4 core, 8GB) using the XDP generic
+driver will comfortably support 100K concurrent clients,
+380Mbps/700Kpps through the load balancer and 8Gbps of traffic from
+the backends directly to the clients.
 
-A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical cores and an Intel 10Gbps NIC (ixgbe driver) in native mode will support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic back to clients. This was at a load of ~25% on the CPU - clearly it can do significantly more than this, but resources for running more client and backend servers were not available at the time.
+A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical
+cores and an Intel 10Gbps NIC (ixgbe driver) in native mode will
+support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic back
+to clients. This was at a load of ~25% on the CPU - clearly it can do
+significantly more than this, but resources for running more client
+and backend servers were not available at the time.
+
+
 
 ## TODOs
 
-* VLAN support
 * IPIP/GRE/DSCP L3 support
 * Least conns support / Take most loaded server out of pool
 * Multicast status to help last conns check
@@ -156,9 +216,17 @@ A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical cores and an 
 
 ## Configuration
 
-The [config.yaml](config.yaml) file should have a commentary detailing the structure. To see the underlying JSON structure, you can run `tools/config.pl config.yaml`. The JSON format is significantly more verbose and everything is explicitly specified.
+The [config.yaml](config.yaml) file should have a commentary detailing
+the structure. To see the underlying JSON structure, you can run
+`tools/config.pl config.yaml`. The JSON format is significantly more
+verbose and everything is explicitly specified.
 
-The goal of the YAML format is to have a reasonably concise human-readable configuration which is then rendered into an explcit format. If the YAML format does not quite suit your needs then you can write your own generator (eg. an HAProxy L7 balancing layer behind the L4 layer, with a single config format used to generate both HAProxy and VC5 configurations).
+The goal of the YAML format is to have a reasonably concise
+human-readable configuration which is then rendered into an explcit
+format. If the YAML format does not quite suit your needs then you can
+write your own generator (eg. an HAProxy L7 balancing layer behind the
+L4 layer, with a single config format used to generate both HAProxy
+and VC5 configurations).
 
 
 ## Notes

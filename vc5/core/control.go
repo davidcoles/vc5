@@ -96,8 +96,6 @@ type Control struct {
 	backend_idx             int
 	tx_port                 int
 
-	arp_queue int
-
 	//// logger *logger
 	iface2u8 map[string]uint8
 
@@ -258,10 +256,6 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.backend_recs = c.find_map("backend_recs", 4, 16)
 	c.backend_idx = c.find_map("backend_idx", 8, 8192)
 	c.tx_port = c.find_map("tx_port", 4, 4)
-
-	c.arp_queue = c.find_map("arp_queue", 0, 28)
-
-	go c.ARPQueue()
 
 	if p, err := net.InterfaceByName(peth[0]); err != nil {
 		fmt.Println(peth, err)
@@ -507,18 +501,6 @@ func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) in
 		total += t
 	}
 	return total
-}
-
-func (c *Control) ARPQueue() {
-
-	for {
-		var entry [28]byte
-		if xdp.BpfMapLookupAndDeleteElem(c.arp_queue, nil, uP(&entry)) != 0 {
-			time.Sleep(100 * time.Millisecond)
-		} else {
-			fmt.Println(entry)
-		}
-	}
 }
 
 func (c *Control) FlowQueue() (*[FLOW_STATE]byte, bool) {

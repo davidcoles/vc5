@@ -182,8 +182,15 @@ func (old *Config) ReloadConfiguration(file string) (*Config, error) {
 		return nil, err
 	}
 
-	fix_nat(new, old)
-	fix_idx(new, old)
+	err = fix_nat(new, old)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fix_idx(new, old)
+	if err != nil {
+		return nil, err
+	}
 
 	return new, nil
 }
@@ -214,8 +221,15 @@ func LoadConfiguration(file string, iface string, src IP4) (*Config, error) {
 		return nil, err
 	}
 
-	fix_nat(config, nil)
-	fix_idx(config, nil)
+	err = fix_nat(config, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fix_idx(config, nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return config, nil
 }
@@ -387,7 +401,7 @@ func fix_new(c *Config) error {
 	return nil
 }
 
-func fix_nat(new, old *Config) {
+func fix_nat(new, old *Config) error {
 	//fmt.Println(new.Vips)
 
 	natify := func(i uint16) IP4 {
@@ -399,7 +413,7 @@ func fix_nat(new, old *Config) {
 		u bool
 	}
 
-	newi := func(m map[[8]byte]idx) uint16 {
+	newi := func(m map[[8]byte]idx) (uint16, error) {
 		n := make(map[uint16]bool)
 		for _, v := range m {
 			n[v.n] = true
@@ -410,12 +424,12 @@ func fix_nat(new, old *Config) {
 		if _, ok := n[i]; ok {
 			i++
 			if i > 65000 {
-				panic("i > 65000")
+				return 0, errors.New("Only max 65000 nat slots allowed currently")
 			}
 			goto check_exists
 		}
 
-		return i
+		return i, nil
 	}
 
 	nats := make(map[[8]byte]idx)
@@ -441,7 +455,11 @@ func fix_nat(new, old *Config) {
 					v.u = true
 					nats[viprip] = v
 				} else {
-					i = newi(nats)
+					var e error
+					i, e = newi(nats)
+					if e != nil {
+						return e
+					}
 					nats[viprip] = idx{n: i, u: true}
 				}
 
@@ -459,15 +477,17 @@ func fix_nat(new, old *Config) {
 			new.Nats[k] = v.n
 		}
 	}
+
+	return nil
 }
 
-func fix_idx(new, old *Config) {
+func fix_idx(new, old *Config) error {
 	type idx struct {
 		n uint16
 		u bool
 	}
 
-	newi := func(m map[IP4]idx) uint16 {
+	newi := func(m map[IP4]idx) (uint16, error) {
 		n := make(map[uint16]bool)
 		for _, v := range m {
 			n[v.n] = true
@@ -477,13 +497,13 @@ func fix_idx(new, old *Config) {
 	check_exists:
 		if _, ok := n[i]; ok {
 			i++
-			if i > 65000 {
-				panic("i > 65000")
+			if i > 255 {
+				return 0, errors.New("Only max 255 real servers allowed currently")
 			}
 			goto check_exists
 		}
 
-		return i
+		return i, nil
 	}
 
 	reals := make(map[IP4]idx)
@@ -507,7 +527,11 @@ func fix_idx(new, old *Config) {
 					v.u = true
 					reals[rip] = v
 				} else {
-					i = newi(reals)
+					var e error
+					i, e = newi(reals)
+					if e != nil {
+						return e
+					}
 					reals[rip] = idx{n: i, u: true}
 				}
 
@@ -528,7 +552,7 @@ func fix_idx(new, old *Config) {
 			new.Real[k] = info
 		}
 	}
-
+	return nil
 }
 
 func fix_info(c *Config) error {
