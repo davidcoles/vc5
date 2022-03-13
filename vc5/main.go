@@ -63,7 +63,8 @@ func main() {
 
 	isatty := flag.Bool("t", false, "isatty")
 	native := flag.Bool("n", false, "native")
-	bridge := flag.String("b", "", "bridge")
+	bridge := flag.Bool("b", false, "bridge")
+	ifname := flag.String("i", "", "ifname")
 	flag.Parse()
 
 	args := flag.Args()
@@ -102,7 +103,11 @@ func main() {
 		copy(hwaddr[:], hw[:])
 	}
 
-	conf, err := config.LoadConfiguration(conffile, peth[0], ipaddr)
+	if *ifname == "" {
+		*ifname = peth[0]
+	}
+
+	conf, err := config.LoadConfiguration(conffile, *ifname, ipaddr)
 
 	if err != nil {
 		panic(err)
@@ -133,7 +138,7 @@ func main() {
 
 	time.Sleep(2 * time.Second) // will bomb if we can't bind to port
 
-	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge != "", peth...)
+	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge, peth...)
 
 	if conf.Multicast != "" {
 		go multicast_recv(c, ipaddr[3], conf.Multicast, *isatty)
@@ -177,9 +182,12 @@ func main() {
 		}
 	}()
 
-	if *bridge != "" {
+	fmt.Println(*bridge, "ip", "link", "set", "dev", veth, "master", *ifname)
+
+	//for some reason setting this before starting the program didn't work
+	if *bridge {
 		time.Sleep(3 * time.Second)
-		exec.Command("ip", "link", "set", "dev", veth, "master", *bridge).Output()
+		exec.Command("ip", "link", "set", "dev", veth, "master", *ifname).Output()
 	}
 
 	multicast_send(c, ipaddr[3], conf.Multicast)

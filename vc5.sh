@@ -4,16 +4,21 @@ set -e
 
 native=
 bridge=
+ifname=
 
 while true; do
     case "$1" in
 	"-n")
-	    native="-n"
 	    shift
+	    native="-n"
 	    ;;
 	"-b")
 	    shift
-	    bridge="-b $1"
+	    bridge="-b"
+	    ;;
+	"-i")
+	    shift
+	    ifname="-i $1"
 	    shift
 	    ;;
 	*)
@@ -72,6 +77,6 @@ if tty >/dev/null 2>&1; then
     tty=-t
 fi
 
-$vc5 $tty $native $bridge $json vc5 vc5_1 $hwaddr $ip4 $@ || true
+$vc5 $tty $native $bridge $ifname $json vc5 vc5_1 $hwaddr $ip4 $@ || true
 
 cleanup

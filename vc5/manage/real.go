@@ -33,7 +33,7 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 
 	go func() {
 
-		history := []bool{false, false, true, true, true} // need 2/5 - first real check will determine the state
+		history := []bool{false, false, true, true, true} // need 3/5 - first real check will determine the state
 
 		tt := real.Service()
 		svc := tt.String()
@@ -46,7 +46,7 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 
 		var concurrent uint64
 		ctrl.VipRipPortCounters(real.Vip, real.Rip, real.Port, true)
-		ctrl.SetNatVipRip(real.Nat, real.Vip, real.Rip, real.Src, real.Iface, real.VLAN, real.IfIndex, real.IfMAC)
+		ctrl.SetNatVipRip(real.Nat, real.Vip, real.Rip, real.Source, real.IfName, real.VLAN, real.IfIndex, real.IfMAC)
 		// ^^^ this can occur for multiple ports! need NVR manager
 		updates := ctrl.VipRipPortConcurrents2(real.Vip, real.Rip, real.Port, done)
 

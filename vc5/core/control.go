@@ -97,20 +97,20 @@ type Control struct {
 	tx_port                 int
 
 	//// logger *logger
-	iface2u8 map[string]uint8
+	//iface2u8 map[string]uint8
 
-	ipaddr  IP4
-	hwaddr  MAC
-	ifindex uint32
+	//ipaddr IP4
+	//hwaddr  MAC
+	//ifindex uint32
 }
 
 func (c *Control) Era() (uint64, uint8) {
 	return c.era, c.interval
 }
 
-func (c *Control) IPAddr() [4]byte {
-	return c.ipaddr
-}
+//func (c *Control) IPAddr() [4]byte {
+//	return c.ipaddr
+//}
 
 type service struct {
 	vip   IP4
@@ -222,7 +222,7 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	var c Control
 
 	c.interval = INTERVAL
-	c.ipaddr = ipaddr
+	//c.ipaddr = ipaddr
 	////c.logger = NewLogger()
 
 	prog := "xdp_main"
@@ -257,13 +257,13 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.backend_idx = c.find_map("backend_idx", 8, 8192)
 	c.tx_port = c.find_map("tx_port", 4, 4)
 
-	if p, err := net.InterfaceByName(peth[0]); err != nil {
-		fmt.Println(peth, err)
-		return nil
-	} else {
-		c.ifindex = uint32(p.Index)
-		copy(c.hwaddr[:], p.HardwareAddr[:])
-	}
+	//if p, err := net.InterfaceByName(peth[0]); err != nil {
+	//	fmt.Println(peth, err)
+	//	return nil
+	//} else {
+	//	//c.ifindex = uint32(p.Index)
+	//	//copy(c.hwaddr[:], p.HardwareAddr[:])
+	//}
 
 	if v, err := net.InterfaceByName(veth); err != nil {
 		fmt.Println(veth, err)
@@ -357,16 +357,12 @@ func (c *Control) DelNatVipRip(nat, vip, rip IP4) {
 }
 func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16, ifindex_ int, ifhw MAC) {
 
-	ifindex := c.ifindex
-	ipaddr := c.ipaddr
-	hwaddr := c.hwaddr
-
-	ifindex = uint32(ifindex_)
-	ipaddr = src
-	hwaddr = ifhw
+	ifindex := uint32(ifindex_)
+	ipaddr := src
+	hwaddr := ifhw
 
 	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr, vlan_hi: byte(vlan >> 8), vlan_lo: byte(vlan & 0xff)}
-	//fmt.Println("SETNATVIPRIP", vip, rip, src, iface, vlan)
+	//fmt.Println("SETNATVIPRIP", nat, vip, rip, src, iface, vlan, ifindex_, ifhw)
 
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)

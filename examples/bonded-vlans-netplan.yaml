@@ -49,13 +49,29 @@ network:
       accept-ra: no
       link-local: []
 
-# enable if needed for native mode
-# remove dhcp from bond0
+
+
+# If you want to use native mode, but the the driver does not support
+# XDP_REDIRECT, then put your main inerface on a bridge (see below)
+# and pass the -b flag to the script. This will XDP_PASS returned
+# probe packes, and the bridge will pass them to the virtual interface
+
+# eg.: ./vc5.sh -b -i br0 vc5/vc5 vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
+
 #  bridges:
 #    br0:
 #      interfaces: [bond0]
 #      parameters:
 #        stp: no
 #      accept-ra: no
-#      link-local: []      
-#      dhcp4: yes
+#      link-local: []
+#      dhcp4: false
+#      addresses:
+#        - 192.168.0.123/24
+#      gateway4: 192.168.0.1
+#      nameservers:
+#        addresses:
+#          - 1.1.1.1
+#          - 8.8.8.8
+#        search:
+#          - example.com

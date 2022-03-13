@@ -70,9 +70,10 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *sta
 			bgp4 <- n.RHI
 		}
 
+		close(bgp4)
+		time.Sleep(2 * time.Second)
 		close(vips)
 		close(real)
-		close(bgp4)
 	}()
 	return c
 }
@@ -85,59 +86,6 @@ func get_tx(ip IP4, nics []types.NIC) uint8 {
 	}
 	return 0
 }
-
-/*
-func reals(reals map[IP4]config.Info) chan map[IP4]config.Info {
-	c := make(chan map[IP4]config.Info)
-
-	go func() {
-
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-
-		for r, i := range reals {
-			ctrl.SetBackendRec(r, MAC{}, i.VLAN, i.Index, 0)
-			ctrl.SetRip(r)
-		}
-
-		for {
-			select {
-			case <-ticker.C:
-			case r, ok := <-c:
-				if !ok {
-					return
-				}
-
-				for r, i := range r {
-					if _, ok := reals[r]; !ok {
-						ctrl.SetBackendRec(r, MAC{}, i.VLAN, i.Index, 0)
-						ctrl.SetRip(r)
-					}
-				}
-
-				reals = r
-
-			}
-
-			for r, i := range reals {
-				go func(r IP4, i config.Info) {
-					probes.Ping(r)
-					time.Sleep(2 * time.Second)
-
-					if ctrl != nil {
-						m := ctrl.ReadMAC(r)
-						if m != nil {
-							ctrl.SetBackendRec(r, *m, i.VLAN, i.Index, 0)
-						}
-					}
-
-				}(r, i)
-			}
-		}
-	}()
-	return c
-}
-*/
 
 func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logger) {
 	var prev types.Counters

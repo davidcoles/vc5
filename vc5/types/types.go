@@ -21,8 +21,8 @@ type IP6 [16]byte
 type MAC [6]byte
 
 type L4 struct {
-	Port uint16
-	Udp  bool
+	Port     uint16
+	Protocol Protocol
 }
 
 type IP4s []IP4
@@ -75,31 +75,22 @@ func (p Protocol) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + p.String() + `"`), nil
 }
 
-type ThreeTuple struct {
+type Thruple struct {
 	IP       IP4
 	Port     uint16
 	Protocol Protocol
 }
 
-func (t *ThreeTuple) L4() L4 {
+func (t *Thruple) L4() L4 {
 	if t.Protocol == UDP {
 		return L4{t.Port, true}
 	}
 	return L4{t.Port, false}
 }
 
-func (t *ThreeTuple) String() string {
+func (t *Thruple) String() string {
 	return t.IP.String() + ":" + t.L4().String()
 }
-
-/*
-func (t *ThreeTuple) Protocol() Protocol {
-	if t.UDP {
-		return UDP
-	}
-	return TCP
-}
-*/
 
 type RHI struct {
 	Ip IP4
@@ -141,8 +132,8 @@ type Scounters struct {
 	Delete      bool                `json:"-"`
 }
 
-func (c *Scounters) Service() ThreeTuple {
-	return ThreeTuple{c.VIP, c.Port, c.Protocol}
+func (c *Scounters) Service() Thruple {
+	return Thruple{c.VIP, c.Port, c.Protocol}
 }
 
 func (c *Scounters) Sum() {
@@ -204,7 +195,7 @@ func (i IP4) String() string {
 }
 
 func (l L4) String() string {
-	if l.Udp {
+	if l.Protocol {
 		return fmt.Sprint(l.Port, "/udp")
 	}
 	return fmt.Sprint(l.Port, "/tcp")

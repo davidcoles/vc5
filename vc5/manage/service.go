@@ -49,7 +49,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 		stats_c := make(chan types.Counters, 1000)
 
 		defer func() {
-			sink <- types.Scounters{Delete: true, VIP: s.Vip, Port: s.Port, Protocol: s.Protocol()}
+			sink <- types.Scounters{Delete: true, VIP: s.Vip, Port: s.Port, Protocol: s.Protocol}
 			for _, v := range state {
 				close(v.c)
 			}
@@ -113,7 +113,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 
 				for k, v := range state {
 					if v.u {
-						alive[k] = v.r.Idx
+						alive[k] = v.r.Index
 					}
 				}
 
@@ -127,7 +127,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 
 				table, stats := rendezvous.RipIndex(alive)
 				logs.DEBUG(s.String(), len(alive), table[0:32], stats)
-				ctrl.SetBackendIdx(s.Vip, s.Port, s.Udp, table)
+				ctrl.SetBackendIdx(s.Vip, s.Port, bool(s.Protocol), table)
 
 				if init && isup != up { // send new status
 					l4 <- l4status_t{l4: s.L4(), up: isup}
@@ -145,7 +145,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 				}
 
 				sc := types.Scounters{Name: s.Name, Description: s.Description, Up: up, Backends: be,
-					VIP: s.Vip, Port: s.Port, Protocol: s.Protocol(), Need: s.Need, Nalive: uint(nalive)}
+					VIP: s.Vip, Port: s.Port, Protocol: s.Protocol, Need: s.Need, Nalive: uint(nalive)}
 				sc.Sum()
 				sink <- sc // put in a select with timeout
 			}

@@ -266,7 +266,7 @@ struct bpf_map_def SEC("maps") backend_idx = {
   .type        = BPF_MAP_TYPE_PERCPU_HASH,
   .key_size    = sizeof(struct service),
   .value_size  = (1<<IDX_BITS),
-  .max_entries = 16,
+  .max_entries = 256,
 };
 
 struct bpf_map_def SEC("maps") tx_port = {
