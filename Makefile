@@ -1,4 +1,4 @@
-LIBBPF     := $(PWD)/libbpf
+LIBBPF     := $(PWD)
 LIBBPF_LIB := $(PWD)/bpf
 LIBBPF_VER := v0.4.0
 

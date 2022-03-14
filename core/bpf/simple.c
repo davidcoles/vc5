@@ -33,8 +33,8 @@
 #include <string.h>
 
 
-#include <src/bpf_helpers.h>
-#include <src/bpf_endian.h>
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 
 struct tuple {
     __be32 src;
