@@ -116,7 +116,9 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 
 	C.xdp_link_detach2(C.CString(veth))
 	//C.load_bpf_section(o, C.CString(veth), C.CString(program), 0)
-	if C.load_bpf_section(o, C.CString(veth), C.CString(program), C.int(boolint(native))) != 0 {
+	//if C.load_bpf_section(o, C.CString(veth), C.CString(program), C.int(boolint(native))) != 0 {
+	// don't use native mode - seems to break passing probes into a bridge
+	if C.load_bpf_section(o, C.CString(veth), C.CString(program), C.int(0)) != 0 {
 		panic("load_bpf_section veth")
 	}
 	xdp.p = o
