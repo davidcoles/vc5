@@ -34,7 +34,7 @@ import (
 	"time"
 	//"strings"
 
-	"vc5/types"
+	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4

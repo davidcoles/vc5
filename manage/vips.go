@@ -22,8 +22,8 @@ import (
 	"sync"
 	"time"
 
-	"vc5/config"
-	"vc5/types"
+	"github.com/davidcoles/vc5/config"
+	"github.com/davidcoles/vc5/types"
 )
 
 type L4 = types.L4

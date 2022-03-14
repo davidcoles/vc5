@@ -28,7 +28,7 @@ import (
 	"regexp"
 	"strconv"
 
-	"vc5/types"
+	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4
@@ -384,7 +384,8 @@ func fix_nat(new, old *Config) error {
 	//fmt.Println(new.Vips)
 
 	natify := func(i uint16) IP4 {
-		return IP4{10, 1, byte((i >> 8) & 0xff), byte(i & 0xff)}
+		i += 4
+		return IP4{10, 255, byte((i >> 8) & 0xff), byte(i & 0xff)}
 	}
 
 	type idx struct {

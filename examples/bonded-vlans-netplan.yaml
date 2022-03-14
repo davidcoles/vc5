@@ -52,11 +52,12 @@ network:
 
 
 # If you want to use native mode, but the the driver does not support
-# XDP_REDIRECT, then put your main inerface on a bridge (see below)
-# and pass the -b flag to the script. This will XDP_PASS returned
-# probe packes, and the bridge will pass them to the virtual interface
+# XDP_REDIRECT, then put your main interface on a bridge (see below)
+# and pass the -n, -b and -i flags to the script. This will XDP_PASS
+# returned probe packes, and the bridge will pass them to the virtual
+# interface
 
-# eg.: ./vc5.sh -b -i br0 vc5/vc5 vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
+# eg.: cmd/vc5 -n -b -i br0 cmd/vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
 
 #  bridges:
 #    br0:

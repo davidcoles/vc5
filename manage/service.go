@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"vc5/config"
-	"vc5/rendezvous"
-	"vc5/types"
+	"github.com/davidcoles/vc5/config"
+	"github.com/davidcoles/vc5/rendezvous"
+	"github.com/davidcoles/vc5/types"
 )
 
 func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan config.Service {

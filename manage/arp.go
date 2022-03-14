@@ -27,7 +27,7 @@ import (
 	"regexp"
 	"time"
 
-	"vc5/config"
+	"github.com/davidcoles/vc5/config"
 )
 
 func read_macs(r map[IP4]config.Info) (map[IP4]MAC, error) {

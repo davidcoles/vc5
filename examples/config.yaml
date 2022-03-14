@@ -1,0 +1,24 @@
+---
+
+learn: 10
+multicast: 224.0.0.1:9999
+rhi:
+  as_number: 65000
+  peers:
+    - 10.10.100.3
+    - 10.10.100.4
+
+services:
+
+  - name: nginx
+    description: NGINX webserver
+    address:
+      - 192.168.101.1
+    servers:
+      - 10.10.100.130
+      - 10.10.100.131
+    host: foo.example.com
+    path: /
+    need: 1
+    policy:
+      http:

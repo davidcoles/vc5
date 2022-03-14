@@ -19,7 +19,7 @@
 package main
 
 import (
-	_ "embed"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -31,35 +31,14 @@ import (
 	"strconv"
 	"syscall"
 	"time"
-	"unsafe"
 
-	"encoding/json"
-
-	"vc5/config"
-	"vc5/core"
-	"vc5/logger"
-	"vc5/manage"
-	"vc5/probes"
-	"vc5/stats"
-	"vc5/types"
-	"vc5/xdp"
+	"github.com/davidcoles/vc5"
 )
-
-//go:embed bpf/simple.o
-var SIMPLE_O []byte
-
-//go:embed bpf/bpf.o
-var BPF_O []byte
-
-type IP4 = types.IP4
 
 func main() {
 	ulimit()
 
-	//simple()
-	//return
-
-	logs := logger.NewLogger()
+	logs := vc5.NewLogger()
 
 	isatty := flag.Bool("t", false, "isatty")
 	native := flag.Bool("n", false, "native")
@@ -69,7 +48,10 @@ func main() {
 
 	args := flag.Args()
 
-	vip := IP4{10, 0, 0, 1}
+	//vip1 := vc5.IP4{10, 0, 0, 1}
+	//vip2 := vc5.IP4{10, 0, 0, 2}
+	vip1 := vc5.IP4{10, 255, 0, 1}
+	vip2 := vc5.IP4{10, 255, 0, 2}
 
 	if len(args) == 1 {
 
@@ -79,35 +61,31 @@ func main() {
 			for _ = range hup {
 			}
 		}()
-		probes.Daemon(args[0], vip.String())
+		vc5.Daemon(args[0], vip1.String())
 	}
 
 	fmt.Println(args)
 
 	conffile := args[0]
-	netns := args[1]
-	veth := args[2]
-	mac := args[3]
-	ipv4 := args[4]
-	peth := args[5:]
+	//netns := args[1]
+	//veth := args[2]
+	//mac := args[3]
+	ipv4 := args[1]
+	peth := args[2:]
+
+	netns := "vc5"
+	veth := "vc5_1"
 
 	ipaddr, ok := parseIP(ipv4)
 	if !ok {
 		log.Fatal(ipv4)
 	}
 
-	var hwaddr [6]byte
-	if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
-		panic(err)
-	} else {
-		copy(hwaddr[:], hw[:])
-	}
-
 	if *ifname == "" {
 		*ifname = peth[0]
 	}
 
-	conf, err := config.LoadConfiguration(conffile, *ifname, ipaddr)
+	conf, err := vc5.LoadConfiguration(conffile, *ifname, ipaddr)
 
 	if err != nil {
 		panic(err)
@@ -134,20 +112,30 @@ func main() {
 	if conf.Webserver != "" {
 		ws = conf.Webserver
 	}
-	webserver := stats.Server(ws, logs)
+	//webserver := stats.Server(ws, logs)
+	webserver := vc5.Console(ws, logs)
 
 	time.Sleep(2 * time.Second) // will bomb if we can't bind to port
 
-	c := core.New(BPF_O, ipaddr, veth, vip, hwaddr, *native, *bridge, peth...)
+	mac, err := setup(vip1.String(), vip2.String(), peth...)
+	defer cleanup(peth...)
+
+	if err != nil {
+		fmt.Println("Scripts failed:", err)
+		return
+	}
+
+	//c := vc5.New(ipaddr, veth, vip, hwaddr, *native, *bridge, peth...)
+	c := vc5.New(ipaddr, veth, vip1, mac, *native, *bridge, peth...)
 
 	if conf.Multicast != "" {
 		go multicast_recv(c, ipaddr[3], conf.Multicast, *isatty)
 	}
 
 	// Set up probe server - runs in other network namespace
-	go probes.Serve(netns)
+	go vc5.Serve(netns)
 
-	manager := manage.Bootstrap(conf, c, logs, webserver)
+	manager := vc5.Bootstrap(conf, c, logs, webserver)
 	var closed bool
 
 	sig := make(chan os.Signal)
@@ -155,11 +143,12 @@ func main() {
 	go func() {
 		<-sig
 		fmt.Println("Exiting ...")
-		exec.Command("ip", "link", "delete", veth).Run()
-		exec.Command("ip", "netns", "delete", netns).Run()
+		//exec.Command("ip", "link", "delete", veth).Run()
+		//exec.Command("ip", "netns", "delete", netns).Run()
 		closed = true
 		close(manager)
 		time.Sleep(10 * time.Second)
+		cleanup(peth...)
 		os.Exit(1)
 	}()
 
@@ -182,10 +171,10 @@ func main() {
 		}
 	}()
 
-	fmt.Println(*bridge, "ip", "link", "set", "dev", veth, "master", *ifname)
-
 	//for some reason setting this before starting the program didn't work
 	if *bridge {
+		fmt.Println(*bridge, "ip", "link", "set", "dev", veth, "master", *ifname)
+
 		time.Sleep(3 * time.Second)
 		exec.Command("ip", "link", "set", "dev", veth, "master", *ifname).Output()
 	}
@@ -197,7 +186,7 @@ func main() {
 	}
 }
 
-func multicast_recv(control *core.Control, instance byte, srvAddr string, isatty bool) {
+func multicast_recv(control *vc5.Control, instance byte, srvAddr string, isatty bool) {
 	maxDatagramSize := 1500
 
 	addr, err := net.ResolveUDPAddr("udp", srvAddr)
@@ -227,9 +216,9 @@ func multicast_recv(control *core.Control, instance byte, srvAddr string, isatty
 				fmt.Print(spin())
 			}
 
-			for len(buff) >= core.FLOW_STATE {
+			for len(buff) >= vc5.FLOW_STATE {
 				control.UpdateFlow(buff)
-				buff = buff[core.FLOW_STATE:]
+				buff = buff[vc5.FLOW_STATE:]
 			}
 		} else {
 			if isatty {
@@ -240,7 +229,7 @@ func multicast_recv(control *core.Control, instance byte, srvAddr string, isatty
 	}
 }
 
-func multicast_send(control *core.Control, instance byte, srvAddr string) {
+func multicast_send(control *vc5.Control, instance byte, srvAddr string) {
 	if srvAddr == "" {
 		for {
 			if _, ok := control.FlowQueue(); ok {
@@ -338,52 +327,81 @@ func parseIP(ip string) ([4]byte, bool) {
 	return addr, true
 }
 
-func simple() {
-	//x, e := xdp.Simple("enp130s0f1", bpf.BPF_simple, "xdp_main")
-	x, e := xdp.Simple("enp130s0f1", SIMPLE_O, "xdp_main")
+func setup(vip1, vip2 string, nics ...string) ([6]byte, error) {
+	var mac [6]byte
 
-	type counter struct {
-		count uint64
-		time  uint64
+	script1 := `
+ip link del vc5_1 || true
+ip netns del vc5 || true
+ip link add vc5_1 type veth peer name vc5_2
+ip l set vc5_1 up
+ip a add ` + vip2 + `/30 dev vc5_1
+`
+	_, err := exec.Command("/bin/sh", "-e", "-c", script1).Output()
+	if err != nil {
+		return mac, err
 	}
 
-	m := x.FindMap("stats")
-
-	if m == -1 {
-		log.Fatal("not found")
+	iface, err := net.InterfaceByName("vc5_2")
+	if err != nil {
+		return mac, err
 	}
 
-	if !x.CheckMap(m, 4, 16) {
-		log.Fatal("incorrect size")
+	copy(mac[:], iface.HardwareAddr[:])
+
+	script2 := `
+ip netns add vc5
+ip link set vc5_2 netns vc5
+`
+	_, err = exec.Command("/bin/sh", "-e", "-c", script2).Output()
+	if err != nil {
+		return mac, err
 	}
 
-	var zero uint32
+	script3 := `
+ip netns exec vc5 /bin/bash <<EOF
+ip l set vc5_2 up
+ip a add ` + vip1 + `/30 dev vc5_2
+ip r replace default via ` + vip2 + ` dev vc5_2
+ethtool -K vc5_2 tx off >/dev/null
+`
+	// ip r replace 10.1.0.0/16 via ` + vip2 + ` dev vc5_2
 
-	fmt.Println(x, e)
+	_, err = exec.Command("ip", "netns", "exec", "vc5", "/bin/sh", "-e", "-c", script3).Output()
+	if err != nil {
+		return mac, err
+	}
 
-	for {
-		var counters [16]counter
+	for _, nic := range nics {
+		script4 := `
+ip link set dev ` + nic + ` xdpgeneric off >/dev/null 2>&1 || true
+ip link set dev ` + nic + ` xdpdrv     off >/dev/null 2>&1 || true
+ethtool -K ` + nic + ` rxvlan off >/dev/null 2>&1 || true
+`
 
-		xdp.BpfMapUpdateElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters), xdp.BPF_ANY)
-
-		time.Sleep(1 * time.Second)
-
-		if xdp.BpfMapLookupElem(m, unsafe.Pointer(&zero), unsafe.Pointer(&counters)) != 0 {
-			log.Fatal("oops")
+		_, err = exec.Command("/bin/sh", "-e", "-c", script4).Output()
+		if err != nil {
+			return mac, err
 		}
-
-		var s uint64
-		var t uint64
-
-		for _, c := range counters {
-			s += c.count
-			t += c.time
-		}
-
-		if s > 0 {
-			fmt.Println(t / s)
-		} else {
-			fmt.Println(0)
-		}
 	}
+
+	return mac, nil
+}
+
+func cleanup(nics ...string) {
+	script1 := `
+ip link del vc5_1 || true
+ip netns del vc5 || true
+`
+
+	exec.Command("/bin/sh", "-e", "-c", script1).Output()
+
+	for _, nic := range nics {
+		script2 := `
+ip link set dev ` + nic + ` xdpgeneric off >/dev/null 2>&1 || true
+ip link set dev ` + nic + ` xdpdrv     off >/dev/null 2>&1 || true
+`
+		exec.Command("/bin/sh", "-e", "-c", script2).Output()
+	}
+
 }

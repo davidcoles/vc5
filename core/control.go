@@ -27,9 +27,15 @@ import (
 	"time"
 	"unsafe"
 
-	"vc5/types"
-	"vc5/xdp"
+	"github.com/davidcoles/vc5/types"
+	"github.com/davidcoles/vc5/xdp"
 )
+
+//go:embed bpf/simple.o
+var SIMPLE_O []byte
+
+//go:embed bpf/bpf.o
+var BPF_O []byte
 
 type counters = types.Counters
 

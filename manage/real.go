@@ -23,9 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"vc5/config"
-	"vc5/probes"
-	"vc5/types"
+	"github.com/davidcoles/vc5/config"
+	"github.com/davidcoles/vc5/probes"
+	"github.com/davidcoles/vc5/types"
 )
 
 func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c chan types.Counters) chan config.Real {

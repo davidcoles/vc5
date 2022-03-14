@@ -28,9 +28,9 @@ import (
 	"strconv"
 	"strings"
 
-	//"vc5/core"
-	"vc5/logger"
-	"vc5/types"
+	//"github.com/davidcoles/vc5/core"
+	"github.com/davidcoles/vc5/logger"
+	"github.com/davidcoles/vc5/types"
 )
 
 //go:embed lb.html

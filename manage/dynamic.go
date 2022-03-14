@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"time"
 
-	"vc5/config"
-	"vc5/core"
-	"vc5/logger"
-	//"vc5/probes"
-	"vc5/stats"
-	"vc5/types"
+	"github.com/davidcoles/vc5/config"
+	"github.com/davidcoles/vc5/core"
+	"github.com/davidcoles/vc5/logger"
+	//"github.com/davidcoles/vc5/probes"
+	"github.com/davidcoles/vc5/stats"
+	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4

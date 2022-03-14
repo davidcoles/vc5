@@ -33,8 +33,8 @@
 #include <string.h>
 
 
-#include <bpf/bpf_helpers.h>
-#include <bpf/bpf_endian.h>
+#include <src/bpf_helpers.h>
+#include <src/bpf_endian.h>
 
 #ifndef lock_xadd
 #define lock_xadd(ptr, val) ((void) __sync_fetch_and_add(ptr, val))

@@ -8,21 +8,16 @@ export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 MAX_FLOWS    ?= 10000000
 MAX_SERVICES ?= 100
 
-all: clean build
+all: clean cmd/vc5 cmd/vc5.json
 
-build: vc5/vc5 vc5.json
+cmd/vc5: cmd/main.go core/bpf/bpf.o core/bpf/simple.o 
+	cd cmd && go build -o vc5 main.go
 
-test:
-	cd vc5 && go run test.go
+cmd/vc5.yaml:
+	cp docs/config.yaml $@
 
-vc5.json: tools/config.pl vc5.yaml
-	tools/config.pl vc5.yaml >vc5.json
-
-wc: clean
-	wc vc5/*.go vc5/*/*.go vc5/*/*.c vc5/*/*.h
-
-vc5/vc5: vc5/bpf/bpf.o vc5/bpf/simple.o
-	cd vc5 && go build -o vc5 main.go
+cmd/vc5.json: tools/config.pl cmd/vc5.yaml
+	tools/config.pl cmd/vc5.yaml >$@
 
 %.o: %.c libbpf/bpf
 	clang -S \
@@ -40,15 +35,20 @@ vc5/vc5: vc5/bpf/bpf.o vc5/bpf/simple.o
 	llc -march=bpf -filetype=obj -o $@ $*.ll
 
 
+libbpf/src:
+	git submodule init
+	git submodule update
 
-libbpf/bpf: libbpf
-	if [ ! -d libbpf/bpf ]; then (cd libbpf/src && make && cd .. && ln -s src bpf); fi
+libbpf/src/libbpf.a: libbpf/src
+	cd libbpf/src && $(MAKE)
 
-libbpf:
-	if [ ! -d libbpf ]; then git clone https://github.com/libbpf/libbpf/ && cd libbpf && git checkout $(LIBBPF_VER); fi
+libbpf/bpf: libbpf/src/libbpf.a
+	cd libbpf && ln -s src bpf
 
 clean:
-	rm -f vc5/vc5 vc5.json vc5/bpf/*.ll vc5/bpf/*.o
+	rm -f cmd/vc5 cmd/vc5.json core/bpf/*.ll core/bpf/*.o libbpf/bpf
 
 distclean: clean
 	rm -rf libbpf
+	mkdir libbpf
+

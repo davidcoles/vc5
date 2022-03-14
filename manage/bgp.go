@@ -21,8 +21,8 @@ package manage
 import (
 	"time"
 
-	"vc5/bgp4"
-	"vc5/config"
+	"github.com/davidcoles/vc5/bgp4"
+	"github.com/davidcoles/vc5/config"
 )
 
 type nlri_t struct {
