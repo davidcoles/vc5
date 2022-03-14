@@ -1,5 +1,5 @@
 # VC5 L2DSR Load Balancer config
-# run with: ./vc5.sh vc5/vc5 vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
+# run with, eg.: cmd/vc5 -n -b -i br0 cmd/vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
 ---
 
 learn: 20

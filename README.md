@@ -18,16 +18,16 @@ VC5 is a network load balancer designed to work as replacement for
 legacy hardware appliances. It allows a service with a Virtual IP
 address (VIP) to be distributed to a set of real servers. Real servers
 might run the service themselves or work as proxies for another layer
-of servers (eg. HAProxy serving as a Layer 7 router and SSL offload
-for webservers). The VIP needs to be configured on a loopback device
-on real server, eg.: `ip a add 192.168.101.1/32 dev lo`
+of servers (eg. HAProxy serving as a Layer 7 router and SSL
+offload). The VIP needs to be configured on a loopback device on real
+server, eg.: `ip a add 192.168.101.1/32 dev lo`
 
 One server with a 10Gbit/s network interface should be capable of
 supporting a service of 100Gbit/s due to the asymmetric nature of most
 internet traffic. For smaller services a modest virtual machine or two
 will likely handle a few Gbit/s.
 
-If one server is not sufficient then more servers may be added to
+If one instance is not sufficient then more servers may be added to
 horizontally scale capacity (or provide redundancy) using the ECMP
 feature of routing hardware. 802.3AD bonded interfaces and 802.1Q VLAN
 trunking is supported (see [examples/](examples/) directory).
@@ -62,14 +62,14 @@ Run `make`. This will pull a copy of
 [libbpf](https://github.com/libbpf/libbpf), build the binary and
 transform the YAML config file to a more verbose JSON config format.
 
-Run the vc5 binary with arguments of the json file,
+Run the vc5 binary with arguments of the JSON file,
 your IP address and network interface name, eg.:
 
   `cmd/vc5 cmd/vc5.json 10.10.100.200 ens192`
 
 If this doesn't bomb out then you should have a load balancer up and
 running. A virtual network device and net namespace will be created
-for performing healthchecks to VIPs on the backend servers. A
+for performing NATted healthchecks to VIPs on the backend servers. A
 webserver (running on port 80 by default) will display logs,
 statistics and backend status. There is Prometheus metric endpoint for
 collecting statistics.
