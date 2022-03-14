@@ -1,5 +1,5 @@
 LIBBPF     := $(PWD)/libbpf
-LIBBPF_LIB := $(PWD)/libbpf/bpf
+LIBBPF_LIB := $(PWD)/bpf
 LIBBPF_VER := v0.4.0
 
 export CGO_CFLAGS = -I$(LIBBPF)
@@ -42,11 +42,11 @@ libbpf/src:
 libbpf/src/libbpf.a: libbpf/src
 	cd libbpf/src && $(MAKE)
 
-libbpf/bpf: libbpf/src/libbpf.a
-	cd libbpf && ln -s src bpf
+bpf: libbpf/src/libbpf.a
+	ln -s libbpf/src bpf
 
 clean:
-	rm -f cmd/vc5 cmd/vc5.json core/bpf/*.ll core/bpf/*.o libbpf/bpf
+	rm -f cmd/vc5 cmd/vc5.json core/bpf/*.ll core/bpf/*.o bpf
 
 distclean: clean
 	rm -rf libbpf

@@ -29,7 +29,7 @@ will likely handle a few Gbit/s.
 
 If one instance is not sufficient then more servers may be added to
 horizontally scale capacity (or provide redundancy) using the ECMP
-feature of routing hardware. 802.3AD bonded interfaces and 802.1Q VLAN
+feature of routing hardware. 802.3ad bonded interfaces and 802.1Q VLAN
 trunking is supported (see [examples/](examples/) directory).
 
 No kernel modules or complex setups are required, although for best
