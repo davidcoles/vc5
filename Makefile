@@ -19,7 +19,7 @@ cmd/vc5.yaml:
 cmd/vc5.json: tools/config.pl cmd/vc5.yaml
 	tools/config.pl cmd/vc5.yaml >$@
 
-%.o: %.c libbpf/bpf
+%.o: %.c bpf
 	clang -S \
 	    -target bpf \
 	    -D MAX_FLOWS=$(MAX_FLOWS) \
