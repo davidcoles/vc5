@@ -49,6 +49,8 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 		stats_c := make(chan types.Counters, 1000)
 
 		defer func() {
+			ctrl.DelBackendIdx(s.Vip, s.Port, bool(s.Protocol))
+
 			sink <- types.Scounters{Delete: true, VIP: s.Vip, Port: s.Port, Protocol: s.Protocol}
 			for _, v := range state {
 				close(v.c)
