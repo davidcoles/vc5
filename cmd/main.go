@@ -128,6 +128,17 @@ func main() {
 	//c := vc5.New(ipaddr, veth, vip, hwaddr, *native, *bridge, peth...)
 	c := vc5.New(ipaddr, veth, vip1, mac, *native, *bridge, peth...)
 
+	//for some reason setting this before starting the program didn't work
+	if *bridge {
+		exec.Command("ip", "link", "set", "dev", veth, "master", *ifname).Output()
+	}
+
+	// weird behaviour ... maybe just bridge AND native mode???
+	if *native {
+		fmt.Println("Waiting for native mode o settle ...")
+		time.Sleep(10 * time.Second)
+	}
+
 	if conf.Multicast != "" {
 		go multicast_recv(c, ipaddr[3], conf.Multicast, *isatty)
 	}
@@ -170,14 +181,6 @@ func main() {
 			}
 		}
 	}()
-
-	//for some reason setting this before starting the program didn't work
-	if *bridge {
-		fmt.Println(*bridge, "ip", "link", "set", "dev", veth, "master", *ifname)
-
-		time.Sleep(3 * time.Second)
-		exec.Command("ip", "link", "set", "dev", veth, "master", *ifname).Output()
-	}
 
 	multicast_send(c, ipaddr[3], conf.Multicast)
 
