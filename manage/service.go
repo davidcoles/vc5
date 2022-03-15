@@ -128,7 +128,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 				}
 
 				table, stats := rendezvous.RipIndex(alive)
-				logs.DEBUG(s.String(), len(alive), table[0:32], stats)
+				logs.DEBUG("Backend", s.String(), len(alive), table[0:32], stats)
 				ctrl.SetBackendIdx(s.Vip, s.Port, bool(s.Protocol), table)
 
 				if init && isup != up { // send new status

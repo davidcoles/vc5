@@ -501,7 +501,7 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     return bpf_map_lookup_elem(&backend_recs, &rec_idx);
 }
 
-static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, int rx_bytes, int new) {
+static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, int rx_bytes, int new, __u64 era_now) {
     struct vip_rip_port vrp;
     vrp.vip = ipv4->daddr;
     vrp.rip = rip;
@@ -514,6 +514,10 @@ static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *t
 	counter->rx_packets++;
 	counter->rx_bytes += rx_bytes;
     }
+    __s32 *concurrent = NULL;
+    vrp.pad = era_now % 2;
+    concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+    if(concurrent) (*concurrent)++;
 }
 
 static __always_inline void save_state(struct iphdr *ipv4, struct tcphdr *tcp, struct backend_rec *rec) {
@@ -816,7 +820,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	
 	if(DEFCON >= 4) save_state(ipv4, tcp, rec);
 	
-	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4));
+	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4), era_now);
 	
 	if(DEFCON >= 4) statsp->new_flows++;
 	statsp->fp_count++;

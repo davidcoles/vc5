@@ -589,6 +589,7 @@ func (c *Control) VipRipPortConcurrents2(vip, rip IP4, port uint16, done chan bo
 				next, _ := c.Era()
 				if last != next {
 					conn = c.VipRipPortConcurrent(vip, rip, port, last)
+					fmt.Println(">>>", last, conn)
 					last = next
 					if conn < 0 {
 						conn = 0

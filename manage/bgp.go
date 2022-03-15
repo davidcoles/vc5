@@ -99,7 +99,7 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 				gen++
 
 			case <-timer.C:
-				logs.DEBUG("Learn timer expired")
+				logs.NOTICE("Learn timer expired")
 				close(start)
 
 			case n := <-nlri_c:

@@ -211,6 +211,7 @@ func virtual(vip IP4, s map[L4]config.Service, vip_c chan status_t, w *sync.Wait
 			if ok != up {
 				up = ok
 				vip_c <- status_t{ip: vip, up: up}
+				logs.NOTICE("Changed", vip, "to", updown(up))
 				advertise(vip, up)
 			}
 		}
