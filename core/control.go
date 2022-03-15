@@ -76,7 +76,7 @@ func (c *raw_counters) add(r raw_counters) {
 const FLOW = 12
 const STATE = 32
 const FLOW_STATE = FLOW + STATE
-const MAX_CPU = 32
+const MAX_CPU = 256
 const INTERVAL = 5
 
 type Control struct {
