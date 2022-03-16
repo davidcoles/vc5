@@ -85,14 +85,14 @@ type Control struct {
 	interval uint8
 	defcon   uint8
 
-	settings                int
-	interfaces              int
-	service_backend         int
-	rip_to_mac              int
-	mac_to_rip              int
-	nat_to_vip_rip          int
-	vip_rip_to_nat          int
-	clocks                  int
+	settings        int
+	interfaces      int
+	service_backend int
+	rip_to_mac      int
+	mac_to_rip      int
+	nat_to_vip_rip  int
+	vip_rip_to_nat  int
+	//clocks                  int
 	vip_rip_port_counters   int
 	vip_rip_port_concurrent int
 	stats                   int
@@ -100,7 +100,7 @@ type Control struct {
 	flows                   int
 	backend_recs            int
 	backend_idx             int
-	tx_port                 int
+	//tx_port                 int
 
 	//// logger *logger
 	//iface2u8 map[string]uint8
@@ -155,7 +155,7 @@ func (c *Control) find_map(name string, ks int, rs int) int {
 	m := c.xdp.FindMap(name)
 
 	if m == -1 {
-		log.Fatal(name, "not found")
+		log.Fatal(name, " not found")
 	}
 
 	if !c.xdp.CheckMap(m, ks, rs) {
@@ -186,7 +186,10 @@ func (c *Control) global_update() {
 	go func() {
 		for {
 			var s settings
+			s.era = c.era
+			s.time = uint64(time.Now().Unix())
 			s.defcon = c.defcon
+
 			var settings [MAX_CPU]settings
 			for i, _ := range settings {
 				settings[i] = s
@@ -196,28 +199,8 @@ func (c *Control) global_update() {
 		}
 	}()
 
-	type clocks struct {
-		era    uint64
-		time   uint64
-		defcon uint8
-		pad    [7]byte
-	}
-
-	var clock clocks
-	clock.defcon = 1
-
-	go func() {
-		for {
-			clock.time = uint64(time.Now().Unix())
-			xdp.BpfMapUpdateElem(c.clocks, uP(&zero), uP(&clock), xdp.BPF_ANY)
-			time.Sleep(1 * time.Second)
-		}
-	}()
-
 	for {
 		c.era++
-		clock.era = c.era
-		xdp.BpfMapUpdateElem(c.clocks, uP(&zero), uP(&clock), xdp.BPF_ANY)
 		time.Sleep(INTERVAL * time.Second)
 	}
 
@@ -247,13 +230,13 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.defcon = 5
 
 	c.settings = c.find_map("settings", 4, 24)
-	c.interfaces = c.find_map("interfaces", 4, 16)
+	//c.interfaces = c.find_map("interfaces", 4, 16)
 	//c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.mac_to_rip = c.find_map("mac_to_rip", 6, 4)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
-	c.clocks = c.find_map("clocks", 4, 24)
+	//c.clocks = c.find_map("clocks", 4, 24)
 	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", 12, 8*6)
 	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", 12, 4)
 	c.stats = c.find_map("stats", 4, 8*6)
@@ -261,7 +244,7 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.flows = c.find_map("flows", FLOW, STATE)
 	c.backend_recs = c.find_map("backend_recs", 4, 16)
 	c.backend_idx = c.find_map("backend_idx", 8, 8192)
-	c.tx_port = c.find_map("tx_port", 4, 4)
+	//c.tx_port = c.find_map("tx_port", 4, 4)
 
 	//if p, err := net.InterfaceByName(peth[0]); err != nil {
 	//	fmt.Println(peth, err)
@@ -275,12 +258,16 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 		fmt.Println(veth, err)
 		return nil
 	} else {
-		var zero uint32
-		var virt interfaces
-		virt.ifindex = uint32(v.Index)
-		virt.ipaddr = vip
-		virt.hwaddr = hwaddr
-		xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&virt), xdp.BPF_ANY)
+		/*
+			var zero uint32
+			var virt interfaces
+			virt.ifindex = uint32(v.Index)
+			virt.ipaddr = vip
+			virt.hwaddr = hwaddr
+			xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&virt), xdp.BPF_ANY)
+		*/
+
+		c.SetBackendRec2(vip, hwaddr, 0, 0, int32(v.Index))
 	}
 
 	/*
@@ -316,6 +303,39 @@ func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16, tx ui
 
 	for n := 0; n < MAX_CPU; n++ {
 		copy(recs[(n*16):], r[:])
+	}
+
+	//fmt.Println("SETBACKENDREC", rip, mac, vlan, idx)
+
+	if xdp.BpfMapUpdateElem(c.backend_recs, uP(&i), uP(&recs), xdp.BPF_ANY) != 0 {
+		panic("c.backend_recs")
+	}
+}
+
+func (c *Control) SetBackendRec2(rip IP4, mac MAC, vlan uint16, idx uint16, ifindex int32) {
+
+	i := uint32(idx)
+
+	type backend_rec struct {
+		hwaddr  [6]byte
+		vlan    [2]byte
+		rip     [4]byte
+		ifindex int32
+	}
+
+	var backend backend_rec
+	backend.hwaddr = mac
+
+	backend.vlan[0] = byte((vlan >> 8) & 0xff)
+	backend.vlan[1] = byte(vlan & 0xff)
+
+	backend.rip = rip
+	backend.ifindex = ifindex
+
+	var recs [MAX_CPU]backend_rec
+
+	for n := 0; n < len(recs); n++ {
+		recs[n] = backend
 	}
 
 	//fmt.Println("SETBACKENDREC", rip, mac, vlan, idx)

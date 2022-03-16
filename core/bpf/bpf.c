@@ -41,7 +41,7 @@
 #endif
 
 // nanoseconds ...
-#define SECOND 1000000000
+//#define SECOND 1000000000
 
 struct counter {
     __u64 new_flows;
@@ -62,8 +62,8 @@ struct tuple {
     __be32 dst;
     __be16 sport;
     __be16 dport;
-    __u8 protocol;
-    __u8 pad[3];
+    //__u8 protocol;
+    //__u8 pad[3];
 };
 
 struct flow {
@@ -71,7 +71,6 @@ struct flow {
     __be32 dst;
     __be16 sport;
     __be16 dport;
-    //__u32 pad;
 };
 
 struct flow_state {
@@ -85,8 +84,6 @@ struct flow_state {
 };
 
 struct flow_flow_state {
-    //struct flow f;
-    //struct flow_state fs;
     __u8 data[sizeof(struct flow) + sizeof(struct flow_state)];
 };
 
@@ -100,7 +97,6 @@ struct service {
     __be16 ports;
     __u8 proto;
     __u8 pad;
-    //__be16 pad;
 };
 
 struct vip_rip_port {
@@ -110,12 +106,6 @@ struct vip_rip_port {
     __u16 pad;
 };
 
-struct interface {
-    unsigned int ifindex;
-    __be32 ipaddr;
-    unsigned char hwaddr[6];
-    unsigned char pad[2];
-};
 
 struct settings {
     __u64 era;
@@ -124,12 +114,12 @@ struct settings {
     __u8 defcon;
 };
 
-struct clocks {
-    __u64 era;
-    __u64 time;
-    __u8 defcon;
-    __u8 pad[7];
-};
+//struct clocks {
+//    __u64 era;
+//    __u64 time;
+//    __u8 defcon;
+//    __u8 pad[7];
+//};
 
 struct vlan_hdr {
     __be16 h_tci;
@@ -146,14 +136,21 @@ struct vip_rip_src_if {
     __be16 vlan;
 };
 
+//struct interface {
+//    unsigned int ifindex;
+//    __be32 ipaddr;
+//    unsigned char hwaddr[6];
+//    unsigned char pad[2];
+//};
+
 struct backend_rec {
     unsigned char hwaddr[6];
     __u16 vlan;
     __be32 rip;
-    // was "__be32 pad"    
-    __u8 tx_port;
-    __u8 pad1;  
-    __u16 pad2;
+    // conveniently, this needs to be padded with 4 bytes.we can use
+    // this to hold an ifindex for the veth device in slot 0 of
+    // backend_recs
+    unsigned int ifindex;
 };
 
 /**********************************************************************/
@@ -161,158 +158,214 @@ struct backend_rec {
 /**********************************************************************/
 
 //#define PHYSICAL 0
-#define VIRTUAL  1
+//#define VIRTUAL  1
 
-struct bpf_map_def SEC("maps") stats = {
-  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
-  .key_size    = sizeof(unsigned int),
-  .value_size  = sizeof(struct counter),
-  .max_entries = 2,
-};
+//struct bpf_map_def SEC("maps") stats = {
+//  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
+//  .key_size    = sizeof(unsigned int),
+//  .value_size  = sizeof(struct counter),
+//  .max_entries = 2,
+//};
 
-
-struct bpf_map_def SEC("maps") clocks = {
-  .type        = BPF_MAP_TYPE_ARRAY,
-  .key_size    = sizeof(unsigned int),
-  .value_size  = sizeof(struct clocks),
-  .max_entries = 2,
-};
-
-struct bpf_map_def SEC("maps") settings = {
-  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
-  .key_size    = sizeof(unsigned int),
-  .value_size  = sizeof(struct settings),
-  .max_entries = 1,
-};
-
-struct bpf_map_def SEC("maps") vip_rip_port_counters = {
-  .type        = BPF_MAP_TYPE_PERCPU_HASH,
-  .key_size    = sizeof(struct vip_rip_port),
-  .value_size  = sizeof(struct counter),
-  .max_entries = 1024,
-};
-
-struct bpf_map_def SEC("maps") vip_rip_port_concurrent = {
-  .type        = BPF_MAP_TYPE_PERCPU_HASH,
-  .key_size    = sizeof(struct vip_rip_port),
-  .value_size  = sizeof(__s32),
-  .max_entries = 1024,
-};
-
-struct bpf_map_def SEC("maps") interfaces = {
-  .type        = BPF_MAP_TYPE_ARRAY,
-  .key_size    = sizeof(unsigned int),
-  .value_size  = sizeof(struct interface),
-  .max_entries = 2,
-};
-
-struct bpf_map_def SEC("maps") flows = {
-  .type        = BPF_MAP_TYPE_LRU_HASH,
-  .key_size    = sizeof(struct flow),
-  .value_size  = sizeof(struct flow_state),
-  .max_entries = MAX_FLOWS,
-};
-
-struct bpf_map_def SEC("maps") flow_queue = {
-  .type        = BPF_MAP_TYPE_QUEUE,
-  .key_size    = 0,
-  .value_size  = sizeof(struct flow_flow_state),  
-  .max_entries = 10000,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, unsigned int);
+    __type(value, struct counter);
+    __uint(max_entries, 2);
+} stats SEC(".maps");
 
 
-struct bpf_map_def SEC("maps") rip_to_mac = {
-        .type = BPF_MAP_TYPE_HASH,
-        .key_size = 4,
-        .value_size = 6,
-        .max_entries = 1024,
-        .map_flags = 0,
-};
+//struct bpf_map_def SEC("maps") clocks = {
+//  .type        = BPF_MAP_TYPE_ARRAY,
+//  .key_size    = sizeof(unsigned int),
+//  .value_size  = sizeof(struct clocks),
+//  .max_entries = 2,
+//};
 
-struct bpf_map_def SEC("maps") mac_to_rip = {
-        .type = BPF_MAP_TYPE_HASH,
-        .key_size = 6,
-        .value_size = 4,
-        .max_entries = 1024,
-        .map_flags = 0,
-};
+//struct {
+//    __uint(type, BPF_MAP_TYPE_ARRAY);
+//    __type(key, unsigned int);
+//    __type(value, struct clocks);
+//    __uint(max_entries, 2);
+//} clocks SEC(".maps");
 
-struct bpf_map_def SEC("maps") nat_to_vip_rip = {
-        .type = BPF_MAP_TYPE_HASH,
-        .key_size = 4,
-        .value_size = sizeof(struct vip_rip_src_if),
-        .max_entries = 1024,
-        .map_flags = 0,
-};
+//struct bpf_map_def SEC("maps") settings = {
+//  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
+//  .key_size    = sizeof(unsigned int),
+//  .value_size  = sizeof(struct settings),
+//  .max_entries = 1,
+//};
 
-struct bpf_map_def SEC("maps") vip_rip_to_nat = {
-        .type = BPF_MAP_TYPE_HASH,
-        .key_size = 8,
-        .value_size = 4,
-        .max_entries = 1024,
-        .map_flags = 0,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, unsigned int);
+    __type(value, struct settings);
+    __uint(max_entries, 1);
+} settings SEC(".maps");
 
+//struct bpf_map_def SEC("maps") vip_rip_port_counters = {
+//  .type        = BPF_MAP_TYPE_PERCPU_HASH,
+//  .key_size    = sizeof(struct vip_rip_port),
+//  .value_size  = sizeof(struct counter),
+//  .max_entries = 1024,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, struct vip_rip_port);
+    __type(value, struct counter);
+    __uint(max_entries, 1024);
+} vip_rip_port_counters  SEC(".maps");
+
+//struct bpf_map_def SEC("maps") vip_rip_port_concurrent = {
+//  .type        = BPF_MAP_TYPE_PERCPU_HASH,
+//  .key_size    = sizeof(struct vip_rip_port),
+//  .value_size  = sizeof(__s32),
+//  .max_entries = 1024,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, struct vip_rip_port);
+    __type(value, __s32);
+    __uint(max_entries, 1024);
+} vip_rip_port_concurrent SEC(".maps");
+
+//struct bpf_map_def SEC("maps") interfaces = {
+//  .type        = BPF_MAP_TYPE_ARRAY,
+//  .key_size    = sizeof(unsigned int),
+//  .value_size  = sizeof(struct interface),
+//  .max_entries = 2,
+//};
+
+//struct bpf_map_def SEC("maps") flows = {
+//  .type        = BPF_MAP_TYPE_LRU_HASH,
+//  .key_size    = sizeof(struct flow),
+//  .value_size  = sizeof(struct flow_state),
+//  .max_entries = MAX_FLOWS,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __type(key, struct flow);
+    __type(value, struct flow_state);
+    __uint(max_entries, MAX_FLOWS);
+} flows SEC(".maps");
+
+//struct bpf_map_def SEC("maps") flow_queue = {
+//  .type        = BPF_MAP_TYPE_QUEUE,
+//  .key_size    = 0,
+//  .value_size  = sizeof(struct flow_flow_state),  
+//  .max_entries = 10000,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_QUEUE);
+    //__type(key, struct flow);
+    __type(value, struct flow_flow_state);
+    __uint(max_entries, 10000);
+} flow_queue SEC(".maps");
+
+//struct bpf_map_def SEC("maps") rip_to_mac = {
+//        .type = BPF_MAP_TYPE_HASH,
+//        .key_size = 4,
+//        .value_size = 6,
+//        .max_entries = 1024,
+//        .map_flags = 0,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __be32);
+    __type(value, __u8[6]);
+    __uint(max_entries, 1024);
+} rip_to_mac SEC(".maps");
+
+//struct bpf_map_def SEC("maps") mac_to_rip = {
+//        .type = BPF_MAP_TYPE_HASH,
+//        .key_size = 6,
+//        .value_size = 4,
+//        .max_entries = 1024,
+//        .map_flags = 0,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u8[6]);
+    __type(value, __be32);
+    __uint(max_entries, 1024);
+} mac_to_rip SEC(".maps");
+
+
+//struct bpf_map_def SEC("maps") nat_to_vip_rip = {
+//        .type = BPF_MAP_TYPE_HASH,
+//        .key_size = 4,
+//        .value_size = sizeof(struct vip_rip_src_if),
+//        .max_entries = 1024,
+//        .map_flags = 0,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u8[4]);
+    __type(value, struct vip_rip_src_if);
+    __uint(max_entries, 1024);
+} nat_to_vip_rip SEC(".maps");
+
+//struct bpf_map_def SEC("maps") vip_rip_to_nat = {
+//        .type = BPF_MAP_TYPE_HASH,
+//        .key_size = 8,
+//        .value_size = 4,
+//        .max_entries = 1024,
+//        .map_flags = 0,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u8[8]);
+    __type(value, __u8[4]);
+    __uint(max_entries, 1024);
+} vip_rip_to_nat SEC(".maps");
+
+
+//struct bpf_map_def SEC("maps") backend_recs = {
+//  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
+//  .key_size    = sizeof(unsigned int),
+//  .value_size  = sizeof(struct backend_rec),
+//  .max_entries = 256,
+//};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, unsigned int);
+    __type(value, struct backend_rec);
+    __uint(max_entries, 256);
+} backend_recs SEC(".maps");
+	
 
 #define IDX_BITS 13
-struct bpf_map_def SEC("maps") backend_recs = {
-  .type        = BPF_MAP_TYPE_PERCPU_ARRAY,
-  .key_size    = sizeof(unsigned int),
-  .value_size  = sizeof(struct backend_rec),
-  .max_entries = 256,
-};
 
-struct bpf_map_def SEC("maps") backend_idx = {
-  .type        = BPF_MAP_TYPE_PERCPU_HASH,
-  .key_size    = sizeof(struct service),
-  .value_size  = (1<<IDX_BITS),
-  .max_entries = 256,
-};
+//struct bpf_map_def SEC("maps") backend_idx = {
+//  .type        = BPF_MAP_TYPE_PERCPU_HASH,
+//  .key_size    = sizeof(struct service),
+//  .value_size  = (1<<IDX_BITS),
+//  .max_entries = 256,
+//};
 
-struct bpf_map_def SEC("maps") tx_port = {
-	.type = BPF_MAP_TYPE_DEVMAP,
-	.key_size = sizeof(int),
-	.value_size = sizeof(int),
-	.max_entries = 255,
-};
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, struct service);
+    __type(value, __u8[(1<<IDX_BITS)]);
+    __uint(max_entries, 256);
+} backend_idx SEC(".maps");
+
 
 /**********************************************************************/
 
-/*
-static inline unsigned short checksum_sum(unsigned short *buf, int bufsz, unsigned long sum) {
-    //unsigned long sum = 0;
-
-    while (bufsz > 1) {
-        sum += *buf;
-        buf++;
-        bufsz -= 2;
-    }
-
-    if (bufsz == 1) {
-        sum += *(unsigned char *)buf;
-    }
-
-    sum = (sum & 0xffff) + (sum >> 16);
-    sum = (sum & 0xffff) + (sum >> 16);
-
-    return ~sum;
-}
-*/
-//static inline unsigned short checksum_ptr(unsigned short *buf, void *end, unsigned long sum) {
-//    return checksum_sum(buf, (end - (void *)buf)+1, sum);
-//}
-
-/*
-static inline unsigned short checksum(unsigned short *buf, int bufsz) {
-    return checksum_ptr(buf, ((void *) buf) + (bufsz-1), 0);
-}
-*/
-
 #define MAX_TCP_SIZE 1480
 
-static inline unsigned short generic_checksum(unsigned short *buf, void *data_end,  unsigned long sum, int max) {
-    //unsigned long sum = 0;
-
+static inline unsigned short generic_checksum(unsigned short *buf, void *data_end, unsigned long sum, int max) {
+    
     for (int i = 0; i < max; i += 2) {
 	if ((void *)(buf + 1) > data_end)
 	    break;
@@ -356,9 +409,6 @@ static inline void maccpy(unsigned char *dst, unsigned char *src) {
     dst[3] = src[3];
     dst[4] = src[4];
     dst[5] = src[5];
-
-    //*((__u32 *) dst) = *((__u32 *) src);
-    //*(((__u16 *) dst)+2) = *(((__u16 *) src)+2);
 }
 
 static inline int maccmp(unsigned char *m, unsigned char *s) {
@@ -371,18 +421,18 @@ static inline int maccmp(unsigned char *m, unsigned char *s) {
 }
 
 static inline void push_flow_queue(struct flow *f, struct flow_state *s, struct counter *statsp) {
-      
-      struct flow_flow_state fs;
-      void *fsp = &fs;
-      memcpy(fsp, f, sizeof(struct flow));
-      memcpy(fsp+sizeof(struct flow), s, sizeof(struct flow_state)); 
-      
-      struct flow_state *fsp_fs = fsp+sizeof(struct flow);
-      fsp_fs->era = 0;
-      
-      if ((bpf_map_push_elem(&flow_queue, &fs, 0) != 0) && statsp) {
-        statsp->qfailed++;
-       }
+    
+    struct flow_flow_state fs;
+    void *fsp = &fs;
+    memcpy(fsp, f, sizeof(struct flow));
+    memcpy(fsp+sizeof(struct flow), s, sizeof(struct flow_state)); 
+    
+    struct flow_state *fsp_fs = fsp+sizeof(struct flow);
+    fsp_fs->era = 0;
+    
+    if ((bpf_map_push_elem(&flow_queue, &fs, 0) != 0) && statsp) {
+	statsp->qfailed++;
+    }
 }
 
 
@@ -390,12 +440,12 @@ static inline __u16 sdbm(unsigned char *ptr, __u8 len) {
     unsigned long hash = 0;
     unsigned char c;
     unsigned int n;
-
+    
     for(n = 0; n < len; n++) {
         c = ptr[n];
         hash = c + (hash << 6) + (hash << 16) - hash;
     }
-
+    
     return hash & 0xffff;
 }
 
@@ -454,10 +504,10 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
     t.dst = ipv4->daddr;
     t.sport = udp->source;
     t.dport = udp->dest;
-    t.protocol = IPPROTO_UDP;
-    t.pad[0] = 0;
-    t.pad[1] = 0;
-    t.pad[2] = 0;
+    //t.protocol = IPPROTO_UDP;
+    //t.pad[0] = 0;
+    //t.pad[1] = 0;
+    //t.pad[2] = 0;
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
 
     unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
@@ -486,10 +536,10 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     t.dst = ipv4->daddr;
     t.sport = tcp->source;
     t.dport = tcp->dest;
-    t.protocol = IPPROTO_TCP;
-    t.pad[0] = 0;
-    t.pad[1] = 0;
-    t.pad[2] = 0;      
+    //t.protocol = IPPROTO_TCP;
+    //t.pad[0] = 0;
+    //t.pad[1] = 0;
+    //t.pad[2] = 0;      
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
     
     unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
@@ -501,7 +551,7 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     return bpf_map_lookup_elem(&backend_recs, &rec_idx);
 }
 
-static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, int rx_bytes, int new, __u64 era_now) {
+static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, int rx_bytes, int new, __u64 era) {
     struct vip_rip_port vrp;
     vrp.vip = ipv4->daddr;
     vrp.rip = rip;
@@ -515,7 +565,7 @@ static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *t
 	counter->rx_bytes += rx_bytes;
     }
     __s32 *concurrent = NULL;
-    vrp.pad = era_now % 2;
+    vrp.pad = era % 2;
     concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
     if(concurrent) (*concurrent)++;
 }
@@ -548,10 +598,10 @@ static __always_inline void save_state(struct iphdr *ipv4, struct tcphdr *tcp, s
 
 unsigned char nulmac[6] = {0,0,0,0,0,0};
 
-__u64 era = 0;
-__u64 era_last = 0;
-__u64 wallclock = 0;
-const __u32 index0 = 0;
+//__u64 era = 0;
+//__u64 era_last = 0;
+//__u64 wallclock = 0;
+const __u32 zero = 0;
 
 
 // POSSIBILITIES FOR DOS MITIGATION
@@ -563,15 +613,17 @@ const __u32 index0 = 0;
 static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 {
     __u64 start = bpf_ktime_get_ns();
-    __u8 DEFCON = 0;
-
-    {
-	struct settings *setting = bpf_map_lookup_elem(&settings, &index0);
-	if(!setting) {
-	    return XDP_PASS;
-	}
-	DEFCON = setting->defcon;
+    
+    struct settings *setting = bpf_map_lookup_elem(&settings, &zero);
+    if(!setting) {
+	return XDP_PASS;
     }
+    __u8 DEFCON = setting->defcon;
+    __u64 era_now = setting->era;
+    __u64 wallclock_now = setting->time;
+    //__u64 era = era_now;
+    //__u64 wallclock = wallclock_now;
+
     
     if(DEFCON == 0) return XDP_PASS; // C'est ne pas une load-balancer
     
@@ -579,7 +631,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     void *data     = (void *)(long)ctx->data;
     int rx_bytes = data_end - data;
 
-    struct counter *statsp = bpf_map_lookup_elem(&stats, &index0);
+    struct counter *statsp = bpf_map_lookup_elem(&stats, &zero);
     if (!statsp) {
 	return XDP_PASS;
     }
@@ -591,11 +643,9 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	statsp->fp_time = 0;
 	statsp->fp_count = 0;	
     }
-    
-    __u64 era_now = 0;
-    __u64 wallclock_now = 0;
 
 
+    /*
     if((era_last + (1 * SECOND)) < start) {
 	//if((era_last + 1000000000) < start) {
 	// 1s has passed since last era update - check for a new era
@@ -616,7 +666,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	era_now = era;
 	wallclock_now = wallclock;
     }
-    
+    */    
+
     struct ethhdr *eth_hdr = data;
     __u32 nh_off = sizeof(struct ethhdr);
     __be16 eth_proto;
@@ -695,9 +746,11 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     if (data + nh_off > data_end) {
 	return XDP_DROP;
     }
-
-    if(DEFCON <= 2) goto new_flow;
     
+    if(DEFCON <= 2) goto new_flow;
+
+
+    // this lookup adds ~100ns
     struct flow f = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = tcp->source, .dport = tcp->dest };
     struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
     if (fs) {
@@ -909,11 +962,18 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
   rip = bpf_map_lookup_elem(&mac_to_rip, &(eth_hdr->h_source));
 
 
-  struct interface *virif = bpf_map_lookup_elem(&interfaces, &index0);
+  //struct interface *virif = bpf_map_lookup_elem(&interfaces, &index0);
+  //if (!virif || !maccmp(virif->hwaddr, nulmac)) {
+  //    return XDP_PASS;
+  //}
+  
+  struct backend_rec *virif = bpf_map_lookup_elem(&backend_recs, &zero);
   if (!virif || !maccmp(virif->hwaddr, nulmac)) {
       return XDP_PASS;
   }
 
+
+  
   if (rip) {
       struct viprip vr0;
       vr0.vip = ipv4->saddr;
@@ -923,7 +983,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
       if (nat) {
   
 	  ipv4->saddr = *nat;
-	  ipv4->daddr = virif->ipaddr;
+	  //ipv4->daddr = virif->ipaddr;
+	  ipv4->daddr = virif->rip;
 	  maccpy(eth_hdr->h_dest, virif->hwaddr);
 
 	  //ipv4->check = 0;

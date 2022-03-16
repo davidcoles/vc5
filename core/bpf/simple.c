@@ -220,3 +220,38 @@ struct xdp_md {
 	__u32 rx_queue_index;  // rxq->queue_index
 };
 */
+
+
+
+
+
+
+/*
+static inline unsigned short checksum_sum(unsigned short *buf, int bufsz, unsigned long sum) {
+    //unsigned long sum = 0;
+
+    while (bufsz > 1) {
+        sum += *buf;
+        buf++;
+        bufsz -= 2;
+    }
+
+    if (bufsz == 1) {
+        sum += *(unsigned char *)buf;
+    }
+
+    sum = (sum & 0xffff) + (sum >> 16);
+    sum = (sum & 0xffff) + (sum >> 16);
+
+    return ~sum;
+}
+*/
+//static inline unsigned short checksum_ptr(unsigned short *buf, void *end, unsigned long sum) {
+//    return checksum_sum(buf, (end - (void *)buf)+1, sum);
+//}
+
+/*
+static inline unsigned short checksum(unsigned short *buf, int bufsz) {
+    return checksum_ptr(buf, ((void *) buf) + (bufsz-1), 0);
+}
+*/

@@ -40,7 +40,9 @@ support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drive
 
 A basic web console and Prometheus metrics server is included: ![Console screenshot](docs/console.jpg)
 
-A good summary of the concepts in use are discussed in [Patrick Shuff's "Building a Billion User Load Balancer" talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s).
+A good summary of the concepts in use are discussed in [Patrick
+Shuff's "Building a Billion User Load Balancer"
+talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s).
 
 ## Quickstart
 
@@ -207,3 +209,4 @@ https://lpc.events/event/11/contributions/950/attachments/889/1704/lpc_from_xdp_
 
 https://github.com/xdp-project/xdp-tutorial.git
 
+https://lpc.events/event/2/contributions/71/attachments/17/9/presentation-lpc2018-xdp-tutorial.pdf
