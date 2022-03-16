@@ -135,7 +135,7 @@ func main() {
 
 	// weird behaviour ... maybe just bridge AND native mode???
 	if *native {
-		fmt.Println("Waiting for native mode o settle ...")
+		fmt.Println("Waiting for native mode to settle ...")
 		time.Sleep(10 * time.Second)
 	}
 

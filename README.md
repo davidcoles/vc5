@@ -18,7 +18,7 @@ VC5 is a network load balancer designed to work as replacement for
 legacy hardware appliances. It allows a service with a Virtual IP
 address (VIP) to be distributed to a set of real servers. Real servers
 might run the service themselves or work as proxies for another layer
-of servers (eg. HAProxy serving as a Layer 7 router and SSL
+of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
 offload). The VIP needs to be configured on a loopback device on real
 server, eg.: `ip a add 192.168.101.1/32 dev lo`
 
@@ -40,6 +40,7 @@ support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drive
 
 A basic web console and Prometheus metrics server is included: ![Console screenshot](docs/console.jpg)
 
+A good summary of the concepts in use are discussed in [Patrick Shuff's "Building a Billion User Load Balancer" talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s).
 
 ## Quickstart
 

@@ -5,6 +5,11 @@ LIBBPF_VER := v0.4.0
 export CGO_CFLAGS = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 
+## If this is increased to 34000000 it seems to fail on my systems.
+## No idea why. Even on sysems with obscene amount of RAM (>200GB)
+## libbpf: map 'flows': failed to create: Argument list too long(-7)
+#MAX_FLOWS    ?= 33000000
+
 MAX_FLOWS    ?= 10000000
 MAX_SERVICES ?= 100
 
