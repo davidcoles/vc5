@@ -27,10 +27,10 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
-func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan config.Service {
+func service(s config.Service, t Thruple, w *sync.WaitGroup, l4 chan l4status_t) chan config.Service {
 	c := make(chan config.Service)
 	go func() {
-		logs.DEBUG("Starting", s.String())
+		logs.DEBUG("Starting", t.String())
 
 		var wg sync.WaitGroup
 
@@ -49,15 +49,15 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 		stats_c := make(chan types.Counters, 1000)
 
 		defer func() {
-			ctrl.DelBackendIdx(s.Vip, s.Port, bool(s.Protocol))
+			ctrl.DelBackendIdx(t.IP, t.Port, bool(t.Protocol))
 
-			sink <- types.Scounters{Delete: true, VIP: s.Vip, Port: s.Port, Protocol: s.Protocol}
+			sink <- types.Scounters{Delete: true, VIP: t.IP, Port: t.Port, Protocol: t.Protocol}
 			for _, v := range state {
 				close(v.c)
 			}
 
 			select {
-			case l4 <- l4status_t{l4: s.L4(), up: false}:
+			case l4 <- l4status_t{l4: t.L4(), up: false}:
 			case <-time.After(1 * time.Second):
 			}
 
@@ -70,7 +70,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 			case <-wait:
 			}
 
-			logs.DEBUG("Quitting", s.String())
+			logs.DEBUG("Quitting", t.String())
 			w.Done()
 		}()
 
@@ -95,7 +95,8 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 						//current[r.Rip] = v
 					} else {
 						wg.Add(1)
-						state[r.Rip] = &state_t{g: gen, c: real_ip(r, &wg, status_c, stats_c), r: r}
+						//srv := types.Thruple{IP: t.IP, Port: t.Port, Protocol: t.Protocol}
+						state[r.Rip] = &state_t{g: gen, c: real_ip(r, t, &wg, status_c, stats_c), r: r}
 					}
 				}
 
@@ -128,12 +129,12 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 				}
 
 				table, stats := rendezvous.RipIndex(alive)
-				logs.DEBUG("Backend", s.String(), len(alive), table[0:32], stats)
-				ctrl.SetBackendIdx(s.Vip, s.Port, bool(s.Protocol), table)
+				logs.DEBUG("Backend", t.String(), len(alive), table[0:32], stats)
+				ctrl.SetBackendIdx(t.IP, t.Port, bool(t.Protocol), table)
 
 				if init && isup != up { // send new status
-					l4 <- l4status_t{l4: s.L4(), up: isup}
-					logs.NOTICE("Changed", s.String(), "to", updown(isup))
+					l4 <- l4status_t{l4: t.L4(), up: isup}
+					logs.NOTICE("Changed", t.String(), "to", updown(isup))
 				}
 
 				up = isup
@@ -147,7 +148,7 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 				}
 
 				sc := types.Scounters{Name: s.Name, Description: s.Description, Up: up, Backends: be,
-					VIP: s.Vip, Port: s.Port, Protocol: s.Protocol, Need: s.Need, Nalive: uint(nalive)}
+					VIP: t.IP, Port: t.Port, Protocol: t.Protocol, Need: s.Need, Nalive: uint(nalive)}
 				sc.Sum()
 				sink <- sc // put in a select with timeout
 			}
@@ -164,8 +165,8 @@ func service(s config.Service, w *sync.WaitGroup, l4 chan l4status_t) chan confi
 
 			case <-init_timer.C:
 				init = true
-				l4 <- l4status_t{l4: s.L4(), up: up}
-				logs.NOTICE("Starting", s.String(), "as", updown(up))
+				l4 <- l4status_t{l4: t.L4(), up: up}
+				logs.NOTICE("Starting", t.String(), "as", updown(up))
 
 			case u := <-status_c:
 				if v, ok := state[u.ip]; ok {

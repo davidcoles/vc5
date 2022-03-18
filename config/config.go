@@ -25,8 +25,6 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
-	"regexp"
-	"strconv"
 
 	"github.com/davidcoles/vc5/types"
 )
@@ -35,10 +33,6 @@ type IP4 = types.IP4
 type IP6 = types.IP6
 type MAC = types.MAC
 type L4 = types.L4
-type Protocol = types.Protocol
-
-const TCP = types.TCP
-const UDP = types.UDP
 
 type HttpCheck struct {
 	Path   string `json:"path"`
@@ -63,67 +57,40 @@ type Checks struct {
 }
 
 type Real struct {
-	Rip   IP4         `json:"rip"`
 	Http  []HttpCheck `json:"http,omitempty"`
 	Https []HttpCheck `json:"https,omitempty"`
 	Tcp   []TcpCheck  `json:"tcp,omitempty"`
 	Syn   []SynCheck  `json:"syn,omitempty"`
 
-	Vip      IP4
-	Port     uint16
-	Protocol Protocol
-
-	// info for sending probes/redirecting traffic
-	Nat     IP4
-	VLAN    uint16
-	Index   uint16
-	Source  IP4
-	IfName  string
-	IfIndex int
-	IfMAC   MAC
+	Rip   IP4    `json:"rip"`
+	Nat   IP4    `json:"nat"`
+	Info  Info   `json:"info"`
+	Index uint16 `json:"index"`
 }
 
 type Service struct {
-	Vip         IP4             `json:"vip"`
-	Port        uint16          `json:"port"`
-	Protocol    Protocol        `json:"udp"`
-	Rip         map[string]Real `json:"rip"`
-	Need        uint            `json:"need"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	LeastConns  bool            `json:"leastconns"`
+	Rip         map[IP4]Real `json:"rips"`
+	Need        uint         `json:"need"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	LeastConns  bool         `json:"leastconns"`
 }
 
-type Service_ struct {
-	Real        map[string]Real `json:"rips"`
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	LeastConns  bool            `json:"leastconns"`
-	Need        uint            `json:"need"`
+type VR struct {
+	VIP IP4
+	RIP IP4
 }
 
-type Config struct {
-	Multicast string                         `json:"multicast"`
-	Webserver string                         `json:"webserver"`
-	Learn     uint16                         `json:"learn"`
-	VIPs      map[IP4]map[L4]Service         `json:"-"`
-	Vips      map[string]map[string]Service_ `json:"vips"`
-	RHI       RHI                            `json:"rhi"`
-	VLANs     map[uint16]string              `json:"vlans"`
+func (v VR) MarshalText() ([]byte, error) {
+	return []byte(v.string()), nil
+}
+func (v VR) string() string {
+	return v.VIP.String() + ":" + v.RIP.String()
+}
 
-	Address   IP4
-	IfName    string
-	Hardware  MAC
-	IfIndex   int
-	Interface net.Interface
-
-	Real map[IP4]Info       `json:"-"`
-	Nats map[[8]byte]uint16 `json:"-"`
-
-	Out map[string]map[string]Service `json:"out"` // for visualisation/debug
-
-	_reals map[IP4]uint16
-	_vlans map[uint16]Info
+type NI struct {
+	NAT  IP4
+	Info Info
 }
 
 type Info struct {
@@ -132,6 +99,7 @@ type Info struct {
 	VLAN   uint16
 	Source IP4
 	IPNet  net.IPNet
+	MAC    MAC
 }
 
 type RHI struct {
@@ -139,39 +107,29 @@ type RHI struct {
 	Peers    []string `json:"peers"`
 }
 
-type Thruple = types.Thruple
+type Config struct {
+	Multicast string                 `json:"multicast"`
+	Webserver string                 `json:"webserver"`
+	Learn     uint16                 `json:"learn"`
+	RHI       RHI                    `json:"rhi"`
+	VIPs      map[IP4]map[L4]Service `json:"vips"`
+	VLANs     map[uint16]string      `json:"vlans"`
 
-func (r *Real) Service() Thruple {
-	if r.Protocol {
-		return Thruple{r.Vip, r.Port, UDP}
-	}
-	return Thruple{r.Vip, r.Port, TCP}
-}
+	Address    IP4           `json:"-"`
+	_IfName    string        `json:"-"`
+	_Hardware  MAC           `json:"-"`
+	_IfIndex   int           `json:"-"`
+	_Interface net.Interface `json:"-"`
+	Real       map[IP4]Info  `json:"real"`
+	NAT        map[VR]NI     `json:"nat"`
 
-func (s *Service) String() string {
-	t := s.Tuple()
-	return t.String()
-}
-
-func (s *Service) L4() types.L4 {
-	return L4{s.Port, s.Protocol}
-}
-
-func (s *Service) Tuple() Thruple {
-	if s.Protocol {
-		return Thruple{s.Vip, s.Port, UDP}
-	}
-	return Thruple{s.Vip, s.Port, TCP}
-}
-func (s *Service) _Protocol() types.Protocol {
-	if s.Protocol {
-		return types.UDP
-	}
-	return types.TCP
+	_nats map[VR]uint16
+	_real map[IP4]uint16
+	_vlan map[uint16]Info
 }
 
 func (c *Config) vlan_mode() bool {
-	if len(c._vlans) > 0 {
+	if len(c._vlan) > 0 {
 		return true
 	}
 
@@ -179,150 +137,15 @@ func (c *Config) vlan_mode() bool {
 }
 
 func (old *Config) ReloadConfiguration(file string) (*Config, error) {
-	return _LoadConfiguration(file, old.IfName, old.Address, old)
+	return loadConfiguration(file, old._IfName, old.Address, old)
 }
 
 func LoadConfiguration(file string, ifname string, src IP4) (*Config, error) {
-	return _LoadConfiguration(file, ifname, src, nil)
-}
-
-func _LoadConfiguration(file string, ifname string, src IP4, old *Config) (*Config, error) {
-	config, err := loadConfigFile(file)
-	if err != nil {
-		return nil, err
-	}
-
-	err = fix_vlans(config)
-	if err != nil {
-		return nil, err
-	}
-
-	if old != nil && old.vlan_mode() != config.vlan_mode() {
-		return nil, errors.New("Can't dynamically change VLAN mode, sorry.")
-	}
-
-	if config.vlan_mode() {
-		vlan := config.find_vlan(src)
-
-		if vlan == 0 {
-			return nil, errors.New("Bind IP is not contained in any VLAN: " + src.String())
-		}
-
-		info := config._vlans[vlan]
-
-		config.IfName = info.Iface.Name
-		config.Address = src
-
-		copy(config.Hardware[:], info.Iface.HardwareAddr[:])
-		config.IfIndex = info.Iface.Index
-		config.Interface = info.Iface
-
-	} else {
-
-		config.IfName = ifname
-		config.Address = src
-
-		iface, err := net.InterfaceByName(ifname)
-		if err != nil {
-			return nil, err
-		}
-
-		copy(config.Hardware[:], iface.HardwareAddr[:])
-		config.IfIndex = iface.Index
-		config.Interface = *iface
-
-		addrs, err := iface.Addrs()
-		if err != nil {
-			return nil, err
-		}
-
-		var found bool
-
-		for _, addr := range addrs {
-			ipaddr, ipnet, err := net.ParseCIDR(addr.String())
-			if err != nil {
-				return nil, err
-			}
-
-			fmt.Println("DEBUG ", addr, ipaddr, ipnet, iface.Index)
-
-			if ipaddr.String() == src.String() {
-				found = true
-			}
-		}
-
-		if !found {
-			return nil, errors.New("Couldn't find IP " + src.String() + " on interface " + ifname)
-		}
-	}
-
-	//err = fix_info(config)
-	err = fix_reals(config)
-	if err != nil {
-		return nil, err
-	}
-
-	err = fix_services(config)
-	if err != nil {
-		return nil, err
-	}
-
-	err = fix_nat(config, old)
-	if err != nil {
-		return nil, err
-	}
-
-	err = fix_idx(config, old)
-	if err != nil {
-		return nil, err
-	}
-
-	return config, nil
-}
-
-func loadConfigFile(file string) (*Config, error) {
-	jf, err := os.Open(file)
-
-	if err != nil {
-		return nil, err
-	}
-	defer jf.Close()
-
-	bs, _ := ioutil.ReadAll(jf)
-
-	var config Config
-	//err = json.Unmarshal(bs, &(config.Services_))
-	err = json.Unmarshal(bs, &(config))
-
-	if err != nil {
-		return nil, err
-	}
-
-	jf.Close()
-
-	return &config, nil
-}
-
-//func parseIP(ip string) ([4]byte, bool) {
-func parseIP(ip string) (IP4, bool) {
-	var addr [4]byte
-	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
-	m := re.FindStringSubmatch(ip)
-	if len(m) != 5 {
-		return addr, false
-	}
-	for n, _ := range addr {
-		a, err := strconv.ParseInt(m[n+1], 10, 9)
-		if err != nil || a < 0 || a > 255 {
-			return addr, false
-		}
-		addr[n] = byte(a)
-	}
-	return IP4(addr), true
+	return loadConfiguration(file, ifname, src, nil)
 }
 
 func (c *Config) find_vlan(ip IP4) uint16 {
-	for id, info := range c._vlans {
+	for id, info := range c._vlan {
 		i := []byte{ip[0], ip[1], ip[2], ip[3]}
 		if info.IPNet.Contains(i) {
 			return id
@@ -332,10 +155,10 @@ func (c *Config) find_vlan(ip IP4) uint16 {
 }
 
 func fix_vlans(c *Config) error {
+	vlans := c.VLANs
+	c._vlan = make(map[uint16]Info)
 
-	c._vlans = make(map[uint16]Info)
-
-	for k, v := range c.VLANs {
+	for k, v := range vlans {
 
 		if k == 0 || k >= 0xfff {
 			return errors.New(fmt.Sprint("Invalid VLAN (outside range 1-4094): ", k))
@@ -367,8 +190,10 @@ func fix_vlans(c *Config) error {
 				hasip = true
 
 				src := IP4{ip4[0], ip4[1], ip4[2], ip4[3]}
-				info := Info{Index: 0, Iface: *iface, VLAN: k, Source: src, IPNet: *ipnet}
-				c._vlans[k] = info
+				var mac MAC
+				copy(mac[:], iface.HardwareAddr)
+				info := Info{Index: 0, Iface: *iface, VLAN: k, Source: src, IPNet: *ipnet, MAC: mac}
+				c._vlan[k] = info
 			}
 		}
 
@@ -381,7 +206,6 @@ func fix_vlans(c *Config) error {
 }
 
 func fix_nat(new, old *Config) error {
-	//fmt.Println(new.Vips)
 
 	natify := func(i uint16) IP4 {
 		i += 4
@@ -393,7 +217,7 @@ func fix_nat(new, old *Config) error {
 		u bool
 	}
 
-	newi := func(m map[[8]byte]idx) (uint16, error) {
+	newi := func(m map[VR]idx) (uint16, error) {
 		n := make(map[uint16]bool)
 		for _, v := range m {
 			n[v.n] = true
@@ -404,7 +228,7 @@ func fix_nat(new, old *Config) error {
 		if _, ok := n[i]; ok {
 			i++
 			if i > 65000 {
-				return 0, errors.New("Only max 65000 nat slots allowed currently")
+				return 0, errors.New("Only max 65000 NAT slots allowed currently")
 			}
 			goto check_exists
 		}
@@ -412,23 +236,21 @@ func fix_nat(new, old *Config) error {
 		return i, nil
 	}
 
-	nats := make(map[[8]byte]idx)
+	nats := make(map[VR]idx)
 
 	if old != nil {
-		for k, v := range old.Nats {
+		for k, v := range old._nats {
 			nats[k] = idx{n: v, u: false}
 		}
 	}
 
-	for _, v := range new.VIPs {
+	for vip, v := range new.VIPs {
 		for l4, s := range v {
-			for k, r := range s.Rip {
-				vip := s.Vip
-				rip := r.Rip
-
-				viprip := [8]byte{vip[0], vip[1], vip[2], vip[3], rip[0], rip[1], rip[2], rip[3]}
+			for rip, _ := range s.Rip {
 
 				var i uint16
+
+				viprip := VR{VIP: vip, RIP: rip}
 
 				if v, ok := nats[viprip]; ok {
 					i = v.n
@@ -443,18 +265,22 @@ func fix_nat(new, old *Config) error {
 					nats[viprip] = idx{n: i, u: true}
 				}
 
-				obj := new.VIPs[vip][l4].Rip[k]
+				obj := new.VIPs[vip][l4].Rip[rip]
 				obj.Nat = natify(i)
-				new.VIPs[vip][l4].Rip[k] = obj
+				new.VIPs[vip][l4].Rip[rip] = obj
 			}
 		}
 	}
 
-	new.Nats = make(map[[8]byte]uint16)
+	new._nats = make(map[VR]uint16)
+	new.NAT = make(map[VR]NI)
 
 	for k, v := range nats {
 		if v.u {
-			new.Nats[k] = v.n
+			new._nats[k] = v.n
+			info := new.Real[k.RIP]
+			nat := natify(v.n)
+			new.NAT[k] = NI{NAT: nat, Info: info}
 		}
 	}
 
@@ -489,16 +315,14 @@ func fix_idx(new, old *Config) error {
 	reals := make(map[IP4]idx)
 
 	if old != nil {
-		for k, v := range old._reals {
+		for k, v := range old._real {
 			reals[k] = idx{n: v, u: false}
 		}
 	}
 
-	for _, v := range new.VIPs {
+	for vip, v := range new.VIPs {
 		for l4, s := range v {
-			for k, r := range s.Rip {
-				rip := r.Rip
-				vip := r.Vip
+			for rip, real := range s.Rip {
 
 				var i uint16
 
@@ -515,18 +339,17 @@ func fix_idx(new, old *Config) error {
 					reals[rip] = idx{n: i, u: true}
 				}
 
-				obj := new.VIPs[vip][l4].Rip[k]
-				obj.Index = i
-				new.VIPs[vip][l4].Rip[k] = obj
+				real.Index = i
+				new.VIPs[vip][l4].Rip[rip] = real
 			}
 		}
 	}
 
-	new._reals = make(map[IP4]uint16)
+	new._real = make(map[IP4]uint16)
 
 	for k, v := range reals {
 		if v.u {
-			new._reals[k] = v.n
+			new._real[k] = v.n
 			info := new.Real[k]
 			info.Index = v.n
 			new.Real[k] = info
@@ -539,16 +362,11 @@ func fix_reals(c *Config) error {
 
 	c.Real = make(map[IP4]Info)
 
-	for _, vip := range c.Vips {
+	for _, vip := range c.VIPs {
 		for _, service := range vip {
-			for real, _ := range service.Real {
+			for rip, _ := range service.Rip {
 
 				var info Info
-
-				rip, ok := parseIP(real)
-				if !ok {
-					return errors.New("Bad IP: " + real)
-				}
 
 				if _, ok := c.Real[rip]; ok {
 					continue
@@ -559,10 +377,10 @@ func fix_reals(c *Config) error {
 					if vlan == 0 {
 						return errors.New("Real " + rip.String() + " is not in a VLAN")
 					}
-					info = c._vlans[vlan]
+					info = c._vlan[vlan]
 				} else {
 					info.Source = c.Address
-					info.Iface = c.Interface
+					info.Iface = c._Interface
 					info.VLAN = 0
 				}
 
@@ -576,83 +394,132 @@ func fix_reals(c *Config) error {
 
 func fix_services(c *Config) error {
 
-	c.VIPs = make(map[IP4]map[L4]Service)
-	c.Out = make(map[string]map[string]Service)
-
-	for i, m := range c.Vips {
-
-		ip, ok := parseIP(i)
-		if !ok {
-			return errors.New("VIP is not a valid IP address: " + i)
-		}
-
-		vip := IP4{ip[0], ip[1], ip[2], ip[3]}
-
-		c.VIPs[vip] = make(map[L4]Service)
-		c.Out[vip.String()] = make(map[string]Service)
-
-		for pp, s_ := range m {
-
-			re := regexp.MustCompile(`^(udp|tcp):([1-9][0-9]*)$`)
-			ma := re.FindStringSubmatch(pp)
-			if len(ma) != 3 {
-				return errors.New("Service is not of the form (tcp|udp):<port> : " + pp)
+	for vip, m := range c.VIPs {
+		for l4, service := range m {
+			for k, r := range service.Rip {
+				r.Rip = k
+				r.Info = c.Real[r.Rip]
+				service.Rip[k] = r
 			}
-			port, err := strconv.Atoi(ma[2])
-			if err != nil || port < 1 || port > 65535 {
-				return errors.New("Invalid port number : " + pp)
-			}
-
-			var udp bool
-			if ma[1] == "udp" {
-				udp = true
-			}
-
-			var s Service
-			s.Rip = make(map[string]Real)
-
-			for k, v := range s_.Real {
-				ip, ok := parseIP(k)
-				if !ok {
-					return errors.New("RIP '" + k + "' incorrect")
-				}
-				v.Rip = ip
-				s.Rip[ip.String()] = v
-				//s.Rip[v.Rip.String()] = v
-			}
-
-			s.Name = s_.Name
-			s.Description = s_.Description
-			s.Need = s_.Need
-			s.LeastConns = s_.LeastConns
-
-			s.Protocol = Protocol(udp)
-			s.Vip = vip
-			s.Port = uint16(port)
-
-			for k, r := range s.Rip {
-				rip := r.Rip
-				r.Vip = vip
-				r.Port = uint16(port)
-				r.Protocol = Protocol(udp)
-
-				r.Source = c.Real[rip].Source
-				r.IfName = c.Real[rip].Iface.Name
-				r.VLAN = c.Real[rip].VLAN
-				r.IfIndex = c.Real[rip].Iface.Index
-
-				copy(r.IfMAC[:], c.Real[rip].Iface.HardwareAddr)
-
-				s.Rip[k] = r
-			}
-
-			l4 := L4{Port: uint16(port), Protocol: Protocol(udp)}
-			c.VIPs[vip][l4] = s
-			c.Out[vip.String()][l4.String()] = s
+			c.VIPs[vip][l4] = service
 		}
 	}
 
-	c.Vips = nil
-
 	return nil
+}
+
+func loadConfigFile(file string) (*Config, error) {
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	b, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
+	}
+
+	var config Config
+
+	err = json.Unmarshal(b, &(config))
+	if err != nil {
+		return nil, err
+	}
+
+	return &config, nil
+}
+
+func loadConfiguration(file string, ifname string, src IP4, old *Config) (*Config, error) {
+
+	config, err := loadConfigFile(file)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fix_vlans(config)
+	if err != nil {
+		return nil, err
+	}
+
+	if old != nil && old.vlan_mode() != config.vlan_mode() {
+		return nil, errors.New("Can't dynamically change VLAN mode, sorry.")
+	}
+
+	if config.vlan_mode() {
+		vlan := config.find_vlan(src)
+
+		if vlan == 0 {
+			return nil, errors.New("Bind IP is not contained in any VLAN: " + src.String())
+		}
+
+		info := config._vlan[vlan]
+
+		config._IfName = info.Iface.Name
+		config.Address = src
+
+		copy(config._Hardware[:], info.Iface.HardwareAddr[:])
+		config._IfIndex = info.Iface.Index
+		config._Interface = info.Iface
+
+	} else {
+
+		config._IfName = ifname
+		config.Address = src
+
+		iface, err := net.InterfaceByName(ifname)
+		if err != nil {
+			return nil, err
+		}
+
+		copy(config._Hardware[:], iface.HardwareAddr[:])
+		config._IfIndex = iface.Index
+		config._Interface = *iface
+
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return nil, err
+		}
+
+		var found bool
+
+		for _, addr := range addrs {
+			ipaddr, ipnet, err := net.ParseCIDR(addr.String())
+			if err != nil {
+				return nil, err
+			}
+
+			fmt.Println("DEBUG ", addr, ipaddr, ipnet, iface.Index)
+
+			if ipaddr.String() == src.String() {
+				found = true
+			}
+		}
+
+		if !found {
+			return nil, errors.New("Couldn't find IP " + src.String() + " on interface " + ifname)
+		}
+	}
+
+	err = fix_reals(config)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fix_services(config)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fix_nat(config, old)
+	if err != nil {
+		return nil, err
+	}
+
+	err = fix_idx(config, old)
+	if err != nil {
+		return nil, err
+	}
+
+	return config, nil
 }

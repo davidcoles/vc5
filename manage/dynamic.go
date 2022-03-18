@@ -32,6 +32,8 @@ import (
 
 type IP4 = types.IP4
 type MAC = types.MAC
+type VR = config.VR
+type NI = config.NI
 
 var ctrl *core.Control
 var webserver *stats.SServer
@@ -60,12 +62,13 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *sta
 
 	go func() {
 		bgp4 := do_bgp(conf.Address, conf.Learn, conf.RHI)
-		//real := reals(conf.Info)
+		nats := do_nats(conf.NAT)
 		real := arp(conf.Real)
 		vips := virtuals(conf.VIPs)
 
 		for n := range c {
 			real <- n.Real
+			nats <- n.NAT
 			vips <- n.VIPs
 			bgp4 <- n.RHI
 		}
@@ -78,13 +81,39 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *sta
 	return c
 }
 
-func get_tx(ip IP4, nics []types.NIC) uint8 {
-	for i, n := range nics {
-		if n.IPNet.Contains(ip[:]) {
-			return uint8(i)
+func do_nats(nats map[VR]NI) chan map[VR]NI {
+	c := make(chan map[VR]NI, 1)
+	c <- nats
+	go func() {
+		state := make(map[VR]NI)
+		for nats = range c {
+			defer func() {
+				for k, v := range state {
+					ctrl.DelNatVipRip(v.NAT, k.VIP, k.RIP)
+				}
+			}()
+
+			for k, v := range nats {
+				//if _, ok := state[k]; !ok {
+				//	fmt.Println("ADDING", k, v.NAT)
+				//}
+
+				//var mac MAC
+				//copy(mac[:], v.Info.Iface.HardwareAddr)
+				ctrl.SetNatVipRip(v.NAT, k.VIP, k.RIP, v.Info.Source, v.Info.Iface.Name, v.Info.VLAN, v.Info.Iface.Index, v.Info.MAC)
+			}
+
+			for k, v := range state {
+				if _, ok := nats[k]; !ok {
+					//fmt.Println("DELETING", k, v.NAT)
+					ctrl.DelNatVipRip(v.NAT, k.VIP, k.RIP)
+				}
+			}
+
+			state = nats
 		}
-	}
-	return 0
+	}()
+	return c
 }
 
 func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logger) {

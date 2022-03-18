@@ -28,8 +28,8 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *sta
 	return manage.Bootstrap(conf, ctl, l, ws)
 }
 
-func New(ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *core.Control {
-	return core.New(core.BPF_O, ipaddr, veth, vip, hwaddr, native, bridge, peth[:]...)
+func New(veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *core.Control {
+	return core.New(core.BPF_O, veth, vip, hwaddr, native, bridge, peth[:]...)
 }
 
 func Daemon(path, ipaddr string) {

@@ -186,7 +186,8 @@ func virtual(vip IP4, s map[L4]config.Service, vip_c chan status_t, w *sync.Wait
 					x.c <- v
 				} else {
 					wg.Add(1)
-					state[k] = &state_t{g: g, c: service(v, &wg, l4status_c), u: true}
+					t := Thruple{IP: vip, Port: k.Port, Protocol: k.Protocol}
+					state[k] = &state_t{g: g, c: service(v, t, &wg, l4status_c), u: true}
 					// start initially as up so as to not bring down other services on same VIP
 				}
 			}

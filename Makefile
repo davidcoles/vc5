@@ -1,6 +1,5 @@
 LIBBPF     := $(PWD)
 LIBBPF_LIB := $(PWD)/bpf
-LIBBPF_VER := v0.4.0
 
 export CGO_CFLAGS = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF_LIB)

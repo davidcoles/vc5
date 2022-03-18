@@ -48,8 +48,6 @@ func main() {
 
 	args := flag.Args()
 
-	//vip1 := vc5.IP4{10, 0, 0, 1}
-	//vip2 := vc5.IP4{10, 0, 0, 2}
 	vip1 := vc5.IP4{10, 255, 0, 1}
 	vip2 := vc5.IP4{10, 255, 0, 2}
 
@@ -67,9 +65,6 @@ func main() {
 	fmt.Println(args)
 
 	conffile := args[0]
-	//netns := args[1]
-	//veth := args[2]
-	//mac := args[3]
 	ipv4 := args[1]
 	peth := args[2:]
 
@@ -92,6 +87,7 @@ func main() {
 	}
 
 	if false {
+		//if true {
 		j, err := json.MarshalIndent(conf, "", "\t")
 		if err != nil {
 			panic(err)
@@ -126,7 +122,7 @@ func main() {
 	}
 
 	//c := vc5.New(ipaddr, veth, vip, hwaddr, *native, *bridge, peth...)
-	c := vc5.New(ipaddr, veth, vip1, mac, *native, *bridge, peth...)
+	c := vc5.New(veth, vip1, mac, *native, *bridge, peth...)
 
 	//for some reason setting this before starting the program didn't work
 	if *bridge {

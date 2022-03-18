@@ -85,14 +85,13 @@ type Control struct {
 	interval uint8
 	defcon   uint8
 
-	settings        int
-	interfaces      int
-	service_backend int
-	rip_to_mac      int
-	mac_to_rip      int
-	nat_to_vip_rip  int
-	vip_rip_to_nat  int
-	//clocks                  int
+	settings                int
+	interfaces              int
+	service_backend         int
+	rip_to_mac              int
+	mac_to_rip              int
+	nat_to_vip_rip          int
+	vip_rip_to_nat          int
 	vip_rip_port_counters   int
 	vip_rip_port_concurrent int
 	stats                   int
@@ -100,23 +99,11 @@ type Control struct {
 	flows                   int
 	backend_recs            int
 	backend_idx             int
-	//tx_port                 int
-
-	//// logger *logger
-	//iface2u8 map[string]uint8
-
-	//ipaddr IP4
-	//hwaddr  MAC
-	//ifindex uint32
 }
 
 func (c *Control) Era() (uint64, uint8) {
 	return c.era, c.interval
 }
-
-//func (c *Control) IPAddr() [4]byte {
-//	return c.ipaddr
-//}
 
 type service struct {
 	vip   IP4
@@ -206,13 +193,11 @@ func (c *Control) global_update() {
 
 }
 
-func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
+func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *Control {
 
 	var c Control
 
 	c.interval = INTERVAL
-	//c.ipaddr = ipaddr
-	////c.logger = NewLogger()
 
 	prog := "xdp_main"
 
@@ -230,13 +215,10 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.defcon = 5
 
 	c.settings = c.find_map("settings", 4, 24)
-	//c.interfaces = c.find_map("interfaces", 4, 16)
-	//c.service_backend = c.find_map("service_backend", 8, 65536*12+12+1)
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.mac_to_rip = c.find_map("mac_to_rip", 6, 4)
 	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
-	//c.clocks = c.find_map("clocks", 4, 24)
 	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", 12, 8*6)
 	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", 12, 4)
 	c.stats = c.find_map("stats", 4, 8*6)
@@ -244,39 +226,13 @@ func New(bpf []byte, ipaddr IP4, veth string, vip IP4, hwaddr [6]byte, native, b
 	c.flows = c.find_map("flows", FLOW, STATE)
 	c.backend_recs = c.find_map("backend_recs", 4, 16)
 	c.backend_idx = c.find_map("backend_idx", 8, 8192)
-	//c.tx_port = c.find_map("tx_port", 4, 4)
-
-	//if p, err := net.InterfaceByName(peth[0]); err != nil {
-	//	fmt.Println(peth, err)
-	//	return nil
-	//} else {
-	//	//c.ifindex = uint32(p.Index)
-	//	//copy(c.hwaddr[:], p.HardwareAddr[:])
-	//}
 
 	if v, err := net.InterfaceByName(veth); err != nil {
 		fmt.Println(veth, err)
 		return nil
 	} else {
-		/*
-			var zero uint32
-			var virt interfaces
-			virt.ifindex = uint32(v.Index)
-			virt.ipaddr = vip
-			virt.hwaddr = hwaddr
-			xdp.BpfMapUpdateElem(c.interfaces, uP(&zero), uP(&virt), xdp.BPF_ANY)
-		*/
-
 		c.SetBackendRec2(vip, hwaddr, 0, 0, int32(v.Index))
 	}
-
-	/*
-		for i, n := range nics {
-			var k int32 = int32(i)
-			var v int32 = int32(n.Iface.Index)
-			xdp.BpfMapUpdateElem(c.tx_port, uP(&k), uP(&v), xdp.BPF_ANY)
-		}
-	*/
 
 	go c.global_update()
 
@@ -459,11 +415,6 @@ func (c *Control) ReadMAC(ip IP4) *MAC {
 
 	return &m
 }
-
-//func ping(ip IP4) {
-//	command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-//	exec.Command("/bin/sh", "-c", command).Output()
-//}
 
 func (c *Control) VipRipPortCounters2(vip, rip IP4, port uint16, clear bool, curr uint64) counters {
 	count := c.VipRipPortCounters(vip, rip, port, clear)

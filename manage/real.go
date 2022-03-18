@@ -28,15 +28,16 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
-func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats_c chan types.Counters) chan config.Real {
+type Thruple = types.Thruple
+
+func real_ip(real config.Real, service Thruple, wg *sync.WaitGroup, status_c chan status_t, stats_c chan types.Counters) chan config.Real {
 	c := make(chan config.Real)
 
 	go func() {
 
 		history := []bool{false, false, true, true, true} // need 3/5 - first real check will determine the state
 
-		tt := real.Service()
-		svc := tt.String()
+		svc := service.String()
 		logs.DEBUG("Starting", svc, real.Rip)
 
 		// this *may* be a new real IP, wait a few seconds for MAC to be discovered
@@ -45,10 +46,9 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 		done := make(chan bool)
 
 		var concurrent uint64
-		ctrl.VipRipPortCounters(real.Vip, real.Rip, real.Port, true)
-		ctrl.SetNatVipRip(real.Nat, real.Vip, real.Rip, real.Source, real.IfName, real.VLAN, real.IfIndex, real.IfMAC)
-		// ^^^ this can occur for multiple ports! need NVR manager
-		updates := ctrl.VipRipPortConcurrents2(real.Vip, real.Rip, real.Port, done)
+		ctrl.VipRipPortCounters(service.IP, real.Rip, service.Port, true)
+
+		updates := ctrl.VipRipPortConcurrents2(service.IP, real.Rip, service.Port, done)
 
 		status_timer := time.NewTicker(5 * time.Second) // run healthchecks every 5s
 		stats_timer := time.NewTicker(1 * time.Second)  // update stats every 1s
@@ -91,7 +91,7 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 				case <-time.After(1 * time.Second):
 					// we don't update state here to cause a retry of the state change next time round
 				}
-				logs.NOTICE("Changed", svc, real.Rip, "to", updown(state), history)
+				logs.NOTICE("Changed", svc, real.Rip, "to", updown(state))
 			}
 
 		do_select:
@@ -101,7 +101,7 @@ func real_ip(real config.Real, wg *sync.WaitGroup, status_c chan status_t, stats
 			case <-stats_timer.C:
 				// lookup and send stats with timeout
 				select {
-				case stats_c <- ctrl.VipRipPortCounters2(real.Vip, real.Rip, real.Port, false, concurrent):
+				case stats_c <- ctrl.VipRipPortCounters2(service.IP, real.Rip, service.Port, false, concurrent):
 				case <-time.After(1 * time.Second):
 				}
 				goto do_select

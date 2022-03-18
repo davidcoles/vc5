@@ -64,15 +64,24 @@ const (
 	UDP          = true
 )
 
-func (p Protocol) String() string {
+func (p Protocol) string() string {
+
 	if p {
 		return "udp"
 	}
 	return "tcp"
 }
 
+func (p Protocol) String() string {
+	return p.string()
+}
+
 func (p Protocol) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + p.String() + `"`), nil
+	return []byte(`"` + p.string() + `"`), nil
+}
+
+func (p Protocol) MarshalText() ([]byte, error) {
+	return []byte(`"` + p.string() + `"`), nil
 }
 
 type Thruple struct {
@@ -163,12 +172,47 @@ func (i *IP4) UnmarshalJSON(d []byte) error {
 	return errors.New("Badly formated IPv4 address: " + string(d))
 }
 
-//func (i *IP4) MarshalJSON() ([]byte, error) {
-//	return []byte(i.String()), nil
-//}
+func (t Thruple) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + t.String() + `"`), nil
+}
+
+func (i IP4) MarshalText() ([]byte, error) {
+	return []byte(i.string()), nil
+}
+func (i *IP4) UnmarshalText(t []byte) error {
+	//return []byte(i.string()), nil
+	ip, ok := parseIP(string(t))
+	if !ok {
+		return errors.New("Bad: " + string(t))
+	}
+	*i = ip
+	return nil
+}
+func (l *L4) UnmarshalText(t []byte) error {
+	pp := string(t)
+	re := regexp.MustCompile(`^(udp|tcp):([1-9][0-9]*)$`)
+	ma := re.FindStringSubmatch(pp)
+	if len(ma) != 3 {
+		return errors.New("Service is not of the form (tcp|udp):<port> : " + pp)
+	}
+	port, err := strconv.Atoi(ma[2])
+	if err != nil || port < 1 || port > 65535 {
+		return errors.New("Invalid port number : " + pp)
+	}
+
+	var udp bool
+	if ma[1] == "udp" {
+		udp = true
+	}
+	l.Port = uint16(port)
+	l.Protocol = Protocol(udp)
+	return nil
+}
+
 func (i IP4) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + i.String() + `"`), nil
 }
+
 func (m MAC) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + m.String() + `"`), nil
 }
@@ -190,8 +234,22 @@ func parseIP(ip string) ([4]byte, bool) {
 	return addr, true
 }
 
-func (i IP4) String() string {
+func (i IP4) string() string {
 	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
+}
+func (i IP4) String() string {
+	return i.string()
+}
+
+func (l L4) string() string {
+	if l.Protocol {
+		return fmt.Sprint(l.Port, "/udp")
+	}
+	return fmt.Sprint(l.Port, "/tcp")
+}
+
+func (l L4) MarshalText() ([]byte, error) {
+	return []byte(l.string()), nil
 }
 
 func (l L4) String() string {
@@ -199,7 +257,6 @@ func (l L4) String() string {
 		return fmt.Sprint(l.Port, "/udp")
 	}
 	return fmt.Sprint(l.Port, "/tcp")
-
 }
 
 func (l L4) MarshalJSON() ([]byte, error) {
