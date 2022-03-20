@@ -122,13 +122,13 @@ struct vip_rip_src_if {
     __be32 rip;
     __be32 src;
     __u32 ifindex;
-    unsigned char hwaddr[6];
-    __be16 vlan;
+    __u8 hwaddr[6];
+    __u16 _vlan;
 };
 
 struct backend_rec {
     unsigned char hwaddr[6];
-    __u16 vlan;
+    __be16 vlan;
     __be32 rip;
     // conveniently, this needs to be padded with 4 bytes.we can use
     // this to hold an ifindex for the veth device in slot 0 of
@@ -668,7 +668,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	maccpy(eth_hdr->h_dest, rec->hwaddr);
 
 	// if tagged with a vlan, update it
-	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));
+	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));	
 	
 	if(DEFCON >= 4) save_state(ipv4, tcp, rec);
 	
@@ -808,13 +808,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
       ipv4->saddr = vr->src;
       ipv4->daddr = vr->vip;
       maccpy(eth_hdr->h_dest, m);
-      maccpy(eth_hdr->h_source,  vr->hwaddr);
+      maccpy(eth_hdr->h_source, vr->hwaddr);
             
       ipv4->check = 0;
       ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
       
       tcp->check = 0;
-
       tcp->check = tcp_checksum(ipv4, tcp, data_end);
 
       // redirect probe packet out to either eth0, or vlanX

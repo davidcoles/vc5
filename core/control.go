@@ -23,16 +23,12 @@ import (
 	"fmt"
 	"log"
 	"net"
-	//"os/exec"
 	"time"
 	"unsafe"
 
 	"github.com/davidcoles/vc5/types"
 	"github.com/davidcoles/vc5/xdp"
 )
-
-//go:embed bpf/simple.o
-var SIMPLE_O []byte
 
 //go:embed bpf/bpf.o
 var BPF_O []byte
@@ -127,8 +123,7 @@ type vip_rip_src_if struct {
 	src     IP4
 	ifindex uint32
 	hwaddr  MAC
-	vlan_hi byte
-	vlan_lo byte
+	vlan    uint16
 }
 
 type interfaces struct {
@@ -136,6 +131,27 @@ type interfaces struct {
 	ipaddr  IP4
 	hwaddr  [6]byte
 	padding [2]byte
+}
+
+type backend_rec struct {
+	hwaddr  [6]byte
+	vlan    [2]byte
+	rip     [4]byte
+	ifindex int32
+}
+
+type vip_rip_port struct {
+	vip  IP4
+	rip  IP4
+	port uint16
+	pad  uint16
+}
+
+type settings struct {
+	era    uint64  //__u64 era;
+	time   uint64  //__u64 time;
+	pad    [7]byte //__u8 pad[7];
+	defcon uint8   //__u8 defcon;
 }
 
 func (c *Control) find_map(name string, ks int, rs int) int {
@@ -162,13 +178,6 @@ func (c *Control) Defcon(d uint8) uint8 {
 func (c *Control) global_update() {
 	var zero uint32 = 0
 	c.era = 0
-
-	type settings struct {
-		era    uint64  //__u64 era;
-		time   uint64  //__u64 time;
-		pad    [7]byte //__u8 pad[7];
-		defcon uint8   //__u8 defcon;
-	}
 
 	go func() {
 		for {
@@ -214,24 +223,31 @@ func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	c.xdp = x
 	c.defcon = 5
 
-	c.settings = c.find_map("settings", 4, 24)
+	var _backend_rec backend_rec
+	var _vip_rip_port vip_rip_port
+	var _service service
+	var _settings settings
+	var _vip_rip_src_if vip_rip_src_if
+	var _raw_counters raw_counters
+
+	c.settings = c.find_map("settings", 4, int(unsafe.Sizeof(_settings)))
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
 	c.mac_to_rip = c.find_map("mac_to_rip", 6, 4)
-	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, 24)
+	c.nat_to_vip_rip = c.find_map("nat_to_vip_rip", 4, int(unsafe.Sizeof(_vip_rip_src_if)))
 	c.vip_rip_to_nat = c.find_map("vip_rip_to_nat", 8, 4)
-	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", 12, 8*6)
-	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", 12, 4)
-	c.stats = c.find_map("stats", 4, 8*6)
+	c.vip_rip_port_counters = c.find_map("vip_rip_port_counters", int(unsafe.Sizeof(_vip_rip_port)), int(unsafe.Sizeof(_raw_counters)))
+	c.vip_rip_port_concurrent = c.find_map("vip_rip_port_concurrent", int(unsafe.Sizeof(_vip_rip_port)), 4)
+	c.stats = c.find_map("stats", 4, int(unsafe.Sizeof(_raw_counters)))
 	c.flow_queue = c.find_map("flow_queue", 0, FLOW_STATE)
 	c.flows = c.find_map("flows", FLOW, STATE)
-	c.backend_recs = c.find_map("backend_recs", 4, 16)
-	c.backend_idx = c.find_map("backend_idx", 8, 8192)
+	c.backend_recs = c.find_map("backend_recs", 4, int(unsafe.Sizeof(_backend_rec)))
+	c.backend_idx = c.find_map("backend_idx", int(unsafe.Sizeof(_service)), 8192)
 
 	if v, err := net.InterfaceByName(veth); err != nil {
 		fmt.Println(veth, err)
 		return nil
 	} else {
-		c.SetBackendRec2(vip, hwaddr, 0, 0, int32(v.Index))
+		c.SetBackendRec(vip, hwaddr, 0, 0, int32(v.Index))
 	}
 
 	go c.global_update()
@@ -239,54 +255,10 @@ func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	return &c
 }
 
-//nat->vip/rip
-//vip/rip->nat
-
-func (c *Control) SetBackendRec(rip IP4, mac MAC, vlan uint16, idx uint16, tx uint8) {
-	type rec = [16]byte
-	i := uint32(idx)
-
-	//r := rec{mac: mac, vlan: vlan, rip: rip}
-	var r rec
-	copy(r[0:], mac[:])
-	copy(r[8:], rip[:])
-	r[12] = tx
-
-	r[6] = byte((vlan >> 8) & 0xff)
-	r[7] = byte(vlan & 0xff)
-
-	var recs [MAX_CPU * 16]byte
-
-	for n := 0; n < MAX_CPU; n++ {
-		copy(recs[(n*16):], r[:])
-	}
-
-	//fmt.Println("SETBACKENDREC", rip, mac, vlan, idx)
-
-	if xdp.BpfMapUpdateElem(c.backend_recs, uP(&i), uP(&recs), xdp.BPF_ANY) != 0 {
-		panic("c.backend_recs")
-	}
-}
-
-func (c *Control) SetBackendRec2(rip IP4, mac MAC, vlan uint16, idx uint16, ifindex int32) {
-
-	i := uint32(idx)
-
-	type backend_rec struct {
-		hwaddr  [6]byte
-		vlan    [2]byte
-		rip     [4]byte
-		ifindex int32
-	}
-
-	var backend backend_rec
-	backend.hwaddr = mac
-
-	backend.vlan[0] = byte((vlan >> 8) & 0xff)
-	backend.vlan[1] = byte(vlan & 0xff)
-
-	backend.rip = rip
-	backend.ifindex = ifindex
+func (c *Control) SetBackendRec(rip IP4, hwaddr MAC, vlan uint16, idx uint32, ifindex int32) {
+	vh := byte(vlan >> 8)
+	vl := byte(vlan & 0xff)
+	backend := backend_rec{hwaddr: hwaddr, vlan: [2]byte{vh, vl}, rip: rip, ifindex: ifindex}
 
 	var recs [MAX_CPU]backend_rec
 
@@ -294,9 +266,7 @@ func (c *Control) SetBackendRec2(rip IP4, mac MAC, vlan uint16, idx uint16, ifin
 		recs[n] = backend
 	}
 
-	//fmt.Println("SETBACKENDREC", rip, mac, vlan, idx)
-
-	if xdp.BpfMapUpdateElem(c.backend_recs, uP(&i), uP(&recs), xdp.BPF_ANY) != 0 {
+	if xdp.BpfMapUpdateElem(c.backend_recs, uP(&idx), uP(&recs), xdp.BPF_ANY) != 0 {
 		panic("c.backend_recs")
 	}
 }
@@ -315,7 +285,7 @@ func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8)
 	for n := 0; n < len(idxs); n++ {
 		idxs[n] = idx
 	}
-	//fmt.Println("SETBACKENDIDX", vip, port, idx[0:32])
+
 	if xdp.BpfMapUpdateElem(c.backend_idx, uP(&s), uP(&idxs), xdp.BPF_ANY) != 0 {
 		panic("c.backend_idx")
 	}
@@ -337,25 +307,11 @@ func (c *Control) DelNatVipRip(nat, vip, rip IP4) {
 	xdp.BpfMapLookupAndDeleteElem(c.vip_rip_to_nat, uP(&vr), uP(&nat))
 	xdp.BpfMapLookupAndDeleteElem(c.nat_to_vip_rip, uP(&nat), uP(&vr))
 }
-func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16, ifindex_ int, ifhw MAC) {
 
-	ifindex := uint32(ifindex_)
-	ipaddr := src
-	hwaddr := ifhw
-
-	vr := vip_rip_src_if{vip: vip, rip: rip, src: ipaddr, ifindex: ifindex, hwaddr: hwaddr, vlan_hi: byte(vlan >> 8), vlan_lo: byte(vlan & 0xff)}
-	//fmt.Println("SETNATVIPRIP", nat, vip, rip, src, iface, vlan, ifindex_, ifhw)
-
+func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16, ifindex int, hwaddr MAC) {
+	vr := vip_rip_src_if{vip: vip, rip: rip, src: src, ifindex: uint32(ifindex), hwaddr: hwaddr, vlan: vlan}
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)
-
-}
-
-func (c *Control) SetRip(rip IP4) {
-	var mac MAC
-	//fmt.Println("SETRIP", rip)
-	xdp.BpfMapUpdateElem(c.rip_to_mac, uP(&rip), uP(&mac), xdp.BPF_ANY)
-	//go ping(rip)
 }
 
 func (c *Control) SetRipMac(rip IP4, mac MAC) {
@@ -366,29 +322,13 @@ func (c *Control) SetRipMac(rip IP4, mac MAC) {
 		xdp.BpfMapUpdateElem(c.mac_to_rip, uP(&mac), uP(&rip), xdp.BPF_ANY)
 	}
 }
+
 func (c *Control) DelMac(mac MAC) {
 	xdp.BpfMapDeleteElem(c.mac_to_rip, uP(&mac))
 }
+
 func (c *Control) DelRip(rip IP4) {
 	xdp.BpfMapDeleteElem(c.rip_to_mac, uP(&rip))
-}
-
-func (c *Control) _SetBackends(vip IP4, port uint16, backends [65536][12]byte, least [12]byte, weight byte) {
-	if false {
-		var s service
-		s.vip = vip
-		s.port[0] = byte((port >> 8) & 0xff)
-		s.port[1] = byte(port & 0xff)
-
-		type bes struct {
-			backends [65536][12]byte
-			least    [12]byte
-			weight   byte
-		}
-
-		be := bes{backends: backends, least: least, weight: weight}
-		xdp.BpfMapUpdateElem(c.service_backend, uP(&s), uP(&be), xdp.BPF_ANY)
-	}
 }
 
 func (c *Control) ReadMAC(ip IP4) *MAC {
@@ -416,20 +356,14 @@ func (c *Control) ReadMAC(ip IP4) *MAC {
 	return &m
 }
 
-func (c *Control) VipRipPortCounters2(vip, rip IP4, port uint16, clear bool, curr uint64) counters {
-	count := c.VipRipPortCounters(vip, rip, port, clear)
+func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16, clear bool, curr uint64) counters {
+	count := c._VipRipPortCounters(vip, rip, port, clear)
 	count.Concurrent = int64(curr)
 	return count
 }
 
-func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16, clear bool) counters {
+func (c *Control) _VipRipPortCounters(vip, rip IP4, port uint16, clear bool) counters {
 	var raw [MAX_CPU]raw_counters
-	type vip_rip_port struct {
-		vip  IP4
-		rip  IP4
-		port uint16
-		pad  uint16
-	}
 	vrp := vip_rip_port{vip: vip, rip: rip, port: port, pad: 0}
 
 	if clear {
@@ -454,15 +388,9 @@ func (c *Control) VipRipPortCounters(vip, rip IP4, port uint16, clear bool) coun
 	return cooked
 }
 
-func (c *Control) VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) int32 {
+func (c *Control) _VipRipPortConcurrent(vip, rip IP4, port uint16, era uint64) int32 {
 	var curr [MAX_CPU]int32
 	var zero [MAX_CPU]int32
-	type vip_rip_port struct {
-		vip  IP4
-		rip  IP4
-		port uint16
-		pad  uint16
-	}
 
 	vrp := vip_rip_port{vip: vip, rip: rip, port: port, pad: uint16(era % 2)}
 
@@ -507,45 +435,15 @@ func (c *Control) GlobalStats(clear bool) counters {
 	return t.cook()
 }
 
-func (c *Control) VipRipPortConcurrents(vip, rip IP4, port uint16) chan int64 {
-
-	counters := make(chan int64, 100)
-
-	go func() {
-
-		last, _ := c.Era()
-		conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
-		conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
-
-		for {
-			time.Sleep(1 * time.Second)
-
-			next, _ := c.Era()
-			if last != next {
-				conn = c.VipRipPortConcurrent(vip, rip, port, last)
-				last = next
-
-				if conn < 0 {
-					counters <- 0
-				} else {
-					counters <- int64(conn)
-				}
-			}
-		}
-	}()
-
-	return counters
-}
-
-func (c *Control) VipRipPortConcurrents2(vip, rip IP4, port uint16, done chan bool) chan uint64 {
+func (c *Control) VipRipPortConcurrents(vip, rip IP4, port uint16, done chan bool) chan uint64 {
 
 	counters := make(chan uint64, 10)
 
 	go func() {
 
 		last, _ := c.Era()
-		conn := c.VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
-		conn = c.VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
+		conn := c._VipRipPortConcurrent(vip, rip, port, 0) // ensure that both counter
+		conn = c._VipRipPortConcurrent(vip, rip, port, 1)  // slots are created
 
 		ticker := time.NewTicker(1 * time.Second)
 
@@ -559,8 +457,7 @@ func (c *Control) VipRipPortConcurrents2(vip, rip IP4, port uint16, done chan bo
 
 				next, _ := c.Era()
 				if last != next {
-					conn = c.VipRipPortConcurrent(vip, rip, port, last)
-					//fmt.Println(">>>", last, conn)
+					conn = c._VipRipPortConcurrent(vip, rip, port, last)
 					last = next
 					if conn < 0 {
 						conn = 0

@@ -36,8 +36,8 @@ func Daemon(path, ipaddr string) {
 	probes.Daemon(path, ipaddr)
 }
 
-func Serve(netns string) {
-	probes.Serve(netns)
+func Serve(netns string, logs *logger.Logger) {
+	probes.Serve(netns, logs)
 }
 
 func NewLogger() *logger.Logger {

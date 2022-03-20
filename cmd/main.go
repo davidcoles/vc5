@@ -83,14 +83,14 @@ func main() {
 	conf, err := vc5.LoadConfiguration(conffile, *ifname, ipaddr)
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	if false {
 		//if true {
 		j, err := json.MarshalIndent(conf, "", "\t")
 		if err != nil {
-			panic(err)
+			log.Fatal(err)
 		}
 		fmt.Println(string(j))
 
@@ -121,7 +121,6 @@ func main() {
 		return
 	}
 
-	//c := vc5.New(ipaddr, veth, vip, hwaddr, *native, *bridge, peth...)
 	c := vc5.New(veth, vip1, mac, *native, *bridge, peth...)
 
 	//for some reason setting this before starting the program didn't work
@@ -140,7 +139,7 @@ func main() {
 	}
 
 	// Set up probe server - runs in other network namespace
-	go vc5.Serve(netns)
+	go vc5.Serve(netns, logs)
 
 	manager := vc5.Bootstrap(conf, c, logs, webserver)
 	var closed bool

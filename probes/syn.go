@@ -26,7 +26,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	//"github.com/davidcoles/vc5/xdp"
 )
 
 type tuple struct {

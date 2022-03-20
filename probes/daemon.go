@@ -19,6 +19,7 @@
 package probes
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -26,14 +27,14 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	//"log"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
-	//"strings"
 
+	"github.com/davidcoles/vc5/logger"
 	"github.com/davidcoles/vc5/types"
 )
 
@@ -57,11 +58,6 @@ func ptoa(p uint16) string {
 func itoa(i int) string {
 	return fmt.Sprintf("%d", i)
 }
-
-//func _Ping(ip IP4) {
-//	//command := fmt.Sprintf("ping -n -c 1 -w 1  %d.%d.%d.%d >/dev/null 2>&1", ip[0], ip[1], ip[2], ip[3])
-//	exec.Command("/bin/sh", "-c", "ping -n -c 1 -w 1 "+ip.String()+" >/dev/null 2>&1").Output()
-//}
 
 func HTTPCheck(ip IP4, port uint16, path string, expect int, host string) (bool, string) {
 	return _HTTPCheck("http", ip, port, path, expect, host)
@@ -123,15 +119,53 @@ func check_client(c *check) (bool, string) {
 	return s.Success, s.Message
 }
 
-func Serve(netns string) {
+func Serve(netns string, logs *logger.Logger) {
 	for {
 		//exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH).Output()
-		exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" >/tmp/vc5.log 2>&1").Output()
+		//exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" >/tmp/vc5.log 2>&1").Output()
+		//cmd := exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" >/tmp/vc5.log 2>&1")
+		//cmd := exec.Command("/bin/sh", "-c", "ip netns exec vc5 "+os.Args[0]+" "+PATH+" 2>&1")
+		cmd := exec.Command("ip", "netns", "exec", netns, os.Args[0], PATH)
+
+		_, _ = cmd.StdinPipe()
+		stderr, _ := cmd.StderrPipe()
+		stdout, _ := cmd.StdoutPipe()
+
+		reader := func(s string, fh io.ReadCloser) {
+			scanner := bufio.NewScanner(fh)
+			for scanner.Scan() {
+				logs.DEBUG("Daemon", s, scanner.Text())
+			}
+		}
+
+		go reader("stderr", stderr)
+
+		if err := cmd.Start(); err != nil {
+			logs.DEBUG("Daemon:", err)
+		} else {
+			reader("stdout", stdout)
+
+			if err := cmd.Wait(); err != nil {
+				logs.DEBUG("Daemon:", err)
+			}
+		}
+
 		time.Sleep(1 * time.Second)
 	}
 }
 
 func Daemon(path, ipaddr string) {
+
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		c, _, err := reader.ReadRune()
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println(c)
+	}()
 
 	os.Remove(path)
 
@@ -178,12 +212,12 @@ func Daemon(path, ipaddr string) {
 	s, err := net.Listen("unix", PATH)
 
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	server := http.Server{}
 
-	server.Serve(s)
+	log.Fatal(server.Serve(s))
 }
 
 func tcpdial(addr string, port string) bool {

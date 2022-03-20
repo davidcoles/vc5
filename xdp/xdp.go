@@ -110,7 +110,7 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 	for _, iface := range peth {
 		C.xdp_link_detach2(C.CString(iface))
 		if C.load_bpf_section(o, C.CString(iface), C.CString(program), C.int(boolint(native))) != 0 {
-			panic("load_bpf_section")
+			return nil, errors.New("load_bpf_section() failed for " + iface)
 		}
 	}
 
@@ -119,7 +119,7 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 	//if C.load_bpf_section(o, C.CString(veth), C.CString(program), C.int(boolint(native))) != 0 {
 	// don't use native mode - seems to break passing probes into a bridge
 	if C.load_bpf_section(o, C.CString(veth), C.CString(program), C.int(0)) != 0 {
-		panic("load_bpf_section veth")
+		return nil, errors.New("load_bpf_section() failed for " + veth)
 	}
 	xdp.p = o
 

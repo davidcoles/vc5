@@ -165,7 +165,7 @@ func arp(reals map[IP4]config.Info) chan map[IP4]config.Info {
 					if new_mac != mac { // update state if changed
 						state[rip] = new_mac
 						ctrl.SetRipMac(rip, new_mac)
-						ctrl.SetBackendRec(rip, new_mac, real.VLAN, real.Index, 0)
+						ctrl.SetBackendRec(rip, new_mac, real.VLAN, uint32(real.Index), 0)
 					}
 					delete(macs_to_delete, new_mac)
 
@@ -174,7 +174,7 @@ func arp(reals map[IP4]config.Info) chan map[IP4]config.Info {
 					new_mac := arp[rip] // might be 00:00:00:00:00:00 - that's OK
 					state[rip] = new_mac
 					ctrl.SetRipMac(rip, new_mac)
-					ctrl.SetBackendRec(rip, new_mac, real.VLAN, real.Index, 0)
+					ctrl.SetBackendRec(rip, new_mac, real.VLAN, uint32(real.Index), 0)
 					delete(macs_to_delete, new_mac)
 
 				}
