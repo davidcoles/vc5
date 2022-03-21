@@ -44,6 +44,11 @@ func main() {
 	native := flag.Bool("n", false, "native")
 	bridge := flag.Bool("b", false, "bridge")
 	ifname := flag.String("i", "", "ifname")
+
+	lowwm := flag.Uint64("l", 0, "lowwm")
+	highwm := flag.Uint64("h", 0, "highwm")
+	defcon := flag.Uint("d", 5, "defcon")
+
 	flag.Parse()
 
 	args := flag.Args()
@@ -122,6 +127,7 @@ func main() {
 	}
 
 	c := vc5.New(veth, vip1, mac, *native, *bridge, peth...)
+	c.Defcon(uint8(*defcon))
 
 	//for some reason setting this before starting the program didn't work
 	if *bridge {
@@ -177,11 +183,40 @@ func main() {
 		}
 	}()
 
-	multicast_send(c, ipaddr[3], conf.Multicast)
+	go multicast_send(c, ipaddr[3], conf.Multicast)
+
+	prev := c.GlobalStats(false)
 
 	for {
-		time.Sleep(1 * time.Second)
+		time.Sleep(30 * time.Second)
+
+		count := c.GlobalStats(false)
+		defcon := c.Defcon(0)
+
+		latency := count.Latency
+		pps := (count.Rx_packets - prev.Rx_packets) / 30
+
+		fmt.Printf("%d pps, %d ns avg. latency, DEFCON %d\n", pps, latency, defcon)
+
+		// (12 core * 67ns) @ 75% = 603.00
+		// (12 core * 67ns) @ 85% = 683.40
+
+		if defcon > 1 && *highwm > 0 && latency > *highwm {
+			defcon--
+			c.Defcon(defcon)
+			fmt.Println("DEFCON--", defcon)
+		}
+
+		if defcon < 5 && *lowwm > 0 && latency < *lowwm {
+			defcon++
+			c.Defcon(defcon)
+			fmt.Println("DEFCON++", defcon)
+
+		}
+
+		prev = count
 	}
+
 }
 
 func multicast_recv(control *vc5.Control, instance byte, srvAddr string, isatty bool) {

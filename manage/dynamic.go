@@ -19,7 +19,7 @@
 package manage
 
 import (
-	"fmt"
+	//"fmt"
 	"time"
 
 	"github.com/davidcoles/vc5/config"
@@ -148,13 +148,14 @@ func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logge
 
 		count.Latency = latency
 		count.Pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
+		count.DEFCON = c.Defcon(0)
 		counters <- count
 
-		if n%10 == 0 {
-			fmt.Printf("%d pps, %d ns avg. latency\n", count.Pps, count.Latency)
-			//s := fmt.Sprintf(">>> %d pps, %d ns avg. latency", count.Pps, count.Latency)
-			//l.INFO(s)
-		}
+		//if n%10 == 0 {
+		//	fmt.Printf("%d pps, %d ns avg. latency\n", count.Pps, count.Latency)
+		//s := fmt.Sprintf(">>> %d pps, %d ns avg. latency", count.Pps, count.Latency)
+		//l.INFO(s)
+		//}
 		prev = count
 	}
 }

@@ -4,9 +4,17 @@
     <style>
       #console {
 	  height: 150px;
-	  background: grey;
+	  background: #e0e0e0;
 	  overflow-x: hidden;
 	  overflow-x: auto;
+      }
+      table, th, td {
+	  border: 1px solid black;
+	  border-collapse: collapse;
+	  text-align: center;
+      }
+      table {
+	  float: right;
       }
     </style>
     <script>
@@ -15,9 +23,11 @@
       }
     </script>
   </head>
-  <body>
+  <body id="body" bgcolor="#f0f0f0">
 
     <a href="/stats/">stats</a> | <a href="/log/text/5">logs</a> | <a href="/log/text/7">debug logs</a> | <a href="/metrics">prometheus metrics</a>
+
+    <table><tr><th>Readiness condition</th></tr><tr><td id="defcon">DEFCON</td></tr></table>
 
 
     <h2>Logs</h2>
@@ -25,6 +35,7 @@
 
     <h2>VIP status</h2>
     <div id="rhi"></div>
+    
     <h2>Global stats</h2>
     <div id="global"></div>
     <canvas id="doughnut" style="width:100%;max-width:500px"></canvas>

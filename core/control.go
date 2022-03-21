@@ -41,9 +41,9 @@ type MAC = types.MAC
 type uP = unsafe.Pointer
 
 type raw_counters struct {
-	new_flows  uint64 //`json:"total_connections"`
-	rx_packets uint64 //`json:"rx_packets"`
-	rx_bytes   uint64 //`json:"rx_bytes"`
+	new_flows  uint64
+	rx_packets uint64
+	rx_bytes   uint64
 	fp_count   uint64
 	fp_time    uint64
 	qfailed    uint64
@@ -57,6 +57,9 @@ func (r raw_counters) cook() counters {
 	c.Fp_count = r.fp_count
 	c.Fp_time = r.fp_time
 	c.Qfailed = r.qfailed
+	if r.fp_count > 0 {
+		c.Latency = r.fp_time / r.fp_count
+	}
 	return c
 }
 
@@ -108,22 +111,13 @@ type service struct {
 	pad   byte
 }
 
-type tuple struct {
-	src      IP4
-	dst      IP4
-	sport    uint16
-	dport    uint16
-	protocol byte
-	padding  [3]byte
-}
-
 type vip_rip_src_if struct {
 	vip     IP4
 	rip     IP4
 	src     IP4
 	ifindex uint32
 	hwaddr  MAC
-	vlan    uint16
+	vlan    [2]byte
 }
 
 type interfaces struct {
@@ -250,15 +244,16 @@ func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 		c.SetBackendRec(vip, hwaddr, 0, 0, int32(v.Index))
 	}
 
+	c.GlobalStats(true)
+
 	go c.global_update()
 
 	return &c
 }
 
 func (c *Control) SetBackendRec(rip IP4, hwaddr MAC, vlan uint16, idx uint32, ifindex int32) {
-	vh := byte(vlan >> 8)
-	vl := byte(vlan & 0xff)
-	backend := backend_rec{hwaddr: hwaddr, vlan: [2]byte{vh, vl}, rip: rip, ifindex: ifindex}
+
+	backend := backend_rec{hwaddr: hwaddr, vlan: htons(vlan), rip: rip, ifindex: ifindex}
 
 	var recs [MAX_CPU]backend_rec
 
@@ -272,16 +267,9 @@ func (c *Control) SetBackendRec(rip IP4, hwaddr MAC, vlan uint16, idx uint32, if
 }
 
 func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8) {
-	var s service
-	s.vip = vip
-	s.port[0] = byte((port >> 8) & 0xff)
-	s.port[1] = byte(port & 0xff)
-	if udp {
-		s.proto = 1
-	}
+	s := service{vip: vip, port: htons(port), proto: protocol(udp)}
 
 	var idxs [MAX_CPU][8192]uint8
-
 	for n := 0; n < len(idxs); n++ {
 		idxs[n] = idx
 	}
@@ -290,14 +278,26 @@ func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8)
 		panic("c.backend_idx")
 	}
 }
+
+const IPPROTO_TCP = 0x06
+const IPPROTO_UDP = 0x11
+
+func protocol(b bool) uint8 {
+	if b {
+		return IPPROTO_UDP
+	}
+	return IPPROTO_TCP
+}
 func (c *Control) DelBackendIdx(vip IP4, port uint16, udp bool) {
 	var s service
 	s.vip = vip
-	s.port[0] = byte((port >> 8) & 0xff)
-	s.port[1] = byte(port & 0xff)
-	if udp {
-		s.proto = 1
-	}
+	//s.port[0] = byte((port >> 8) & 0xff)
+	//s.port[1] = byte(port & 0xff)
+	s.port = htons(port)
+	//if udp {
+	//	s.proto = 1
+	//}
+	s.proto = protocol(udp)
 
 	xdp.BpfMapDeleteElem(c.backend_idx, uP(&s))
 }
@@ -308,8 +308,12 @@ func (c *Control) DelNatVipRip(nat, vip, rip IP4) {
 	xdp.BpfMapLookupAndDeleteElem(c.nat_to_vip_rip, uP(&nat), uP(&vr))
 }
 
+func htons(i uint16) [2]byte {
+	return [2]byte{byte(i >> 8), byte(i & 0xff)}
+}
+
 func (c *Control) SetNatVipRip(nat, vip, rip, src IP4, iface string, vlan uint16, ifindex int, hwaddr MAC) {
-	vr := vip_rip_src_if{vip: vip, rip: rip, src: src, ifindex: uint32(ifindex), hwaddr: hwaddr, vlan: vlan}
+	vr := vip_rip_src_if{vip: vip, rip: rip, src: src, ifindex: uint32(ifindex), hwaddr: hwaddr, vlan: htons(vlan)}
 	xdp.BpfMapUpdateElem(c.nat_to_vip_rip, uP(&nat), uP(&vr), xdp.BPF_ANY)
 	xdp.BpfMapUpdateElem(c.vip_rip_to_nat, uP(&vr), uP(&nat), xdp.BPF_ANY)
 }

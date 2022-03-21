@@ -59,8 +59,6 @@ struct tuple {
     __be32 dst;
     __be16 sport;
     __be16 dport;
-    //__u8 protocol;
-    //__u8 pad[3];
 };
 
 struct flow {
@@ -123,14 +121,14 @@ struct vip_rip_src_if {
     __be32 src;
     __u32 ifindex;
     __u8 hwaddr[6];
-    __u16 _vlan;
+    __be16 _vlan;
 };
 
 struct backend_rec {
     unsigned char hwaddr[6];
     __be16 vlan;
     __be32 rip;
-    // conveniently, this needs to be padded with 4 bytes.we can use
+    // conveniently, this needs to be padded with 4 bytes. we can use
     // this to hold an ifindex for the veth device in slot 0 of
     // backend_recs
     unsigned int ifindex;
@@ -362,7 +360,7 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
     struct service serv;
     serv.vip = ipv4->daddr;
     serv.ports = udp->dest;
-    serv.proto = 1;
+    serv.proto = IPPROTO_UDP;
     serv.pad = 0;
 
     __u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
@@ -390,7 +388,7 @@ static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, st
     struct service serv;
     serv.vip = ipv4->daddr;
     serv.ports = tcp->dest;
-    serv.proto = 0;
+    serv.proto = IPPROTO_TCP;
     serv.pad = 0;
     
     __u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
@@ -426,10 +424,13 @@ static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *t
 	counter->rx_packets++;
 	counter->rx_bytes += rx_bytes;
     }
-    __s32 *concurrent = NULL;
-    vrp.pad = era % 2;
-    concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
-    if(concurrent) (*concurrent)++;
+    
+    if(new) {
+	__s32 *concurrent = NULL;
+	vrp.pad = era % 2;
+	concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+	if(concurrent) (*concurrent)++;
+    }
 }
 
 static __always_inline void save_state(struct iphdr *ipv4, struct tcphdr *tcp, struct backend_rec *rec) {
@@ -462,6 +463,18 @@ unsigned char nulmac[6] = {0,0,0,0,0,0};
 
 const __u32 zero = 0;
 
+static inline __u8 defcon(__u8 d) {
+    switch(d) {
+    case 0: return 5;
+    case 1: return 1;
+    case 2: return 2;
+    case 3: return 3;
+    case 4: return 4;
+    case 5: return 5;
+    }
+    return 5;    
+}
+
 // POSSIBILITIES FOR DOS MITIGATION
 //DEFCON1: will switch traffic without referring to state
 //DEFCON2: will switch traffic referencing existing state
@@ -476,9 +489,9 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     if(!setting) {
 	return XDP_PASS;
     }
-    __u8 DEFCON = setting->defcon;
-    __u64 era_now = setting->era;
-    __u64 wallclock_now = setting->time;
+    __u8 DEFCON = defcon(setting->defcon);
+    __u64 era = setting->era;
+    __u64 wallclock = setting->time;
     
     if(DEFCON == 0) return XDP_PASS; // C'est ne pas une load-balancer
     
@@ -566,12 +579,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	if (tcp->syn == 1) {
 	    //bpf_map_delete_elem(&flows, &f);
 	    //goto new_flow;
-	    if ((fs->time + 60) < wallclock_now) {
+	    if ((fs->time + 60) < wallclock) {
 		bpf_map_delete_elem(&flows, &f);
 		goto new_flow;
 	    }
 	    // otherwise clear conn tracking fields
-	    fs->era = era_now - 1;
+	    fs->era = era - 1;
 	    fs->finrst = 0;
 	    statsp->new_flows++;
 	}
@@ -603,7 +616,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	}
 	
 	// reuse pad field for concurrency counter selection
-	vrp.pad = era_now % 2;
+	vrp.pad = era % 2;
 	
 	if (fs->finrst == 0 && ((tcp->rst == 1) || (tcp->fin == 1))) {
 	    fs->finrst = 10;
@@ -614,12 +627,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	}
 	
 	__s32 *concurrent = NULL;      
-	if (fs->era != era_now) {
-	    if((fs->era + 1) != era_now) {
+	if (fs->era != era) {
+	    if((fs->era + 1) != era) {
 		// probably transferred from a peer lb - correct it
-		fs->era = era_now;
+		fs->era = era;
 	    } else {		  
-		fs->era = era_now;
+		fs->era = era;
 		
 		switch(fs->finrst) {
 		case 10:
@@ -642,10 +655,10 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	}
 	
 	
-	if (fs->time > wallclock_now) {
-	    fs->time = wallclock_now - (tcp->ack_seq % 11);
-	} else if ((fs->time + 60) <  wallclock_now) {
-	    fs->time = wallclock_now - (tcp->ack_seq % 7);
+	if (fs->time > wallclock) {
+	    fs->time = wallclock - (tcp->ack_seq % 11);
+	} else if ((fs->time + 60) <  wallclock) {
+	    fs->time = wallclock - (tcp->ack_seq % 7);
 	    if(DEFCON > 4) push_flow_queue(&f, fs, statsp);	      
 	}
 	
@@ -672,7 +685,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	
 	if(DEFCON >= 4) save_state(ipv4, tcp, rec);
 	
-	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4), era_now);
+	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4), era);
 	
 	if(DEFCON >= 4) statsp->new_flows++;
 	statsp->fp_count++;

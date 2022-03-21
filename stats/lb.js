@@ -114,6 +114,29 @@ function linechart(title, xvals, yvals) {
     
 }
 
+function tsf(num) {
+    var suffix = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+    
+    if(num < 1000) {
+	return num.toString();
+    }
+    
+    for(; num > 1000 && suffix.length > 1;) {
+	num /= 1000
+	suffix.shift()
+    }
+
+    if(num >= 100) {
+	return Math.round(num).toString() + suffix[0];
+    }
+
+    if(num > 10) {
+        return num.toFixed(1) + suffix[0];
+    }
+    
+    return num.toFixed(2) + suffix[0];;
+}
+
 function updateStats(url) {
     
 
@@ -129,21 +152,33 @@ function updateStats(url) {
 	    var services = document.getElementById("services");
 	    var rhi = document.getElementById("rhi");
 	    var global = document.getElementById("global");
+	    var defcon = document.getElementById("defcon");
 
-
-	    //"average_latency_ns": 850,
-	    //"packets_per_second": 280,
-	    //"total_connections": 13,
-	    //"rx_packets": 2133351,
-	    //"rx_octets": 163047398,
-	    //"userland_queue_failed": 0,
-
-	    //piechart();
 
 	    var connections = {};
 	    var current = 0;
+
+	    switch(data.defcon) {
+	    case 1:
+		defcon.style.background = "white"
+		break;
+	    case 2:
+		defcon.style.background = "#ff7373"
+		break;
+	    case 3:
+		defcon.style.background = "#fdff73"
+		break;
+	    case 4:
+		defcon.style.background = "#00d199"
+		break;
+	    case 5:
+	    default:
+		defcon.style.background ="#008dff"
+	    }
+
+	    defcon.innerHTML = "DEFCON " + data.defcon
 	    
-	    global.innerHTML = data.average_latency_ns + "ns latency, " + data.packets_per_second + "pps, " + data.rx_octets + " rx_octets, " + data.rx_packets + " rx_packets, " + data.total_connections + " total_connections, " + data.current_connections + " current_connections";
+	    global.innerHTML = data.average_latency_ns + "ns latency, " + tsf(data.packets_per_second) + "pps, " + tsf(data.rx_octets) + " rx_octets, " + tsf(data.rx_packets) + " rx_packets, " + tsf(data.total_connections) + " total_connections, " + data.current_connections + " current_connections";
 	    
 
 	    var newrhi = document.createElement("div");
@@ -182,7 +217,7 @@ function updateStats(url) {
 
 		var ih = s + ": " + sv.name + " (" + sv.description + ")";
 
-		ih += ", " + (sv.up ? "up" : "down") + ", " + sv.rx_octets + " rx_octets, " +  sv.rx_packets + " rx_packets, "+ sv.total_connections + " total_connections, " + sv.current_connections + " current_connections";
+		ih += ", " + (sv.up ? "up" : "down") + ", " + tsf(sv.rx_octets) + " rx_octets, " +  tsf(sv.rx_packets) + " rx_packets, "+ tsf(sv.total_connections) + " total_connections, " + sv.current_connections + " current_connections";
 
 		
 		sd.innerHTML = ih;
@@ -206,7 +241,7 @@ function updateStats(url) {
 			bd.style = "padding-left: 50px; line-height: 1.5em;";
 			sd.appendChild(bd);
 		    }
-		    bd.innerHTML = b + " [" + bh.mac + "]"  + ": " + (bh.up ? "up" : "down") + ", " + bh.rx_octets + " rx_octets, " +  bh.rx_packets + " rx_packets, " + bh.total_connections + " total_connections, " + bh.current_connections + " current_connections";
+		    bd.innerHTML = b + " [" + bh.mac + "]"  + ": " + (bh.up ? "up" : "down") + ", " + tsf(bh.rx_octets) + " rx_octets, " +  tsf(bh.rx_packets) + " rx_packets, " + tsf(bh.total_connections) + " total_connections, " + bh.current_connections + " current_connections";
 
 		    if(!connections[b]) {
 			connections[b] = 0;

@@ -46,6 +46,7 @@ type global struct {
 	Warning    string               `json:"warning"`
 	Latency    uint64               `json:"average_latency_ns"`
 	Pps        uint64               `json:"packets_per_second"`
+	DEFCON     uint8                `json:"defcon"`
 	Concurrent uint64               `json:"current_connections"`
 	New_flows  uint64               `json:"total_connections"`
 	Rx_packets uint64               `json:"rx_packets"`
@@ -115,6 +116,7 @@ func (ss *SServer) Server_(addr string, logs *logger.Logger) {
 
 			g.Latency = cooked.Latency
 			g.Pps = cooked.Pps
+			g.DEFCON = cooked.DEFCON
 			g.New_flows = cooked.New_flows
 			g.Rx_packets = cooked.Rx_packets
 			g.Rx_bytes = cooked.Rx_bytes
@@ -285,6 +287,7 @@ func prometheus(g *global) []byte {
 		"# TYPE vc5_rx_packets counter",
 		"# TYPE vc5_rx_octets counter",
 		"# TYPE vc5_userland_queue_failed counter",
+		"# TYPE vc5_defcon gauge",
 
 		"# TYPE vc5_rhi gauge",
 
@@ -315,6 +318,7 @@ func prometheus(g *global) []byte {
 	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Rx_packets))
 	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Rx_bytes))
 	m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
+	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
 
 	for i, v := range g.RHI {
 		m = append(m, fmt.Sprintf(`vc5_rhi{address="%s"} %d`, i, b2u8(v)))

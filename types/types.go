@@ -119,6 +119,7 @@ type Counters struct {
 	Ip         IP4       `json:"-"`
 	Pps        uint64    `json:"-"`
 	Latency    uint64    `json:"-"`
+	DEFCON     uint8     `json:"-"`
 	Rx_pps     uint64    `json:"-"`
 	Rx_bps     uint64    `json:"-"`
 	Timestamp  time.Time `json:"-"`
