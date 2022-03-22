@@ -16,8 +16,8 @@ type IP4 = types.IP4
 
 const FLOW_STATE = core.FLOW_STATE
 
-func Console(addr string, logs *logger.Logger) *stats.SServer {
-	return stats.Server(addr, logs)
+func Console(addr string, logs *logger.Logger, passwd string) *stats.SServer {
+	return stats.Server(addr, logs, passwd)
 }
 
 func LoadConfiguration(file string, ifname string, src types.IP4) (*config.Config, error) {

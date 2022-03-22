@@ -178,7 +178,13 @@ function updateStats(url) {
 
 	    defcon.innerHTML = "DEFCON " + data.defcon
 	    
-	    global.innerHTML = data.average_latency_ns + "ns latency, " + tsf(data.packets_per_second) + "pps, " + tsf(data.rx_octets) + " rx_octets, " + tsf(data.rx_packets) + " rx_packets, " + tsf(data.total_connections) + " total_connections, " + data.current_connections + " current_connections";
+	    global.innerHTML = "Latency: " + data.average_latency_ns + "ns; Rate:[ " +
+		tsf(data.rx_octets_per_second*8) + "bps / " +
+		tsf(data.rx_packets_per_second) + "pps ]; Total:[ " +
+		tsf(data.rx_octets) + "B / " +
+		tsf(data.rx_packets) + " packets / " +
+		tsf(data.total_connections) + " conns ]; Current: " +
+		data.current_connections + " conns.";
 	    
 
 	    var newrhi = document.createElement("div");
@@ -215,10 +221,14 @@ function updateStats(url) {
 		    
 		}
 
-		var ih = s + ": " + sv.name + " (" + sv.description + ")";
+		var ih = s + ": " + sv.name + " [" + sv.description + "]: ";
 
-		ih += ", " + (sv.up ? "up" : "down") + ", " + tsf(sv.rx_octets) + " rx_octets, " +  tsf(sv.rx_packets) + " rx_packets, "+ tsf(sv.total_connections) + " total_connections, " + sv.current_connections + " current_connections";
 
+		ih += " " + (sv.up ? "up" : "down") + "; Rate:[ " +
+		    tsf(sv.rx_octets_per_second*8) + "bps / " +  tsf(sv.rx_packets_per_second) + "pps ]; Total:[ " +
+		    tsf(sv.rx_octets) + "B / " +  tsf(sv.total_connections) + " conns. ]; Current: " +
+		    sv.current_connections + " conns.";
+		
 		
 		sd.innerHTML = ih;
 		
@@ -241,7 +251,11 @@ function updateStats(url) {
 			bd.style = "padding-left: 50px; line-height: 1.5em;";
 			sd.appendChild(bd);
 		    }
-		    bd.innerHTML = b + " [" + bh.mac + "]"  + ": " + (bh.up ? "up" : "down") + ", " + tsf(bh.rx_octets) + " rx_octets, " +  tsf(bh.rx_packets) + " rx_packets, " + tsf(bh.total_connections) + " total_connections, " + bh.current_connections + " current_connections";
+
+		    bd.innerHTML = b + " [" + bh.mac + "]"  + ": " + (bh.up ? "up" : "down") +
+			";  Rate:[ " + tsf(bh.rx_octets_per_second*8) + "bps / " +  tsf(bh.rx_packets_per_second) +
+			"pps ]; Total:[ " + tsf(bh.rx_octets) + "B / " +  tsf(bh.total_connections) +
+			" conns. ]; Current: " + bh.current_connections + " conns.";
 
 		    if(!connections[b]) {
 			connections[b] = 0;

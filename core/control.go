@@ -53,7 +53,7 @@ func (r raw_counters) cook() counters {
 	var c counters
 	c.New_flows = r.new_flows
 	c.Rx_packets = r.rx_packets
-	c.Rx_bytes = r.rx_bytes
+	c.Rx_octets = r.rx_bytes
 	c.Fp_count = r.fp_count
 	c.Fp_time = r.fp_time
 	c.Qfailed = r.qfailed

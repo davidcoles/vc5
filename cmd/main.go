@@ -44,6 +44,7 @@ func main() {
 	native := flag.Bool("n", false, "native")
 	bridge := flag.Bool("b", false, "bridge")
 	ifname := flag.String("i", "", "ifname")
+	passwd := flag.String("p", "", "passwd")
 
 	lowwm := flag.Uint64("l", 0, "lowwm")
 	highwm := flag.Uint64("h", 0, "highwm")
@@ -114,7 +115,7 @@ func main() {
 		ws = conf.Webserver
 	}
 	//webserver := stats.Server(ws, logs)
-	webserver := vc5.Console(ws, logs)
+	webserver := vc5.Console(ws, logs, *passwd)
 
 	time.Sleep(2 * time.Second) // will bomb if we can't bind to port
 
@@ -128,6 +129,12 @@ func main() {
 
 	c := vc5.New(veth, vip1, mac, *native, *bridge, peth...)
 	c.Defcon(uint8(*defcon))
+
+	go func() {
+		for d := range webserver.DEFCON {
+			c.Defcon(uint8(d))
+		}
+	}()
 
 	//for some reason setting this before starting the program didn't work
 	if *bridge {

@@ -20,6 +20,7 @@ package stats
 
 import (
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -34,10 +35,10 @@ import (
 )
 
 //go:embed lb.html
-var LB_HTML string
+var LB_HTML []byte
 
 //go:embed lb.js
-var LB_JS string
+var LB_JS []byte
 
 type scounters = types.Scounters
 type counters = types.Counters
@@ -45,12 +46,13 @@ type counters = types.Counters
 type global struct {
 	Warning    string               `json:"warning"`
 	Latency    uint64               `json:"average_latency_ns"`
-	Pps        uint64               `json:"packets_per_second"`
+	Pps        uint64               `json:"rx_packets_per_second"`
+	Bps        uint64               `json:"rx_octets_per_second"`
 	DEFCON     uint8                `json:"defcon"`
 	Concurrent uint64               `json:"current_connections"`
 	New_flows  uint64               `json:"total_connections"`
 	Rx_packets uint64               `json:"rx_packets"`
-	Rx_bytes   uint64               `json:"rx_octets"`
+	Rx_octets  uint64               `json:"rx_octets"`
 	Qfailed    uint64               `json:"userland_queue_failed"`
 	RHI        map[string]bool      `json:"route_health_injection"`
 	Services   map[string]scounters `json:"services"`
@@ -62,10 +64,20 @@ type SServer struct {
 	vips       chan map[string]bool
 	scountersc chan scounters
 	countersc  chan counters
+	DEFCON     chan uint8
+	username   string
+	password   string
 }
 
-func Server(addr string, logs *logger.Logger) *SServer {
-	ss := &SServer{scountersc: make(chan scounters, 100), countersc: make(chan counters, 100), vips: make(chan map[string]bool, 100)}
+func Server(addr string, logs *logger.Logger, password string) *SServer {
+	ss := &SServer{
+		scountersc: make(chan scounters, 100),
+		countersc:  make(chan counters, 100),
+		DEFCON:     make(chan uint8, 1),
+		vips:       make(chan map[string]bool, 100),
+		username:   "defcon",
+		password:   password,
+	}
 	go ss.Server_(addr, logs)
 	return ss
 }
@@ -115,11 +127,12 @@ func (ss *SServer) Server_(addr string, logs *logger.Logger) {
 			}
 
 			g.Latency = cooked.Latency
-			g.Pps = cooked.Pps
+			g.Pps = cooked.Rx_pps
+			g.Bps = cooked.Rx_bps
 			g.DEFCON = cooked.DEFCON
 			g.New_flows = cooked.New_flows
 			g.Rx_packets = cooked.Rx_packets
-			g.Rx_bytes = cooked.Rx_bytes
+			g.Rx_octets = cooked.Rx_octets
 			g.Qfailed = cooked.Qfailed
 
 			g.Concurrent = 0
@@ -140,19 +153,19 @@ func (ss *SServer) Server_(addr string, logs *logger.Logger) {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(LB_HTML))
+		w.Write(LB_HTML)
 		//w.Write(index())
 	})
 
 	http.HandleFunc("/lb.html", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(LB_HTML))
+		w.Write(LB_HTML)
 	})
 	http.HandleFunc("/lb.js", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/javascript")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(LB_JS))
+		w.Write(LB_JS)
 	})
 
 	http.HandleFunc("/stats/", func(w http.ResponseWriter, r *http.Request) {
@@ -169,29 +182,50 @@ func (ss *SServer) Server_(addr string, logs *logger.Logger) {
 		w.Write(metrics)
 	})
 
-	/*
-		http.HandleFunc("/defcon/", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusOK)
+	http.HandleFunc("/defcon/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
 
-			if len(r.RequestURI) == 9 {
-				switch r.RequestURI[8] {
-				case '1':
-					c.Defcon(1)
-				case '2':
-					c.Defcon(2)
-				case '3':
-					c.Defcon(3)
-				case '4':
-					c.Defcon(4)
-				case '5':
-					c.Defcon(5)
-				}
-			}
+		user := ss.username
+		pass := ss.password
+		basic := "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 
-			w.Write([]byte(fmt.Sprintln("DEFCON:", c.Defcon(0))))
-		})
-	*/
+		auth, ok := r.Header["Authorization"]
+
+		if pass == "" || !ok || len(auth) < 1 || auth[0] != basic {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+
+		if len(r.RequestURI) != 9 {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		var d uint8
+		switch r.RequestURI[8] {
+		case '1':
+			d = 1
+		case '2':
+			d = 2
+		case '3':
+			d = 3
+		case '4':
+			d = 4
+		case '5':
+			d = 5
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+
+		select {
+		case ss.DEFCON <- d:
+			w.Write([]byte(fmt.Sprintln("DEFCON:", d)))
+		default:
+		}
+	})
 
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -316,7 +350,7 @@ func prometheus(g *global) []byte {
 	m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
 	m = append(m, fmt.Sprintf("vc5_total_connections %d", g.New_flows))
 	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Rx_packets))
-	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Rx_bytes))
+	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Rx_octets))
 	m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
 	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
 
@@ -330,7 +364,7 @@ func prometheus(g *global) []byte {
 		m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s",sname="%s"} %d`, s, n, v.Concurrent))
 		m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s",sname="%s"} %d`, s, n, v.New_flows))
 		m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s",sname="%s"} %d`, s, n, v.Rx_packets))
-		m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Rx_bytes))
+		m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Rx_octets))
 
 		m = append(m, fmt.Sprintf(`vc5_service_healthcheck{service="%s",sname="%s"} %d`, s, n, b2u8(v.Up)))
 
@@ -338,7 +372,7 @@ func prometheus(g *global) []byte {
 			m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
 			m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.New_flows))
 			m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Rx_packets))
-			m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Rx_bytes))
+			m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Rx_octets))
 
 			m = append(m, fmt.Sprintf(`vc5_backend_healthcheck{service="%s",backend="%s"} %d`, s, b, b2u8(v.Up)))
 		}

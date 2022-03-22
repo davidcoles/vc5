@@ -107,24 +107,35 @@ type RHI struct {
 }
 
 type Counters struct {
-	Up         bool      `json:"up"`
-	MAC        MAC       `json:"mac"`
-	Concurrent int64     `json:"current_connections"`
-	New_flows  uint64    `json:"total_connections"`
-	Rx_packets uint64    `json:"rx_packets"`
-	Rx_bytes   uint64    `json:"rx_octets"`
-	Qfailed    uint64    `json:"-"`
-	Fp_count   uint64    `json:"-"`
-	Fp_time    uint64    `json:"-"`
-	Ip         IP4       `json:"-"`
-	Pps        uint64    `json:"-"`
-	Latency    uint64    `json:"-"`
-	DEFCON     uint8     `json:"-"`
-	Rx_pps     uint64    `json:"-"`
-	Rx_bps     uint64    `json:"-"`
-	Timestamp  time.Time `json:"-"`
-	Vlan       uint16    `json:"-"`
+	Up         bool   `json:"up"`
+	MAC        MAC    `json:"mac"`
+	Concurrent int64  `json:"current_connections"`
+	New_flows  uint64 `json:"total_connections"`
+	Rx_packets uint64 `json:"rx_packets"`
+	Rx_octets  uint64 `json:"rx_octets"`
+	Qfailed    uint64 `json:"-"`
+	Fp_count   uint64 `json:"-"`
+	Fp_time    uint64 `json:"-"`
+	Ip         IP4    `json:"-"`
+	//Pps        uint64    `json:"-"`
+	//Bps        uint64    `json:"-"`
+	Latency   uint64    `json:"-"`
+	DEFCON    uint8     `json:"-"`
+	Rx_pps    uint64    `json:"rx_packets_per_second"`
+	Rx_bps    uint64    `json:"rx_octets_per_second"`
+	Timestamp time.Time `json:"-"`
+	Vlan      uint16    `json:"-"`
 }
+
+func (c *Counters) PerSec(o Counters) {
+	dur := uint64(c.Timestamp.Sub(o.Timestamp)) / uint64(time.Millisecond)
+
+	if dur > 0 {
+		c.Rx_pps = 1000 * ((c.Rx_packets - o.Rx_packets) / dur)
+		c.Rx_bps = 1000 * ((c.Rx_octets - o.Rx_octets) / dur)
+	}
+}
+
 type Scounters struct {
 	Name        string              `json:"name"`
 	Description string              `json:"description"`
@@ -134,7 +145,9 @@ type Scounters struct {
 	Concurrent  int64               `json:"current_connections"`
 	New_flows   uint64              `json:"total_connections"`
 	Rx_packets  uint64              `json:"rx_packets"`
-	Rx_bytes    uint64              `json:"rx_octets"`
+	Rx_octets   uint64              `json:"rx_octets"`
+	Rx_pps      uint64              `json:"rx_packets_per_second"`
+	Rx_bps      uint64              `json:"rx_octets_per_second"`
 	Backends    map[string]Counters `json:"backends"`
 	VIP         IP4                 `json:"vip"`
 	Port        uint16              `json:"port"`
@@ -150,7 +163,9 @@ func (c *Scounters) Sum() {
 	for _, b := range c.Backends {
 		c.New_flows += b.New_flows
 		c.Rx_packets += b.Rx_packets
-		c.Rx_bytes += b.Rx_bytes
+		c.Rx_octets += b.Rx_octets
+		c.Rx_pps += b.Rx_pps
+		c.Rx_bps += b.Rx_bps
 		c.Concurrent += b.Concurrent
 	}
 }

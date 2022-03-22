@@ -46,7 +46,7 @@ func real_ip(real config.Real, service Thruple, wg *sync.WaitGroup, status_c cha
 		done := make(chan bool)
 
 		var concurrent uint64
-		ctrl.VipRipPortCounters(service.IP, real.Rip, service.Port, true, 0)
+		old := ctrl.VipRipPortCounters(service.IP, real.Rip, service.Port, true, 0)
 
 		updates := ctrl.VipRipPortConcurrents(service.IP, real.Rip, service.Port, done)
 
@@ -100,8 +100,11 @@ func real_ip(real config.Real, service Thruple, wg *sync.WaitGroup, status_c cha
 				goto do_select
 			case <-stats_timer.C:
 				// lookup and send stats with timeout
+				stats := ctrl.VipRipPortCounters(service.IP, real.Rip, service.Port, false, concurrent)
+				stats.PerSec(old)
+				old = stats
 				select {
-				case stats_c <- ctrl.VipRipPortCounters(service.IP, real.Rip, service.Port, false, concurrent):
+				case stats_c <- stats:
 				case <-time.After(1 * time.Second):
 				}
 				goto do_select

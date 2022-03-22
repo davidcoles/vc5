@@ -147,7 +147,8 @@ func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logge
 		}
 
 		count.Latency = latency
-		count.Pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
+		count.Rx_pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
+		count.Rx_bps = (count.Rx_octets - prev.Rx_octets)   // uint64(interval)
 		count.DEFCON = c.Defcon(0)
 		counters <- count
 
