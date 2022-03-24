@@ -53,25 +53,26 @@ if(1) {
 
 	    $i{'name'} = $s->{_name};
 	    $i{'description'} = $s->{_desc};
+	    $i{'sticky'} = $s->{_sticky} ? JSON::true : JSON::false;
 	    
 	    
 	    my @r;
 	    my %r;
 	    {
-		my @h;
-		my @H;
-		my @t;
-		my @s;
+		my @http;
+		my @https;
+		my @tcp;
+		my @syn;
 
 		if(0) {
 		    my $c = $s->{_check};
 		    
 		    if(defined $c) {
 			given($c->{_type}) {
-			    when ('http') { push @h, httpchk($c) }
-			    when ('https') { push @H, httpchk($c) }
-			    when ('tcp') { push @t, { 'port' => $c->{_port} } }
-			    when ('syn') { push @s, { 'port' => $c->{_port} } }
+			    when ('http')   { push @http, httpchk($c) }
+			    when ('https') { push @https, httpchk($c) }
+			    when ('tcp')   { push @tcp,   { 'port' => $c->{_port} } }
+			    when ('syn')   { push @syn,   { 'port' => $c->{_port} } }
 			}
 		    }
 		} else {
@@ -79,10 +80,10 @@ if(1) {
 		    if(defined $c) {
 			foreach my $C (@$c) {
 			    given($C->{_type}) {
-				when ('http') { push @h, httpchk($C) }
-				when ('https') { push @H, httpchk($C) }
-				when ('tcp') { push @t, { 'port' => $C->{_port} } }
-				when ('syn') { push @s, { 'port' => $C->{_port} } }
+				when ('http')  { push @http,  httpchk($C) }
+				when ('https') { push @https, httpchk($C) }
+				when ('tcp')   { push @tcp,   { 'port' => $C->{_port} } }
+				when ('syn')   { push @syn,   { 'port' => $C->{_port} } }
 			    }
 			}
 		    }
@@ -90,44 +91,31 @@ if(1) {
 		
 		foreach(@{$s->{_real}}) {
 		    my %r;
-		    #$r{'rip'} = $_->{_addr};
-		    $r{'http'} = \@h if scalar(@h) > 0;
-		    $r{'https'} = \@H if scalar(@H) > 0;
-		    $r{'tcp'} = \@t if scalar(@t) > 0;
-		    $r{'syn'} = \@s if scalar(@s) > 0;
+		    $r{'http'}  = \@http  if scalar(@http) > 0;
+		    $r{'https'} = \@https if scalar(@https) > 0;
+		    $r{'tcp'}   = \@tcp   if scalar(@tcp) > 0;
+		    $r{'syn'}   = \@syn   if scalar(@syn) > 0;
 		    
-		    #push(@r, \%r);
 		    $i{'rips'}{$_->{_addr}} = \%r;
 		}
 	    }
-
-	    #$i{'rip'} = \@r;
-	    #foreach(@r) {
-	#	$i{'rip'}{$_->{'rip'}} = $_;
-	 #   }
 	    
 	    push(@S, \%i);	
 	}
     }
     
-    #$out->{'services'} = \@S;
-
-
-    my $foo = {};
+    my $vips = {};
     foreach(@S) {
-	my $i = $_->{'vip'};
-	my $p = $_->{'port'};
-	my $u = $_->{'udp'};
-	my $n = $u ? "udp:" : "tcp:";
-	$n .= $p;
-
+	my $vip = $_->{'vip'};
+	my $l4 = sprintf "%s:%d", $_->{'udp'} ? "udp" : "tcp", $_->{'port'};
+	
 	delete($_->{'vip'});
 	delete($_->{'udp'});
 	delete($_->{'port'});
 	
-	$foo->{$i}->{$n} = $_;
+	$vips->{$vip}->{$l4} = $_;
     }
-    $out->{'vips'} = $foo;
+    $out->{'vips'} = $vips;
     
     print to_json($out, {pretty => 1, canonical => 1});
 }
@@ -152,13 +140,14 @@ sub readconf {
 	
     
     foreach(@$s) {
-	my $a = $_->{'address'};
-	my $h = $_->{'host'};
-	my $n = $_->{'name'};
-	my $d = $_->{'description'};
-	my $P = $_->{'path'};
-	my $N = $_->{'need'};	
-	my $b = $_->{'predictor'};
+	my $addr = $_->{'address'};
+	my $host = $_->{'host'};
+	my $name = $_->{'name'};
+	my $desc = $_->{'description'};
+	my $path = $_->{'path'};
+	my $need = $_->{'need'};	
+	my $pred = $_->{'predictor'};
+	my $sticky = $_->{'sticky'} ? JSON::true : JSON::false;
 	my %r;
 
 	if(ref($_->{'servers'}) eq 'HASH') {
@@ -171,7 +160,7 @@ sub readconf {
 	}
 
 
- 	die "$b\n" unless !defined $b || $b =~ /^(roundrobin|leastconn|first|source)$/;
+ 	die "$pred\n" unless !defined $pred || $pred =~ /^(roundrobin|leastconn|first|source)$/;
 
 	
 	my $policy = $_->{'policy'};
@@ -185,7 +174,7 @@ sub readconf {
 
 	my %policy = %$policy;
 
-	my @ret = policy($a, $h, $P, $n, $d, $N, \%r, %policy);
+	my @ret = policy($addr, $host, $path, $name, $desc, $need, $sticky, \%r, %policy);
 	
 	push(@s, @ret);
 	
@@ -196,7 +185,7 @@ sub readconf {
 
 
 sub policy {
-    my($a, $h, $P, $n, $d, $need, $r, %policy) = @_;
+    my($a, $host_, $path_, $name_, $desc_, $need_, $sticky_, $r, %policy) = @_;
 
     my %r = %$r;
     my @s;
@@ -207,17 +196,22 @@ sub policy {
 	my $check = { _type => 'none' };
 	my $port = 0;
 	my $bind = 0;
-	#my $expt = defined $p ? $p : undef;
 	my $expt;
-	my $host = defined $h ? $h : undef;
-	my $path = defined $P ? $P : undef;
-	
+	my $host = defined $host_ ? $host_ : undef;
+	my $path = defined $path_ ? $path_ : undef;
 	my $udp = 0;
 
 	my @c;
 
+	my $need = $need_;
+	my $sticky = $sticky_;	
+	
 	if(exists $policy{$pol}{'need'}) {
 	    $need = $policy{$pol}{'need'} + 0;
+	}
+
+	if(exists $policy{$pol}{'sticky'}) {
+	    $sticky = $policy{$pol}{'sticky'};
 	}
 
 	
@@ -244,11 +238,12 @@ sub policy {
 	my $e = {
 	    _addr => $a,
 	    _port => $port,
-	    _name => $n,
-	    _desc => $d,
+	    _name => $name_,
+	    _desc => $desc_,
 	    _need => $need,
 	    _real => \@R,
 	    _udp => $udp,
+	    _sticky => $sticky,
 	    _checks => \@c,
 	    _balance => defined $b ? $b :'roundrobin',
 	};

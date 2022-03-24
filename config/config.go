@@ -74,6 +74,7 @@ type Service struct {
 	Name        string       `json:"name"`
 	Description string       `json:"description"`
 	LeastConns  bool         `json:"leastconns"`
+	Sticky      bool         `json:"sticky"`
 }
 
 type VR struct {

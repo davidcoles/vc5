@@ -41,10 +41,12 @@ services:
 
   # iperf server with port/healthcheck and server list declared separately
   # If 'need' is not specified it will default to 1 by the Perl script
-  # If need be, you can explicitly set it to 0
+  # If need be, you can explicitly set it to 0. Use "sticky" selection -
+  # only considers Layer 3 data when when selecing backend.
   - name: iperf
     description: bandwidth test
     address: 192.168.101.3
+    sticky: true
     servers: iperf
     policy: iperf
 

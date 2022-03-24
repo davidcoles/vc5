@@ -148,6 +148,12 @@ type settings struct {
 	defcon uint8   //__u8 defcon;
 }
 
+type backend_idx struct {
+	backend [8192]uint8
+	flags   uint8
+	padding [7]uint8
+}
+
 func (c *Control) find_map(name string, ks int, rs int) int {
 	m := c.xdp.FindMap(name)
 
@@ -223,6 +229,7 @@ func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	var _settings settings
 	var _vip_rip_src_if vip_rip_src_if
 	var _raw_counters raw_counters
+	var _backend_idx backend_idx
 
 	c.settings = c.find_map("settings", 4, int(unsafe.Sizeof(_settings)))
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
@@ -235,7 +242,8 @@ func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	c.flow_queue = c.find_map("flow_queue", 0, FLOW_STATE)
 	c.flows = c.find_map("flows", FLOW, STATE)
 	c.backend_recs = c.find_map("backend_recs", 4, int(unsafe.Sizeof(_backend_rec)))
-	c.backend_idx = c.find_map("backend_idx", int(unsafe.Sizeof(_service)), 8192)
+	//c.backend_idx = c.find_map("backend_idx", int(unsafe.Sizeof(_service)), 8192)
+	c.backend_idx = c.find_map("backend_idx", int(unsafe.Sizeof(_service)), int(unsafe.Sizeof(_backend_idx)))
 
 	if v, err := net.InterfaceByName(veth); err != nil {
 		fmt.Println(veth, err)
@@ -266,12 +274,18 @@ func (c *Control) SetBackendRec(rip IP4, hwaddr MAC, vlan uint16, idx uint32, if
 	}
 }
 
-func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8) {
+func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8, sticky bool) {
 	s := service{vip: vip, port: htons(port), proto: protocol(udp)}
 
-	var idxs [MAX_CPU][8192]uint8
+	var backends backend_idx
+	backends.backend = idx
+	if sticky {
+		backends.flags |= 0x01
+	}
+
+	var idxs [MAX_CPU]backend_idx
 	for n := 0; n < len(idxs); n++ {
-		idxs[n] = idx
+		idxs[n] = backends
 	}
 
 	if xdp.BpfMapUpdateElem(c.backend_idx, uP(&s), uP(&idxs), xdp.BPF_ANY) != 0 {

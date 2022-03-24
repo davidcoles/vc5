@@ -94,6 +94,24 @@ struct service {
     __u8 pad;
 };
 
+#define IDX_BITS 13
+
+#define F_STICKY    0x01
+//#define F_SOMETHING 0x02
+//#define F_SOMETHING 0x04
+//#define F_SOMETHING 0x08
+//#define F_SOMETHING 0x10
+//#define F_SOMETHING 0x20
+//#define F_SOMETHING 0x40
+//#define F_SOMETHING 0x80
+
+struct backends {
+    __u8 backend[(1<<IDX_BITS)];
+    __u8 flags;
+    __u8 padding[7];
+    // needs to be aligned on 8 bytes
+};
+
 struct vip_rip_port {
     __be32 vip;
     __be32 rip;
@@ -218,12 +236,11 @@ struct {
 } backend_recs SEC(".maps");
 	
 
-#define IDX_BITS 13
-
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
     __type(key, struct service);
-    __type(value, __u8[(1<<IDX_BITS)]);
+    //__type(value, __u8[(1<<IDX_BITS)]);
+    __type(value, struct backends);
     __uint(max_entries, 256);
 } backend_idx SEC(".maps");
 
@@ -363,18 +380,26 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
     serv.proto = IPPROTO_UDP;
     serv.pad = 0;
 
-    __u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
+    //__u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
+    struct backends *idx = bpf_map_lookup_elem(&backend_idx, &serv);
     if(!idx) {
 	return NULL;
     }
     struct tuple t;
     t.src = ipv4->saddr;
     t.dst = ipv4->daddr;
-    t.sport = udp->source;
-    t.dport = udp->dest;
+    if(idx->flags & F_STICKY) {
+        t.sport = 0;
+        t.dport = 0;
+    } else {
+        t.sport = udp->source;
+        t.dport = udp->dest;
+    }
+
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
 
-    unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
+    //unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
+    unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];
 
     if(rec_idx == 0) {
         return NULL;
@@ -384,25 +409,33 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
 }
 
 
-static __always_inline struct backend_rec *lookup_backend(struct iphdr *ipv4, struct tcphdr *tcp) {
+static __always_inline struct backend_rec *lookup_backend_tcp(struct iphdr *ipv4, struct tcphdr *tcp) {
     struct service serv;
     serv.vip = ipv4->daddr;
     serv.ports = tcp->dest;
     serv.proto = IPPROTO_TCP;
     serv.pad = 0;
     
-    __u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
+    //__u8 *idx = bpf_map_lookup_elem(&backend_idx, &serv);
+    struct backends *idx = bpf_map_lookup_elem(&backend_idx, &serv);
     if(!idx) {
 	return NULL;
     }
     struct tuple t;
     t.src = ipv4->saddr;
     t.dst = ipv4->daddr;
-    t.sport = tcp->source;
-    t.dport = tcp->dest;
+    if(idx->flags & F_STICKY) {
+    	t.sport = 0;
+        t.dport = 0;
+    } else {
+    	t.sport = tcp->source;
+    	t.dport = tcp->dest;
+    }
+
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
-    
-    unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
+
+    //unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
+    unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];    
     
     if(rec_idx == 0) {
 	return NULL;
@@ -672,7 +705,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
  new_flow:
     
-    rec = lookup_backend(ipv4, tcp);
+    rec = lookup_backend_tcp(ipv4, tcp);
     if(rec) {
 	if (!maccmp(rec->hwaddr, nulmac)) {
 	    return XDP_DROP;
