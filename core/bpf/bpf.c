@@ -111,7 +111,7 @@ struct backends {
     __u8 leastconns;
     __u8 weight;
     __u8 padding[5];
-    // needs to be aligned on 8 bytes
+    // needs to be aligned on 8 byte boundary
 };
 
 struct vip_rip_port {
@@ -241,7 +241,6 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
     __type(key, struct service);
-    //__type(value, __u8[(1<<IDX_BITS)]);
     __type(value, struct backends);
     __uint(max_entries, 256);
 } backend_idx SEC(".maps");
@@ -373,6 +372,7 @@ static __always_inline int vlan_pop(struct xdp_md *ctx) {
     return 0;
 }
 
+#define SAVE_STATE(defcon) (defcon >= 4)
 
 
 static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4, struct udphdr *udp) {
@@ -401,10 +401,6 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
     
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
 
-    if(idx->leastconns != 0 && n < idx->weight) {
-	n = idx->leastconns;
-    }
-
     //unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
     unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];
 
@@ -416,7 +412,7 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
 }
 
 
-static __always_inline struct backend_rec *lookup_backend_tcp(struct iphdr *ipv4, struct tcphdr *tcp) {
+static __always_inline struct backend_rec *lookup_backend_tcp(struct iphdr *ipv4, struct tcphdr *tcp, __u8 defcon) {
     struct service serv;
     serv.vip = ipv4->daddr;
     serv.ports = tcp->dest;
@@ -442,7 +438,11 @@ static __always_inline struct backend_rec *lookup_backend_tcp(struct iphdr *ipv4
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
 
     //unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
-    unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];    
+    unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];
+
+    if(idx->leastconns != 0 && (n % 256) < idx->weight && SAVE_STATE(defcon)) {
+	rec_idx = idx->leastconns;
+    }    
     
     if(rec_idx == 0) {
 	return NULL;
@@ -514,6 +514,8 @@ static inline __u8 defcon(__u8 d) {
     }
     return 5;    
 }
+
+
 
 // POSSIBILITIES FOR DOS MITIGATION
 //DEFCON1: will switch traffic without referring to state
@@ -711,8 +713,9 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     struct backend_rec *rec;    
 
  new_flow:
+
     
-    rec = lookup_backend_tcp(ipv4, tcp);
+    rec = lookup_backend_tcp(ipv4, tcp, DEFCON);
     if(rec) {
 	if (!maccmp(rec->hwaddr, nulmac)) {
 	    return XDP_DROP;
@@ -723,11 +726,11 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	// if tagged with a vlan, update it
 	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));	
 	
-	if(DEFCON >= 4) save_state(ipv4, tcp, rec);
+	if(SAVE_STATE(DEFCON)) save_state(ipv4, tcp, rec);
 	
 	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4), era);
 	
-	if(DEFCON >= 4) statsp->new_flows++;
+	if(SAVE_STATE(DEFCON)) statsp->new_flows++;
 	statsp->fp_count++;
 	statsp->fp_time += (bpf_ktime_get_ns()-start);
 

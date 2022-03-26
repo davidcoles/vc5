@@ -27,37 +27,39 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
-func service(s config.Service, t Thruple, w *sync.WaitGroup, l4 chan l4status_t) chan config.Service {
-	c := make(chan config.Service)
+type state_t struct {
+	generation uint64
+	channel    chan config.Real
+	up         bool
+	real       config.Real
+	stats      types.Counters
+}
+
+type service_state map[IP4]*state_t
+
+func service(service config.Service, tuple Thruple, w *sync.WaitGroup, l4 chan l4status_t) chan config.Service {
+	c := make(chan config.Service, 1)
+	c <- service
 	go func() {
-		logs.DEBUG("Starting", t.String())
+		logs.DEBUG("Starting", tuple.String())
 
 		var wg sync.WaitGroup
-
-		type state_t struct {
-			g uint64
-			c chan config.Real
-			u bool
-			r config.Real
-			s types.Counters
-		}
-
-		var gen uint64
+		var generation uint64
 
 		state := make(map[IP4]*state_t)
 		status_c := make(chan status_t, 1000)
 		stats_c := make(chan types.Counters, 1000)
 
 		defer func() {
-			ctrl.DelBackendIdx(t.IP, t.Port, bool(t.Protocol))
+			ctrl.DelBackendIdx(tuple.IP, tuple.Port, bool(tuple.Protocol))
 
-			sink <- types.Scounters{Delete: true, VIP: t.IP, Port: t.Port, Protocol: t.Protocol}
+			sink <- types.Scounters{Delete: true, VIP: tuple.IP, Port: tuple.Port, Protocol: tuple.Protocol}
 			for _, v := range state {
-				close(v.c)
+				close(v.channel)
 			}
 
 			select {
-			case l4 <- l4status_t{l4: t.L4(), up: false}:
+			case l4 <- l4status_t{l4: tuple.L4(), up: false}:
 			case <-time.After(1 * time.Second):
 			}
 
@@ -70,121 +72,179 @@ func service(s config.Service, t Thruple, w *sync.WaitGroup, l4 chan l4status_t)
 			case <-wait:
 			}
 
-			logs.DEBUG("Quitting", t.String())
+			logs.DEBUG("Quitting", tuple.String())
 			w.Done()
 		}()
 
-		ticker := time.NewTicker(4 * time.Second)
-		init_timer := time.NewTimer(10 * time.Second)
+		split := NewSplit(10*time.Second, 4*time.Second)
 
-		var reconf bool = true
-		var recalc bool = true
-		var init bool = false
-		var up bool
-		var nalive int
+		//var init bool
+
+		table, up, alive := backend_mapping(service, tuple, nil)
+		ctrl.SetBackendIdx(tuple.IP, tuple.Port, bool(tuple.Protocol), table, false, 0, 0)
+		up = true // assume service is up iniially
+
+		var recalcuate bool
 
 		for {
-			if reconf {
-				reconf = false
-				recalc = true
-				for _, r := range s.Rip {
-					if v, ok := state[r.Rip]; ok {
-						v.g = gen
-						v.c <- r
-						v.r = r
-						//current[r.Rip] = v
-					} else {
-						wg.Add(1)
-						//srv := types.Thruple{IP: t.IP, Port: t.Port, Protocol: t.Protocol}
-						state[r.Rip] = &state_t{g: gen, c: real_ip(r, t, &wg, status_c, stats_c), r: r}
-					}
-				}
-
-				for k, v := range state {
-					if v.g != gen {
-						close(v.c)
-						delete(state, k)
-					}
-				}
-			}
-
-			if recalc {
-				recalc = false
-				var isup bool
-
-				alive := make(map[[4]byte]uint16)
-
-				for k, v := range state {
-					if v.u {
-						alive[k] = v.r.Index
-					}
-				}
-
-				nalive = len(alive)
-
-				if len(alive) >= int(s.Need) {
-					isup = true
-				} else {
-					alive = make(map[[4]byte]uint16) // blank it
-				}
-
-				table, stats := rendezvous.RipIndex(alive)
-				logs.DEBUG("Backend", t.String(), len(alive), table[0:32], stats)
-				ctrl.SetBackendIdx(t.IP, t.Port, bool(t.Protocol), table, s.Sticky, 0, 0)
-
-				if init && isup != up { // send new status
-					l4 <- l4status_t{l4: t.L4(), up: isup}
-					logs.NOTICE("Changed", t.String(), "to", updown(isup))
-				}
-
-				up = isup
-			}
-
-			if true { // send stats every time
-				be := make(map[string]types.Counters)
-				for k, v := range state {
-					v.s.Up = v.u
-					be[k.String()] = v.s
-				}
-
-				sc := types.Scounters{Name: s.Name, Description: s.Description, Up: up, Backends: be,
-					VIP: t.IP, Port: t.Port, Protocol: t.Protocol, Need: s.Need, Nalive: uint(nalive)}
-				sc.Sum()
-				sink <- sc // put in a select with timeout
-			}
-
-		do_select:
+			var ok bool
 			select {
-			case n, ok := <-c:
+			case service, ok = <-c:
 				if !ok {
 					return
 				}
-				s = n
-				gen++
-				reconf = true
-
-			case <-init_timer.C:
-				init = true
-				l4 <- l4status_t{l4: t.L4(), up: up}
-				logs.NOTICE("Starting", t.String(), "as", updown(up))
+				generation++
+				state = reconfigure(service, tuple, state, generation, &wg, status_c, stats_c)
+				recalcuate = true
+				continue
 
 			case u := <-status_c:
 				if v, ok := state[u.ip]; ok {
-					v.u = u.up
+					v.up = u.up
 				}
-				recalc = true
-				goto do_select
+				recalcuate = true
+				continue
 
 			case s := <-stats_c:
 				if v, ok := state[s.Ip]; ok {
-					v.s = s
+					v.stats = s
 				}
-				goto do_select
+				continue
 
-			case <-ticker.C: // break out periodically to do stats/recalc
+			case <-split.C:
 			}
 
+			var leastconns uint8
+			var weight uint8
+
+			if service.LeastConns {
+				leastconns, weight = least_conns(tuple, state)
+			}
+
+			was := up
+
+			if recalcuate {
+				recalcuate = false
+				table, up, alive = backend_mapping(service, tuple, state)
+			}
+
+			// just update this every time - it's only once every 4 seconds
+			ctrl.SetBackendIdx(tuple.IP, tuple.Port, bool(tuple.Protocol), table, service.Sticky, leastconns, weight)
+
+			if up != was {
+				l4 <- l4status_t{l4: tuple.L4(), up: up}
+				logs.NOTICE("Changed", tuple.String(), "to", updown(up))
+			}
+
+			sink <- service_counters(service, tuple, state, up, alive)
 		}
 	}()
 	return c
+}
+
+func reconfigure(s config.Service, t Thruple, state map[IP4]*state_t, g uint64, w *sync.WaitGroup,
+	status_c chan status_t, stats_c chan types.Counters) map[IP4]*state_t {
+
+	for _, r := range s.Rip {
+		if v, ok := state[r.Rip]; ok {
+			v.generation = g
+			v.channel <- r
+			v.real = r
+		} else {
+			w.Add(1)
+			state[r.Rip] = &state_t{generation: g, channel: real_ip(r, t, w, status_c, stats_c), real: r}
+		}
+	}
+
+	for k, v := range state {
+		if v.generation != g {
+			close(v.channel)
+			delete(state, k)
+		}
+	}
+
+	return state
+}
+
+func backend_mapping(s config.Service, t Thruple, state map[IP4]*state_t) ([8192]byte, bool, uint) {
+
+	var isup bool
+
+	alive := make(map[[4]byte]uint16)
+
+	for k, v := range state {
+		if v.up {
+			alive[k] = v.real.Index
+		}
+	}
+
+	if len(alive) >= int(s.Need) {
+		isup = true
+	} else {
+		alive = nil
+	}
+
+	table, stats := rendezvous.RipIndex(alive)
+	logs.DEBUG("Backend", t.String(), len(alive), table[0:32], stats)
+	return table, isup, uint(len(alive))
+}
+
+func least_conns(tuple types.Thruple, state map[IP4]*state_t) (uint8, uint8) {
+
+	var leastconns uint8
+	var weight uint64 = 255
+	var average uint64
+	var nservers uint64
+	var minimum uint64
+	var server IP4
+
+	for _, v := range state {
+		if v.up {
+			average += v.stats.Rx_bps
+			nservers++
+		}
+	}
+
+	if nservers == 0 {
+		return 0, 0
+	}
+
+	average /= nservers
+
+	// is there a particularly unloaded server?
+	for k, v := range state {
+		if v.up && (minimum == 0 || v.stats.Rx_bps < minimum) {
+			minimum = v.stats.Rx_bps
+			leastconns = uint8(v.real.Index)
+			server = k
+		}
+	}
+
+	// don't kick in unless average > 1Mbps and server has less than 80% of average
+	if ((average * 8) > 1000000) && (minimum < ((average * 4) / 5)) {
+		logs.NOTICE("Least connections adjustment", tuple.String(), server, "bps/average:", minimum, "/", average)
+
+		weight = (255 * minimum) / average
+		if weight > 255 {
+			weight = 255
+		}
+
+		return leastconns, 255 - uint8(weight)
+	}
+
+	return 0, 0
+}
+
+func service_counters(s config.Service, t types.Thruple, state service_state, up bool, alive uint) types.Scounters {
+
+	be := make(map[string]types.Counters)
+	for k, v := range state {
+		v.stats.Up = v.up
+		be[k.String()] = v.stats
+	}
+
+	sc := types.Scounters{Name: s.Name, Description: s.Description, Up: up, Backends: be,
+		VIP: t.IP, Port: t.Port, Protocol: t.Protocol, Need: s.Need, Nalive: alive}
+	sc.Sum()
+	return sc
 }

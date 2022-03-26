@@ -54,6 +54,7 @@ if(1) {
 	    $i{'name'} = $s->{_name};
 	    $i{'description'} = $s->{_desc};
 	    $i{'sticky'} = $s->{_sticky} ? JSON::true : JSON::false;
+	    $i{'leastconns'} = $s->{_leastconns} ? JSON::true : JSON::false;	    
 	    
 	    
 	    my @r;
@@ -148,6 +149,7 @@ sub readconf {
 	my $need = $_->{'need'};	
 	my $pred = $_->{'predictor'};
 	my $sticky = $_->{'sticky'} ? JSON::true : JSON::false;
+	my $leastconns = $_->{'leastconns'} ? JSON::true : JSON::false;	
 	my %r;
 
 	if(ref($_->{'servers'}) eq 'HASH') {
@@ -174,7 +176,7 @@ sub readconf {
 
 	my %policy = %$policy;
 
-	my @ret = policy($addr, $host, $path, $name, $desc, $need, $sticky, \%r, %policy);
+	my @ret = policy($addr, $host, $path, $name, $desc, $need, $sticky, $leastconns, \%r, %policy);
 	
 	push(@s, @ret);
 	
@@ -185,7 +187,7 @@ sub readconf {
 
 
 sub policy {
-    my($a, $host_, $path_, $name_, $desc_, $need_, $sticky_, $r, %policy) = @_;
+    my($a, $host_, $path_, $name_, $desc_, $need_, $sticky_, $leastconns_, $r, %policy) = @_;
 
     my %r = %$r;
     my @s;
@@ -204,7 +206,8 @@ sub policy {
 	my @c;
 
 	my $need = $need_;
-	my $sticky = $sticky_;	
+	my $sticky = $sticky_;
+	my $leastconns = $leastconns_;
 	
 	if(exists $policy{$pol}{'need'}) {
 	    $need = $policy{$pol}{'need'} + 0;
@@ -212,6 +215,10 @@ sub policy {
 
 	if(exists $policy{$pol}{'sticky'}) {
 	    $sticky = $policy{$pol}{'sticky'};
+	}
+
+	if(exists $policy{$pol}{'leastconns'}) {
+	    $leastconns = $policy{$pol}{'leastconns'};
 	}
 
 	
@@ -244,6 +251,7 @@ sub policy {
 	    _real => \@R,
 	    _udp => $udp,
 	    _sticky => $sticky,
+	    _leastconns => $leastconns,	    
 	    _checks => \@c,
 	    _balance => defined $b ? $b :'roundrobin',
 	};

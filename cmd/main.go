@@ -75,7 +75,7 @@ func main() {
 	peth := args[2:]
 
 	netns := "vc5"
-	veth := "vc5_1"
+	veth := "vc5"
 
 	ipaddr, ok := parseIP(ipv4)
 	if !ok {
@@ -119,8 +119,8 @@ func main() {
 
 	time.Sleep(2 * time.Second) // will bomb if we can't bind to port
 
-	mac, err := setup(vip1.String(), vip2.String(), peth...)
-	defer cleanup(peth...)
+	mac, err := setup(netns, veth, vip1.String(), vip2.String(), peth...)
+	defer cleanup(netns, veth, peth...)
 
 	if err != nil {
 		fmt.Println("Scripts failed:", err)
@@ -167,7 +167,7 @@ func main() {
 		closed = true
 		close(manager)
 		time.Sleep(10 * time.Second)
-		cleanup(peth...)
+		cleanup(netns, veth, peth...)
 		os.Exit(1)
 	}()
 
@@ -208,7 +208,7 @@ func main() {
 		// (12 core * 67ns) @ 75% = 603.00
 		// (12 core * 67ns) @ 85% = 683.40
 
-		if defcon > 1 && *highwm > 0 && latency > *highwm {
+		if defcon > 1 && *highwm > 0 && latency > *highwm && pps > 100000 {
 			defcon--
 			c.Defcon(defcon)
 			fmt.Println("DEFCON--", defcon)
@@ -367,22 +367,23 @@ func parseIP(ip string) ([4]byte, bool) {
 	return addr, true
 }
 
-func setup(vip1, vip2 string, nics ...string) ([6]byte, error) {
+func setup(netns, veth, vip1, vip2 string, nics ...string) ([6]byte, error) {
 	var mac [6]byte
+	var be string = veth + "b"
 
 	script1 := `
-ip link del vc5_1 || true
-ip netns del vc5 || true
-ip link add vc5_1 type veth peer name vc5_2
-ip l set vc5_1 up
-ip a add ` + vip2 + `/30 dev vc5_1
+ip link del ` + veth + ` || true
+ip netns del ` + netns + ` || true
+ip link add ` + veth + ` type veth peer name ` + be + `
+ip l set ` + veth + ` up
+ip a add ` + vip2 + `/30 dev ` + veth + `
 `
 	_, err := exec.Command("/bin/sh", "-e", "-c", script1).Output()
 	if err != nil {
 		return mac, err
 	}
 
-	iface, err := net.InterfaceByName("vc5_2")
+	iface, err := net.InterfaceByName(be)
 	if err != nil {
 		return mac, err
 	}
@@ -390,8 +391,8 @@ ip a add ` + vip2 + `/30 dev vc5_1
 	copy(mac[:], iface.HardwareAddr[:])
 
 	script2 := `
-ip netns add vc5
-ip link set vc5_2 netns vc5
+ip netns add ` + netns + `
+ip link set ` + be + ` netns ` + netns + `
 `
 	_, err = exec.Command("/bin/sh", "-e", "-c", script2).Output()
 	if err != nil {
@@ -399,15 +400,15 @@ ip link set vc5_2 netns vc5
 	}
 
 	script3 := `
-ip netns exec vc5 /bin/bash <<EOF
-ip l set vc5_2 up
-ip a add ` + vip1 + `/30 dev vc5_2
-ip r replace default via ` + vip2 + ` dev vc5_2
-ethtool -K vc5_2 tx off >/dev/null
+ip netns exec ` + netns + ` /bin/bash <<EOF
+ip l set ` + be + ` up
+ip a add ` + vip1 + `/30 dev ` + be + `
+ip r replace default via ` + vip2 + ` dev ` + be + `
+ethtool -K ` + be + ` tx off >/dev/null
 `
 	// ip r replace 10.1.0.0/16 via ` + vip2 + ` dev vc5_2
 
-	_, err = exec.Command("ip", "netns", "exec", "vc5", "/bin/sh", "-e", "-c", script3).Output()
+	_, err = exec.Command("ip", "netns", "exec", netns, "/bin/sh", "-e", "-c", script3).Output()
 	if err != nil {
 		return mac, err
 	}
@@ -428,10 +429,10 @@ ethtool -K ` + nic + ` rxvlan off >/dev/null 2>&1 || true
 	return mac, nil
 }
 
-func cleanup(nics ...string) {
+func cleanup(netns, veth string, nics ...string) {
 	script1 := `
-ip link del vc5_1 || true
-ip netns del vc5 || true
+ip link del ` + veth + ` || true
+ip netns del ` + netns + ` || true
 `
 
 	exec.Command("/bin/sh", "-e", "-c", script1).Output()
