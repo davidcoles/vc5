@@ -96,7 +96,7 @@ struct service {
 
 #define IDX_BITS 13
 
-#define F_STICKY    0x01
+#define F_STICKY     0x01
 //#define F_SOMETHING 0x02
 //#define F_SOMETHING 0x04
 //#define F_SOMETHING 0x08
@@ -108,7 +108,9 @@ struct service {
 struct backends {
     __u8 backend[(1<<IDX_BITS)];
     __u8 flags;
-    __u8 padding[7];
+    __u8 leastconns;
+    __u8 weight;
+    __u8 padding[5];
     // needs to be aligned on 8 bytes
 };
 
@@ -385,18 +387,23 @@ static __always_inline struct backend_rec *lookup_backend_udp(struct iphdr *ipv4
     if(!idx) {
 	return NULL;
     }
+
     struct tuple t;
     t.src = ipv4->saddr;
     t.dst = ipv4->daddr;
     if(idx->flags & F_STICKY) {
-        t.sport = 0;
-        t.dport = 0;
+	t.sport = 0;
+	t.dport = 0;
     } else {
-        t.sport = udp->source;
-        t.dport = udp->dest;
+	t.sport = udp->source;
+	t.dport = udp->dest;
     }
-
+    
     __u16 n = sdbm((unsigned char*) &t, sizeof(t));
+
+    if(idx->leastconns != 0 && n < idx->weight) {
+	n = idx->leastconns;
+    }
 
     //unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
     unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];

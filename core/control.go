@@ -149,9 +149,11 @@ type settings struct {
 }
 
 type backend_idx struct {
-	backend [8192]uint8
-	flags   uint8
-	padding [7]uint8
+	backend    [8192]uint8
+	flags      uint8
+	leastconns uint8
+	weight     uint8
+	padding    [5]uint8
 }
 
 func (c *Control) find_map(name string, ks int, rs int) int {
@@ -274,7 +276,7 @@ func (c *Control) SetBackendRec(rip IP4, hwaddr MAC, vlan uint16, idx uint32, if
 	}
 }
 
-func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8, sticky bool) {
+func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8, sticky bool, leastconns, weight uint8) {
 	s := service{vip: vip, port: htons(port), proto: protocol(udp)}
 
 	var backends backend_idx
@@ -282,6 +284,8 @@ func (c *Control) SetBackendIdx(vip IP4, port uint16, udp bool, idx [8192]uint8,
 	if sticky {
 		backends.flags |= 0x01
 	}
+	backends.leastconns = leastconns
+	backends.weight = weight
 
 	var idxs [MAX_CPU]backend_idx
 	for n := 0; n < len(idxs); n++ {

@@ -130,7 +130,7 @@ func service(s config.Service, t Thruple, w *sync.WaitGroup, l4 chan l4status_t)
 
 				table, stats := rendezvous.RipIndex(alive)
 				logs.DEBUG("Backend", t.String(), len(alive), table[0:32], stats)
-				ctrl.SetBackendIdx(t.IP, t.Port, bool(t.Protocol), table, s.Sticky)
+				ctrl.SetBackendIdx(t.IP, t.Port, bool(t.Protocol), table, s.Sticky, 0, 0)
 
 				if init && isup != up { // send new status
 					l4 <- l4status_t{l4: t.L4(), up: isup}
