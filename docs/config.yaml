@@ -22,7 +22,7 @@ services:
   # to use those values for the Host header and resouce path that is queried
   - name: nginx
     description: NGINX webserver
-    address:
+    virtual:
       - 192.168.101.1
       - 192.168.101.2
     servers:
@@ -45,7 +45,7 @@ services:
   # only considers Layer 3 data when when selecing backend.
   - name: iperf
     description: bandwidth test
-    address: 192.168.101.3
+    virtual: 192.168.101.3
     sticky: true
     servers: iperf
     policy: iperf
@@ -56,7 +56,7 @@ services:
   # gracefully taken out of service by removing the inservice file.
   - name: bind
     description: BIND DNS server
-    address: 192.168.101.4
+    virtual: 192.168.101.4
     servers: bind
     path: /inservice
     policy:

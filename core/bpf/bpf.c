@@ -440,7 +440,7 @@ static __always_inline struct backend_rec *lookup_backend_tcp(struct iphdr *ipv4
     //unsigned int rec_idx = idx[(n & ((1<<IDX_BITS)-1))];
     unsigned int rec_idx = idx->backend[(n & ((1<<IDX_BITS)-1))];
 
-    if(idx->leastconns != 0 && (n % 256) < idx->weight && SAVE_STATE(defcon)) {
+    if(idx->leastconns != 0 && (n & 0xff ) < idx->weight && SAVE_STATE(defcon)) {
 	rec_idx = idx->leastconns;
     }    
     

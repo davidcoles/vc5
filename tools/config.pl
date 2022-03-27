@@ -142,12 +142,12 @@ sub readconf {
     
     foreach(@$s) {
 	my $addr = $_->{'address'};
+	$addr = $_->{'virtual'} if defined $_->{'virtual'};
 	my $host = $_->{'host'};
 	my $name = $_->{'name'};
 	my $desc = $_->{'description'};
 	my $path = $_->{'path'};
 	my $need = $_->{'need'};	
-	my $pred = $_->{'predictor'};
 	my $sticky = $_->{'sticky'} ? JSON::true : JSON::false;
 	my $leastconns = $_->{'leastconns'} ? JSON::true : JSON::false;	
 	my %r;
@@ -160,10 +160,6 @@ sub readconf {
 	    my $k = $_->{'servers'};
 	    %r = map { $_ => $_ } @{$srv->{$k}};
 	}
-
-
- 	die "$pred\n" unless !defined $pred || $pred =~ /^(roundrobin|leastconn|first|source)$/;
-
 	
 	my $policy = $_->{'policy'};
 	$policy = $DEFAULT unless defined $policy;

@@ -12,7 +12,7 @@ services:
 
   - name: nginx
     description: NGINX webserver
-    address:
+    virtual:
       - 192.168.101.1
     servers:
       - 10.10.100.130

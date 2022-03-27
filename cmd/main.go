@@ -203,23 +203,22 @@ func main() {
 		latency := count.Latency
 		pps := (count.Rx_packets - prev.Rx_packets) / 30
 
-		fmt.Printf("%d pps, %d ns avg. latency, DEFCON %d\n", pps, latency, defcon)
-
 		// (12 core * 67ns) @ 75% = 603.00
 		// (12 core * 67ns) @ 85% = 683.40
 
 		if defcon > 1 && *highwm > 0 && latency > *highwm && pps > 100000 {
 			defcon--
 			c.Defcon(defcon)
-			fmt.Println("DEFCON--", defcon)
+			logs.DEBUG("Readiness condition raised to DEFCON", defcon)
 		}
 
 		if defcon < 5 && *lowwm > 0 && latency < *lowwm {
 			defcon++
 			c.Defcon(defcon)
-			fmt.Println("DEFCON++", defcon)
-
+			logs.DEBUG("Readiness condition lowered to DEFCON", defcon)
 		}
+
+		fmt.Printf("%d pps, %d ns avg. latency, DEFCON %d\n", pps, latency, defcon)
 
 		prev = count
 	}
