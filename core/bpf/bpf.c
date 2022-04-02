@@ -27,6 +27,7 @@
 #include <linux/in.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
+#include <linux/icmp.h>
 
 #include <net/if.h>
 #include <linux/bpf.h>
