@@ -54,7 +54,7 @@ func real_ip(real config.Real, service Thruple, wg *sync.WaitGroup, status_c cha
 		stats_timer := time.NewTicker(1 * time.Second)  // update stats every 1s
 
 		defer func() {
-			logs.DEBUG("Quiting", svc, real.Rip)
+			logs.DEBUG("Quitting", svc, real.Rip)
 			close(done)
 			status_timer.Stop()
 			stats_timer.Stop()
