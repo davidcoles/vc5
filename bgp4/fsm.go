@@ -44,7 +44,7 @@ func htons(h uint16) []byte {
 }
 
 func debug(args ...interface{}) {
-	fmt.Println(args...)
+	//fmt.Println(args...)
 }
 
 func sleeper(n uint8) chan bool {
