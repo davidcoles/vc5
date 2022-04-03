@@ -38,8 +38,7 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 	var gen uint64
 
 	type state_t struct {
-		peer *bgp4.BGP4
-		done chan bool
+		peer *bgp4.Peer
 		gen  uint64
 	}
 
@@ -61,22 +60,22 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 		defer func() {
 			logs.DEBUG("Closing all BGP sessions")
 			for _, v := range state {
-				close(v.done)
+				//close(v.done)
+				v.peer.Close()
 			}
 		}()
 
 		for {
 			for _, s := range conf.Peers {
 				if v, ok := state[s]; !ok {
-					done := make(chan bool)
 					logs.DEBUG("Starting BGP session", s)
 					///peer := bgp4.BGP4Start(s, addr, addr, conf.ASNumber, start, done)
-					peer := bgp4.Session(s, addr, addr, conf.ASNumber, start, done)
+					peer := bgp4.Session(s, addr, addr, conf.ASNumber, start)
 					for k, v := range nlri {
 						peer.NLRI([4]byte(k), v)
 					}
 
-					state[s] = state_t{peer: peer, done: done, gen: gen}
+					state[s] = state_t{peer: peer, gen: gen}
 				} else {
 					v.gen = gen
 					state[s] = v
@@ -86,7 +85,8 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 			for k, v := range state {
 				if v.gen != gen {
 					logs.DEBUG("Closing BGP session", k)
-					close(v.done)
+					//close(v.done)
+					v.peer.Close()
 					delete(state, k)
 				}
 			}

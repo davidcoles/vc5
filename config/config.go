@@ -62,9 +62,9 @@ type Real struct {
 	Tcp   []TcpCheck  `json:"tcp,omitempty"`
 	Syn   []SynCheck  `json:"syn,omitempty"`
 
-	Rip   IP4    `json:"rip"`
-	Nat   IP4    `json:"nat"`
-	Info  Info   `json:"info"`
+	Rip IP4 `json:"rip"`
+	Nat IP4 `json:"nat"`
+	//_Info Info   `json:"info"`
 	Index uint16 `json:"index"`
 }
 
@@ -399,7 +399,7 @@ func fix_services(c *Config) error {
 		for l4, service := range m {
 			for k, r := range service.Rip {
 				r.Rip = k
-				r.Info = c.Real[r.Rip]
+				//r._Info = c.Real[r.Rip]
 				service.Rip[k] = r
 			}
 			c.VIPs[vip][l4] = service

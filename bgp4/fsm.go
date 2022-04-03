@@ -27,6 +27,26 @@ import (
 	"time"
 )
 
+// RECEIVED: OPEN:[VERSION:4 AS:65304 HOLD:240 ID:10.10.10.10 OPL:24 [{2 [1 4 0 1 0 1 2 0 64 2 0 0 65 4 0 0 255 24 70 0 71 0]}]]
+// https://www.iana.org/assignments/capability-codes/capability-codes.xhtml#capability-codes-2
+// 1 4 0 1 0 1     // Multiprotocol Extensions for BGP-4 -  AFI 01  SAFI 1
+// 2 0             // Route Refresh Capability for BGP-4
+// 64 2 0 0        // Graceful Restart Capability
+// 65 4 0 0 255 24 // Support for 4-octet AS number capability
+// 70 0            // Enhanced Route Refresh Capability
+// 71 0            // Long-Lived Graceful Restart (LLGR) Capability
+
+func htonl(h uint32) []byte {
+	return []byte{byte(h >> 24), byte(h >> 16), byte(h >> 8), byte(h)}
+}
+func htons(h uint16) []byte {
+	return []byte{byte(h >> 8), byte(h)}
+}
+
+func debug(args ...interface{}) {
+	fmt.Println(args...)
+}
+
 func sleeper(n uint8) chan bool {
 	c := make(chan bool)
 	go func() {
@@ -44,64 +64,63 @@ func slice(up map[IP4]bool) []nlri {
 	return ad
 }
 
-func (b *Peer) bgp4state(start chan bool, done chan bool) {
+func (p *Peer) session(wait chan bool) {
 
-	out, fin := b.bgp4conn(start, nil)
+	nlri, done := p.connect(wait, nil)
 
 	up := make(map[IP4]bool)
 
 	for {
 		select {
-		case <-fin:
-			close(out)
-			out, fin = b.bgp4conn(sleeper(10), slice(up))
+		case <-done:
+			close(nlri)
+			nlri, done = p.connect(sleeper(10), slice(up))
 
-		case u := <-b.updates:
+		case u, ok := <-p.nlri:
+			if !ok {
+				close(nlri)
+				return
+			}
+
 			if u.up {
 				up[u.ip] = true
 			} else {
 				delete(up, u.ip)
 			}
-			out <- u
-		case <-done:
-			close(out)
-			return
+
+			nlri <- u // won't block
 		}
 	}
 }
 
-func (b *Peer) bgp4conn(start chan bool, ad []nlri) (chan nlri, chan bool) {
-	ri := make(chan nlri, 10000)
-	ok := make(chan bool)
-	for _, n := range ad {
-		ri <- n
+func (p *Peer) connect(wait chan bool, initial []nlri) (chan nlri, chan bool) {
+	nlri := make(chan nlri, 10000)
+	done := make(chan bool)
+	for _, n := range initial {
+		nlri <- n
 	}
-	go b.bgp4fsm(start, ri, ok)
-	return ri, ok
+	go p.bgp4fsm(wait, nlri, done)
+	return nlri, done
 }
 
-func (b *Peer) bgp4fsm(start chan bool, ri chan nlri, ok chan bool) {
-
-	keep := make(chan bool)
-	exit := make(chan bool)
-	defer close(exit)
-
-	var external bool = false
+func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
+	p.state = IDLE
+	defer func() {
+		p.state = IDLE
+		close(done)
+	}()
 
 	pend := newpending(ri)
 
-	<-start
+	select {
+	case <-wait: // wait for channel to close (before connecting)
+	case <-ri:
+		return
+	}
 
-	b.state = IDLE
+	p.state = CONNECT
 
-	defer func() {
-		b.state = IDLE
-		close(ok)
-	}()
-
-	b.state = CONNECT
-
-	conn, err := connection(b.myip, b.peer, b.port)
+	conn, err := connection(p.myip, p.peer, p.port)
 
 	if err != nil {
 		return
@@ -109,11 +128,20 @@ func (b *Peer) bgp4fsm(start chan bool, ri chan nlri, ok chan bool) {
 
 	defer close(conn.send)
 
-	fmt.Println("CONNECTED:", b.peer)
+	debug("CONNECTED:", p.peer)
+
+	keep := make(chan bool)
+	exit := make(chan bool)
+	hold := make(chan bool)
+	defer close(exit)
+
+	var external bool = false
+	var hold_timer *time.Timer
+	var hold_time uint16 = 240
 
 	select {
-	case conn.send <- bgpmessage{mtype: M_OPEN, open: bgpopen{version: 4, as: b.asn, ht: 5, id: b.rid}}:
-		b.state = OPEN_SENT
+	case conn.send <- message{mtype: M_OPEN, open: open{version: 4, as: p.asn, ht: hold_time, id: p.rid}}:
+		p.state = OPEN_SENT
 	case <-conn.dead:
 	case <-pend.done:
 	}
@@ -121,31 +149,36 @@ func (b *Peer) bgp4fsm(start chan bool, ri chan nlri, ok chan bool) {
 	for {
 		select {
 		case <-conn.dead: // tcp connection died
-			fmt.Println("TCP DIED", b.peer)
+			debug("TCP DIED", p.peer)
 			return
 
 		case <-pend.done: // tear down session
-			fmt.Println("CLOSING", b.peer)
-			conn.send <- bgpmessage{mtype: M_NOTIFICATION, notification: bgpnotification{code: CEASE}}
+			debug("CLOSING", p.peer)
+			//conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: CEASE}}
+			return
+
+		case <-hold:
+			debug("HOLD TIMER EXPIRED", p.peer)
+			// could send a notification
 			return
 
 		case <-pend.poll: // nrli update waiting
-			if b.state == ESTABLISHED {
+			if p.state == ESTABLISHED {
 				select {
 				case n := <-pend.nlri:
 					select {
-					case conn.send <- bgpmessage{mtype: M_UPDATE, body: bgpupdate(b.myip, b.asn, external, []nlri{n})}:
+					case conn.send <- message{mtype: M_UPDATE, body: bgpupdate(p.myip, p.asn, external, []nlri{n})}:
 					case <-conn.dead: // tcp connection died
 					case <-pend.done: // tear down session
 					}
-				default: // fibbing?
+				default: // fibbing? probably not needed now as channel is buffered
 				}
 			}
 
 		case <-keep:
-			if b.state == ESTABLISHED {
+			if p.state == ESTABLISHED {
 				select {
-				case conn.send <- bgpmessage{mtype: M_KEEPALIVE}:
+				case conn.send <- message{mtype: M_KEEPALIVE}:
 				case <-conn.dead: // tcp connection died
 				case <-pend.done: // tear down session
 				}
@@ -153,51 +186,65 @@ func (b *Peer) bgp4fsm(start chan bool, ri chan nlri, ok chan bool) {
 
 		case m, ok := <-conn.recv:
 			if !ok {
-				fmt.Println("RECV CLOSED")
+				debug("RECV CLOSED")
 				return
 			}
 
-			switch b.state {
+			switch p.state {
 			case OPEN_SENT:
 				switch m.mtype {
 				case M_OPEN:
-					external = m.open.as != b.asn
+					p.state = OPEN_CONFIRM
+					external = m.open.as != p.asn // iBGP or eBGP
+					if m.open.ht == 0 || (m.open.ht >= 3 && m.open.ht < hold_time) {
+						hold_time = m.open.ht
+					}
+					if hold_time > 0 {
+						hold_timer = time.AfterFunc(time.Duration(hold_time)*time.Second, func() { close(hold) })
+						debug("hold_timer", hold_time)
+						defer hold_timer.Stop()
+					}
 					select {
-					case conn.send <- bgpmessage{mtype: M_KEEPALIVE}:
-						b.state = OPEN_CONFIRM
+					case conn.send <- message{mtype: M_KEEPALIVE}:
 					case <-conn.dead: // tcp connection died
 					case <-pend.done: // tear down session
 					}
+
 				default:
-					fmt.Println("OPEN_SENT:", m)
+					debug("OPEN_SENT:", m)
 				}
 
 			case OPEN_CONFIRM:
 				switch m.mtype {
 				case M_KEEPALIVE:
+					p.state = ESTABLISHED
+					pend.wait = false // start alerting via poll
 					go keepalive(keep, exit)
-					b.state = ESTABLISHED
+
 				default:
-					fmt.Println("OPEN_CONFIRM:", m)
+					debug("OPEN_CONFIRM:", m)
 				}
 
 			case ESTABLISHED:
 				switch m.mtype {
 				case M_KEEPALIVE:
+					if hold_timer != nil {
+						hold_timer.Reset(time.Duration(hold_time) * time.Second)
+					}
 				default:
-					fmt.Println("ESTABLISHED:", m)
+					debug("ESTABLISHED:", m)
 				}
 
 			default:
-				fmt.Println("DEFAULT:", b.state, m)
+				debug("DEFAULT:", p.state, m)
 			}
 		}
 	}
 }
 
 type bgpconn struct {
-	send chan bgpmessage
-	recv chan bgpmessage
+	send chan message
+	recv chan message
 	dead chan bool
 }
 
@@ -206,7 +253,6 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 	dialer := net.Dialer{
 		Timeout: 10 * time.Second,
 		LocalAddr: &net.TCPAddr{
-			//IP:   net.ParseIP(ipaddr),
 			IP:   net.ParseIP(addr.String()),
 			Port: 0,
 		},
@@ -214,14 +260,14 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 
 	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:%d", peer, port))
 
-	fmt.Println("CONNECTION", peer, port, err)
+	debug("CONNECTION", peer, port, err)
 
 	if err != nil {
 		return nil, err
 	}
 
-	send := make(chan bgpmessage)
-	recv := make(chan bgpmessage)
+	send := make(chan message)
+	recv := make(chan message)
 	dead := make(chan bool)
 	done := make(chan bool)
 
@@ -229,14 +275,18 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 
 	go func() {
 		// send
+		defer close(done)
 		for m := range send {
 			if m.mtype != M_KEEPALIVE {
-				fmt.Println("SENDING:", m)
+				debug("SENDING:", m)
 			}
-			conn.Write(m.headerise())
+			n, err := conn.Write(m.headerise())
+			if err != nil {
+				debug("WRITE FAILED:", n)
+				return
+			}
 		}
-		fmt.Println("QUITTING")
-		close(done)
+		debug("SEND CLOSED")
 	}()
 
 	go func() {
@@ -245,12 +295,12 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 		defer close(dead)
 
 		for {
-			m := bgp4readmessage(conn, done)
+			m := readmessage(conn, done)
 			if m == nil {
 				return
 			}
 			if m.mtype != M_KEEPALIVE {
-				fmt.Println("RECEIVED:", *m)
+				debug("RECEIVED:", *m)
 			}
 			select {
 			case recv <- *m:
@@ -263,7 +313,7 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 	return &c, nil
 }
 
-func bgp4readmessage(conn net.Conn, done chan bool) *bgpmessage {
+func readmessage(conn net.Conn, done chan bool) *message {
 
 	select {
 	case <-done:
@@ -280,15 +330,12 @@ func bgp4readmessage(conn net.Conn, done chan bool) *bgpmessage {
 
 	for _, b := range header[0:16] {
 		if b != 0xff {
-			//fmt.Println("header not all 1s")
 			return nil
 		}
 	}
 
 	length := int(header[16])<<8 + int(header[17])
 	mtype := header[18]
-
-	//fmt.Println(header, length, mtype)
 
 	if length < 19 || length > 4096 {
 		//fmt.Println("length out of bounds", length)
@@ -305,20 +352,18 @@ func bgp4readmessage(conn net.Conn, done chan bool) *bgpmessage {
 		return nil
 	}
 
-	//fmt.Println("RECV:", mtype, body)
-
 	switch mtype {
 	case M_OPEN:
-		return &bgpmessage{mtype: mtype, open: newopen(body)}
+		return &message{mtype: mtype, open: newopen(body)}
 	case M_NOTIFICATION:
-		return &bgpmessage{mtype: mtype, notification: newnotification(body)}
+		return &message{mtype: mtype, notification: newnotification(body)}
 	}
 
-	return &bgpmessage{mtype: mtype, body: body}
+	return &message{mtype: mtype, body: body}
 }
 
 func keepalive(keep, done chan bool) {
-	fmt.Println("STARTING KEEPALIVE")
+	debug("STARTING KEEPALIVE")
 	for {
 		time.Sleep(1 * time.Second)
 		select {
@@ -333,33 +378,36 @@ type pending_t struct {
 	poll chan bool
 	nlri chan nlri
 	done chan bool
+	wait bool
 }
 
 func newpending(in chan nlri) *pending_t {
-	p := &pending_t{poll: make(chan bool), nlri: make(chan nlri), done: make(chan bool)}
+	p := &pending_t{poll: make(chan bool), nlri: make(chan nlri, 1), done: make(chan bool)}
 
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
 		defer close(p.done)
 		var ri []nlri
 
 		for {
-			if len(ri) > 0 {
-				r := ri[0]
+			// stuff the outbound channel with any pending updates
+			for blocked := false; !blocked && len(ri) > 0; {
 				select {
-				case n, ok := <-in:
+				case p.nlri <- ri[0]:
+					ri = ri[1:]
+				default:
+					blocked = true
+				}
+			}
+
+			// if there are updates waiting to be read from channel ...
+			if !p.wait && len(p.nlri) > 0 {
+				select {
+				case p.poll <- true: // let listener know
+				case n, ok := <-in: // new updates ...
 					if !ok {
 						return
 					}
 					ri = append(ri, n)
-				case <-ticker.C:
-					select {
-					case p.poll <- true:
-					default:
-					}
-				case p.nlri <- r:
-					ri = ri[1:]
 				}
 			} else {
 				select {
