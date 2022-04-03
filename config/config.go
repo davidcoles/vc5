@@ -105,6 +105,7 @@ type Info struct {
 
 type RHI struct {
 	ASNumber uint16   `json:"as_number"`
+	HoldTime uint16   `json:"hold_time"`
 	Peers    []string `json:"peers"`
 }
 
@@ -436,6 +437,10 @@ func loadConfiguration(file string, ifname string, src IP4, old *Config) (*Confi
 	config, err := loadConfigFile(file)
 	if err != nil {
 		return nil, err
+	}
+
+	if config.RHI.HoldTime == 0 {
+		config.RHI.HoldTime = 5
 	}
 
 	err = fix_vlans(config)

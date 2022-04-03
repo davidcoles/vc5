@@ -23,6 +23,7 @@ if(1) {
 
     $conf->{'learn'}+=0 if defined $conf->{'learn'};
     $conf->{'rhi'}->{'as_number'}+= 0 if defined $conf->{'rhi'}->{'as_number'};
+    $conf->{'rhi'}->{'hold_time'}+= 0 if defined $conf->{'rhi'}->{'hold_time'};    
 
     my $out = {};
 

@@ -76,6 +76,7 @@ type Peer struct {
 	myip  [4]byte
 	rid   [4]byte
 	asn   uint16
+	hold  uint16
 	nlri  chan nlri
 }
 
@@ -203,12 +204,12 @@ func headerise(t byte, d []byte) []byte {
 	return p
 }
 
-func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, wait chan bool) *Peer {
+func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool) *Peer {
 	if rid == [4]byte{0, 0, 0, 0} {
 		rid = myip
 	}
 
-	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn}
+	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn, hold: hold}
 
 	go b.session(wait)
 

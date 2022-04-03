@@ -70,7 +70,7 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 				if v, ok := state[s]; !ok {
 					logs.DEBUG("Starting BGP session", s)
 					///peer := bgp4.BGP4Start(s, addr, addr, conf.ASNumber, start, done)
-					peer := bgp4.Session(s, addr, addr, conf.ASNumber, start)
+					peer := bgp4.Session(s, addr, addr, conf.ASNumber, conf.HoldTime, start)
 					for k, v := range nlri {
 						peer.NLRI([4]byte(k), v)
 					}

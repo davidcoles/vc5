@@ -9,6 +9,7 @@
 learn: 5
 multicast: 224.0.0.1:9999
 rhi:
+  hold_time: 5
   as_number: 65304
   peers:
     - 10.10.100.3
@@ -19,7 +20,7 @@ services:
   # webservers on 2 VIPs, standard HTTP and HTTPs ports with standard checks
   # At least 3 servers need to be alive for the service/vip to be advertised
   # Setting the 'host' and 'path' options will cause http/http healthchecks
-  # to use those values for the Host header and resouce path that is queried
+  # to use those values for the Host header and resource path that is queried
   - name: nginx
     description: NGINX webserver
     virtual:

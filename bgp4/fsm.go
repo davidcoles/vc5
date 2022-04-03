@@ -141,7 +141,7 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 
 	var external bool = false
 	var hold_timer *time.Timer
-	var hold_time uint16 = 240
+	var hold_time uint16 = p.hold
 
 	select {
 	case conn.send <- message{mtype: M_OPEN, open: open{version: 4, as: p.asn, ht: hold_time, id: p.rid}}:
@@ -374,7 +374,7 @@ func readmessage(conn net.Conn, done chan bool) *message {
 func keepalive(keep, done chan bool) {
 	debug("STARTING KEEPALIVE")
 	for {
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 		select {
 		case keep <- true:
 		case <-done:
