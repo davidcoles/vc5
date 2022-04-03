@@ -172,10 +172,9 @@ and backend servers were not available at the time.
 ## TODOs
 
 * IPIP/GRE/DSCP L3 support
-* Least conns support / Take most loaded server out of pool
 * Multicast status to help last conns check
 * More complete BGP4 implementation
-* BFD implementation
+* BFD implementation (maybe no need for this with 3s hold time)
 
 ## Configuration
 

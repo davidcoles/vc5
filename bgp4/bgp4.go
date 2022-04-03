@@ -56,9 +56,18 @@ const LOCAL_PREF = 5
 const AS_SET = 1
 const AS_SEQUENCE = 2
 
+const HOLD_TIMER_EXPIRED = 4
 const CEASE = 6
 
-const WKTCRL = 64 // 64 = 0b 0100 0000 (Well-known, Transitive, Complete, Regular length)
+const WTCR = 64  // (Well-known, Transitive, Complete, Regular length)
+const WTCE = 80  // (Well-known, Transitive, Complete, Extended length)
+const ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)
+
+// Optional/Well-known, Non-transitive/Transitive Complete/Partial Regular/Extended-length
+// 128 64 32 16 8 4 2 1
+// 0   1  0  1  0 0 0 0
+// W   N  C  R  0 0 0 0
+// O   T  P  E  0 0 0 0
 
 type Peer struct {
 	state int
@@ -238,31 +247,29 @@ func bgpupdate(ip IP4, asn uint16, external bool, ri []nlri) []byte {
 
 	// <attribute type, attribute length, attribute value> [data ...]
 	// (Well-known, Transitive, Complete, Regular length), 1(ORIGIN), 1(byte), 0(IGP)
-	origin := [4]byte{WKTCRL, ORIGIN, 1, IGP}
+	origin := []byte{WTCR, ORIGIN, 1, IGP}
 
 	// (Well-known, Transitive, Complete, Regular length). 2(AS_PATH), 0(bytes, if iBGP - may get updated)
-	as_path := []byte{WKTCRL, AS_PATH, 0}
+	as_path := []byte{WTCR, AS_PATH, 0}
 	if external {
 		// Each AS path segment is represented by a triple <path segment type, path segment length, path segment value>
 		as_sequence := []byte{AS_SEQUENCE, 1} // AS_SEQUENCE(2), 1 ASN
-		//as_sequence = append(as_sequence, []byte{byte(asn >> 8), byte(asn & 0xff)}...)
 		as_sequence = append(as_sequence, htons(asn)...)
-		as_path = append(as_path, as_sequence[:]...)
+		as_path = append(as_path, as_sequence...)
 		as_path[2] = byte(len(as_sequence)) // update length field
 	}
 
 	// (Well-known, Transitive, Complete, Regular length), NEXT_HOP(3), 4(bytes)
-	next_hop := append([]byte{WKTCRL, NEXT_HOP, 4}, ip[:]...)
+	next_hop := append([]byte{WTCR, NEXT_HOP, 4}, ip[:]...)
 
 	// (Well-known, Transitive, Complete, Regular length), LOCAL_PREF(5), 4 bytes
-	//local_pref := append([]byte{WKTCRL, LOCAL_PREF, 4}, []byte{byte(lp >> 24), byte(lp >> 16), byte(lp >> 8), byte(lp)}...)
-	local_pref := append([]byte{WKTCRL, LOCAL_PREF, 4}, htonl(uint32(lp))...)
+	local_pref := append([]byte{WTCR, LOCAL_PREF, 4}, htonl(uint32(lp))...)
 
 	path_attributes := []byte{}
-	path_attributes = append(path_attributes, origin[:]...)
-	path_attributes = append(path_attributes, as_path[:]...)
-	path_attributes = append(path_attributes, next_hop[:]...)
-	path_attributes = append(path_attributes, local_pref[:]...)
+	path_attributes = append(path_attributes, origin...)
+	path_attributes = append(path_attributes, as_path...)
+	path_attributes = append(path_attributes, next_hop...)
+	path_attributes = append(path_attributes, local_pref...)
 
 	//   +-----------------------------------------------------+
 	//   |   Withdrawn Routes Length (2 octets)                |

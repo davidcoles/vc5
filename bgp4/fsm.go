@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"time"
 )
 
@@ -44,7 +45,10 @@ func htons(h uint16) []byte {
 }
 
 func debug(args ...interface{}) {
-	//fmt.Println(args...)
+	_, ok := os.LookupEnv("DEBUG")
+	if ok {
+		fmt.Println(args...)
+	}
 }
 
 func sleeper(n uint8) chan bool {
@@ -154,12 +158,12 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 
 		case <-pend.done: // tear down session
 			debug("CLOSING", p.peer)
-			//conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: CEASE}}
+			conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: CEASE}}
 			return
 
 		case <-hold:
 			debug("HOLD TIMER EXPIRED", p.peer)
-			// could send a notification
+			conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: HOLD_TIMER_EXPIRED}}
 			return
 
 		case <-pend.poll: // nrli update waiting
@@ -187,6 +191,15 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 		case m, ok := <-conn.recv:
 			if !ok {
 				debug("RECV CLOSED")
+				return
+			}
+
+			if hold_timer != nil {
+				hold_timer.Reset(time.Duration(hold_time) * time.Second)
+			}
+
+			if m.mtype == M_NOTIFICATION {
+				debug("M_NOTIFICATION", m)
 				return
 			}
 
@@ -220,7 +233,6 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 					p.state = ESTABLISHED
 					pend.wait = false // start alerting via poll
 					go keepalive(keep, exit)
-
 				default:
 					debug("OPEN_CONFIRM:", m)
 				}
@@ -228,9 +240,6 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 			case ESTABLISHED:
 				switch m.mtype {
 				case M_KEEPALIVE:
-					if hold_timer != nil {
-						hold_timer.Reset(time.Duration(hold_time) * time.Second)
-					}
 				default:
 					debug("ESTABLISHED:", m)
 				}
