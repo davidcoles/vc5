@@ -107,18 +107,18 @@ func (p *Peer) connect(wait chan bool, initial []nlri) (chan nlri, chan bool) {
 	return nlri, done
 }
 
-func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
+func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 	p.state = IDLE
 	defer func() {
 		p.state = IDLE
 		close(done)
 	}()
 
-	pend := newpending(ri)
+	pend := newpending(nlri)
 
 	select {
 	case <-wait: // wait for channel to close (before connecting)
-	case <-ri:
+	case <-pend.done: // short circuit if upstream is closed
 		return
 	}
 
@@ -158,12 +158,18 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 
 		case <-pend.done: // tear down session
 			debug("CLOSING", p.peer)
-			conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: CEASE}}
+			select {
+			case conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: CEASE}}:
+			case <-conn.dead: // tcp connection died
+			}
 			return
 
 		case <-hold:
 			debug("HOLD TIMER EXPIRED", p.peer)
-			conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: HOLD_TIMER_EXPIRED}}
+			select {
+			case conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: HOLD_TIMER_EXPIRED}}:
+			case <-conn.dead: // tcp connection died
+			}
 			return
 
 		case <-pend.poll: // nrli update waiting
@@ -171,7 +177,7 @@ func (p *Peer) bgp4fsm(wait chan bool, ri chan nlri, done chan bool) {
 				select {
 				case n := <-pend.nlri:
 					select {
-					case conn.send <- message{mtype: M_UPDATE, body: bgpupdate(p.myip, p.asn, external, []nlri{n})}:
+					case conn.send <- message{mtype: M_UPDATE, body: bgpupdate(p.myip, p.asn, external, n)}:
 					case <-conn.dead: // tcp connection died
 					case <-pend.done: // tear down session
 					}

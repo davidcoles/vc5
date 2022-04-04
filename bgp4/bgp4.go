@@ -224,7 +224,7 @@ func (b *Peer) NLRI(ip IP4, up bool) {
 	b.nlri <- nlri{ip: ip, up: up}
 }
 
-func bgpupdate(ip IP4, asn uint16, external bool, ri []nlri) []byte {
+func bgpupdate(myip IP4, asn uint16, external bool, nlri ...nlri) []byte {
 
 	var withdrawn []byte
 	var advertise []byte
@@ -232,7 +232,7 @@ func bgpupdate(ip IP4, asn uint16, external bool, ri []nlri) []byte {
 	status := make(map[IP4]bool)
 
 	// eliminate any bounces
-	for _, r := range ri {
+	for _, r := range nlri {
 		status[r.ip] = r.up
 	}
 
@@ -261,7 +261,7 @@ func bgpupdate(ip IP4, asn uint16, external bool, ri []nlri) []byte {
 	}
 
 	// (Well-known, Transitive, Complete, Regular length), NEXT_HOP(3), 4(bytes)
-	next_hop := append([]byte{WTCR, NEXT_HOP, 4}, ip[:]...)
+	next_hop := append([]byte{WTCR, NEXT_HOP, 4}, myip[:]...)
 
 	// (Well-known, Transitive, Complete, Regular length), LOCAL_PREF(5), 4 bytes
 	local_pref := append([]byte{WTCR, LOCAL_PREF, 4}, htonl(uint32(lp))...)

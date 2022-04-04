@@ -107,32 +107,30 @@ type RHI struct {
 }
 
 type Counters struct {
-	Up         bool   `json:"up"`
-	MAC        MAC    `json:"mac"`
-	Concurrent int64  `json:"current_connections"`
-	New_flows  uint64 `json:"total_connections"`
-	Rx_packets uint64 `json:"rx_packets"`
-	Rx_octets  uint64 `json:"rx_octets"`
-	Qfailed    uint64 `json:"-"`
-	Fp_count   uint64 `json:"-"`
-	Fp_time    uint64 `json:"-"`
-	Ip         IP4    `json:"-"`
-	//Pps        uint64    `json:"-"`
-	//Bps        uint64    `json:"-"`
-	Latency   uint64    `json:"-"`
-	DEFCON    uint8     `json:"-"`
-	Rx_pps    uint64    `json:"rx_packets_per_second"`
-	Rx_bps    uint64    `json:"rx_octets_per_second"`
-	Timestamp time.Time `json:"-"`
-	Vlan      uint16    `json:"-"`
+	Up         bool      `json:"up"`
+	MAC        MAC       `json:"mac"`
+	Concurrent int64     `json:"current_connections"`
+	New_flows  uint64    `json:"total_connections"`
+	Rx_packets uint64    `json:"rx_packets"`
+	Rx_octets  uint64    `json:"rx_octets"`
+	Qfailed    uint64    `json:"-"`
+	Fp_count   uint64    `json:"-"`
+	Fp_time    uint64    `json:"-"`
+	Ip         IP4       `json:"-"`
+	Latency    uint64    `json:"-"`
+	DEFCON     uint8     `json:"-"`
+	Rx_pps     uint64    `json:"rx_packets_per_second"`
+	Rx_bps     uint64    `json:"rx_octets_per_second"`
+	Timestamp  time.Time `json:"-"`
+	Vlan       uint16    `json:"-"`
 }
 
 func (c *Counters) PerSec(o Counters) {
-	dur := uint64(c.Timestamp.Sub(o.Timestamp)) / uint64(time.Millisecond)
+	duration_ms := uint64(c.Timestamp.Sub(o.Timestamp)) / uint64(time.Millisecond)
 
-	if dur > 0 {
-		c.Rx_pps = 1000 * ((c.Rx_packets - o.Rx_packets) / dur)
-		c.Rx_bps = 1000 * ((c.Rx_octets - o.Rx_octets) / dur)
+	if duration_ms > 0 {
+		c.Rx_pps = (1000 * (c.Rx_packets - o.Rx_packets)) / duration_ms
+		c.Rx_bps = (1000 * (c.Rx_octets - o.Rx_octets)) / duration_ms
 	}
 }
 
@@ -195,8 +193,8 @@ func (t Thruple) MarshalJSON() ([]byte, error) {
 func (i IP4) MarshalText() ([]byte, error) {
 	return []byte(i.string()), nil
 }
+
 func (i *IP4) UnmarshalText(t []byte) error {
-	//return []byte(i.string()), nil
 	ip, ok := parseIP(string(t))
 	if !ok {
 		return errors.New("Bad: " + string(t))
@@ -204,6 +202,7 @@ func (i *IP4) UnmarshalText(t []byte) error {
 	*i = ip
 	return nil
 }
+
 func (l *L4) UnmarshalText(t []byte) error {
 	pp := string(t)
 	re := regexp.MustCompile(`^(udp|tcp):([1-9][0-9]*)$`)
@@ -253,6 +252,7 @@ func parseIP(ip string) ([4]byte, bool) {
 func (i IP4) string() string {
 	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
 }
+
 func (i IP4) String() string {
 	return i.string()
 }
@@ -281,49 +281,4 @@ func (l L4) MarshalJSON() ([]byte, error) {
 
 func (m MAC) String() string {
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
-}
-
-type B12s [][12]byte
-type B12 [12]byte
-
-func (h B12s) Len() int           { return len(h) }
-func (h B12s) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h B12s) Less(i, j int) bool { return CmpB12(h[i], h[j]) == -1 }
-
-func Cmpmac(a, b [6]byte) int {
-	for n := 0; n < len(a); n++ {
-		if a[n] < b[n] {
-			return -1
-		}
-		if a[n] > b[n] {
-			return 1
-		}
-	}
-	return 0
-}
-
-func CmpB12s(a, b [][12]byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for i := 0; i < len(a); i++ {
-		if CmpB12(a[i], b[i]) != 0 {
-			return false
-		}
-	}
-
-	return true
-}
-
-func CmpB12(a, b [12]byte) int {
-	for n := 0; n < len(a); n++ {
-		if a[n] < b[n] {
-			return -1
-		}
-		if a[n] > b[n] {
-			return 1
-		}
-	}
-	return 0
 }
