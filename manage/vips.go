@@ -156,6 +156,7 @@ func virtual(vip IP4, s map[L4]config.Service, vip_c chan status_t, w *sync.Wait
 
 		defer func() {
 			advertise(vip, false)
+			ctrl.SetVipSettings(vip, false)
 
 			vip_c <- status_t{ip: vip, up: false}
 
@@ -214,6 +215,7 @@ func virtual(vip IP4, s map[L4]config.Service, vip_c chan status_t, w *sync.Wait
 				vip_c <- status_t{ip: vip, up: up}
 				logs.NOTICE("Changed", vip, "to", updown(up))
 				advertise(vip, up)
+				ctrl.SetVipSettings(vip, up)
 			}
 		}
 

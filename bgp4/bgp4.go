@@ -78,6 +78,7 @@ type Peer struct {
 	asn   uint16
 	hold  uint16
 	nlri  chan nlri
+	logs  logger
 }
 
 type open struct {
@@ -204,12 +205,42 @@ func headerise(t byte, d []byte) []byte {
 	return p
 }
 
-func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool) *Peer {
+type logger interface {
+	EMERG(...interface{})
+	ALERT(...interface{})
+	CRIT(...interface{})
+	ERR(...interface{})
+	WARNING(...interface{})
+	NOTICE(...interface{})
+	INFO(...interface{})
+	DEBUG(...interface{})
+}
+
+type Logger struct {
+}
+
+func (l *Logger) EMERG(e ...interface{})   { debug(e...) }
+func (l *Logger) ALERT(e ...interface{})   { debug(e...) }
+func (l *Logger) CRIT(e ...interface{})    { debug(e...) }
+func (l *Logger) ERR(e ...interface{})     { debug(e...) }
+func (l *Logger) WARNING(e ...interface{}) { debug(e...) }
+func (l *Logger) NOTICE(e ...interface{})  { debug(e...) }
+func (l *Logger) INFO(e ...interface{})    { debug(e...) }
+func (l *Logger) DEBUG(e ...interface{})   { debug(e...) }
+
+//func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool) *Peer {
+//	return Session_(peer, myip, rid, asn, hold, wait, nil)
+//}
+func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool, logs logger) *Peer {
 	if rid == [4]byte{0, 0, 0, 0} {
 		rid = myip
 	}
 
-	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn, hold: hold}
+	if logs == nil {
+		logs = &Logger{}
+	}
+
+	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn, hold: hold, logs: logs}
 
 	go b.session(wait)
 

@@ -155,6 +155,11 @@ struct backend_rec {
     unsigned int ifindex;
 };
 
+struct vip_settings {
+    __u8 up;
+    __u8 pad[3];
+};
+
 /**********************************************************************/
 /* MAPS */
 /**********************************************************************/
@@ -245,6 +250,13 @@ struct {
     __type(value, struct backends);
     __uint(max_entries, 256);
 } backend_idx SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __be32);
+    __type(value, struct vip_settings);
+    __uint(max_entries, 256);
+} vip_settings SEC(".maps");
 
 
 /**********************************************************************/
@@ -587,17 +599,26 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     if (data + nh_off > data_end) {
 	return XDP_DROP;
     }
-    
-    if (ipv4->protocol != IPPROTO_TCP) {
-	
-	if (ipv4->protocol == IPPROTO_UDP) {
-	    goto udp_packet;
-	}
-	
-	return XDP_PASS;
+
+    switch(ipv4->protocol) {
+    case IPPROTO_TCP:
+	goto tcp_packet;
+    case IPPROTO_UDP:
+	goto udp_packet;
+    case IPPROTO_ICMP:
+	goto icmp_packet;
     }
+
+    return XDP_PASS;
     
-    struct tcphdr *tcp = data + nh_off;
+
+
+
+    /**********************************************************************/
+    struct tcphdr *tcp;
+ tcp_packet:
+
+    tcp = data + nh_off;
     
     nh_off += sizeof(struct tcphdr);
     
@@ -710,12 +731,13 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
 	return XDP_TX;      
     }
-    
-    struct backend_rec *rec;    
 
+
+
+    /**********************************************************************/
+    struct backend_rec *rec;    
  new_flow:
 
-    
     rec = lookup_backend_tcp(ipv4, tcp, DEFCON);
     if(rec) {
 	if (!maccmp(rec->hwaddr, nulmac)) {
@@ -740,7 +762,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     goto nat_stuff;
 
 
-
+    
+    /**********************************************************************/
     struct udphdr *udp;
  udp_packet:
 
@@ -772,11 +795,49 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
 
 
+    /**********************************************************************/
+    struct icmphdr *icmp = data + nh_off;
+ icmp_packet:
+    icmp = data + nh_off;
 
+    nh_off += sizeof(struct icmphdr);
+    
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
+    
+    if(icmp->type != ICMP_ECHO || icmp->code != 0) {
+	return XDP_PASS;
+    }
 
+    struct vip_settings *vip = bpf_map_lookup_elem(&vip_settings, &(ipv4->daddr));
+    if(!vip) {
+	return XDP_PASS;
+    }
+    
+    __u8 mac[6];
+    maccpy(mac, eth_hdr->h_dest);
+    maccpy(eth_hdr->h_dest, eth_hdr->h_source);
+    maccpy(eth_hdr->h_source, mac);
+    
+    __be32 addr;
+    addr = ipv4->daddr;
+    ipv4->daddr = ipv4->saddr;
+    ipv4->saddr = addr;
+    
+    if(vip->up == 0) {
+	XDP_DROP;
+    }
 
-
-
+    icmp->type = ICMP_ECHOREPLY;
+    
+    icmp->checksum = 0;
+    icmp->checksum = generic_checksum((void *) icmp, data_end, 0, 64);
+    
+    ipv4->check = 0;
+    ipv4->check = ipv4_checksum((void *) ipv4, (void *)icmp);
+    
+    return XDP_TX;
 
 
 
@@ -803,12 +864,10 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
 
   
-
+   
+    /**********************************************************************/
   __be32 *rip = NULL;
-
-  goto nat_stuff;
-  nat_stuff:
- 
+ nat_stuff:
   
   rip = bpf_map_lookup_elem(&mac_to_rip, &(eth_hdr->h_source));
 

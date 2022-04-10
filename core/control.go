@@ -98,6 +98,7 @@ type Control struct {
 	flows                   int
 	backend_recs            int
 	backend_idx             int
+	vip_settings            int
 }
 
 func (c *Control) Era() (uint64, uint8) {
@@ -154,6 +155,11 @@ type backend_idx struct {
 	leastconns uint8
 	weight     uint8
 	padding    [5]uint8
+}
+
+type vip_settings struct {
+	up  uint8
+	pad [3]uint8
 }
 
 func (c *Control) find_map(name string, ks int, rs int) int {
@@ -232,6 +238,9 @@ func New(bpf []byte, veth string, vip IP4, hwaddr [6]byte, native, bridge bool, 
 	var _vip_rip_src_if vip_rip_src_if
 	var _raw_counters raw_counters
 	var _backend_idx backend_idx
+
+	var _vip_settings vip_settings
+	c.vip_settings = c.find_map("vip_settings", 4, int(unsafe.Sizeof(_vip_settings)))
 
 	c.settings = c.find_map("settings", 4, int(unsafe.Sizeof(_settings)))
 	c.rip_to_mac = c.find_map("rip_to_mac", 4, 6)
@@ -498,4 +507,12 @@ func (c *Control) VipRipPortConcurrents(vip, rip IP4, port uint16, done chan boo
 	}()
 
 	return counters
+}
+
+func (c *Control) SetVipSettings(vip IP4, up bool) {
+	v := vip_settings{}
+	if up {
+		v.up = 1
+	}
+	xdp.BpfMapUpdateElem(c.vip_settings, uP(&vip), uP(&v), xdp.BPF_ANY)
 }
