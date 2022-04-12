@@ -65,6 +65,7 @@ if(1) {
 		my @https;
 		my @tcp;
 		my @syn;
+		my @dns;
 
 		if(0) {
 		    my $c = $s->{_check};
@@ -75,6 +76,7 @@ if(1) {
 			    when ('https') { push @https, httpchk($c) }
 			    when ('tcp')   { push @tcp,   { 'port' => $c->{_port} } }
 			    when ('syn')   { push @syn,   { 'port' => $c->{_port} } }
+			    when ('dns')   { push @dns,   { 'port' => $c->{_port} } }			    
 			}
 		    }
 		} else {
@@ -86,6 +88,7 @@ if(1) {
 				when ('https') { push @https, httpchk($C) }
 				when ('tcp')   { push @tcp,   { 'port' => $C->{_port} } }
 				when ('syn')   { push @syn,   { 'port' => $C->{_port} } }
+				when ('dns')   { push @dns,   { 'port' => $C->{_port} } }				
 			    }
 			}
 		    }
@@ -97,6 +100,7 @@ if(1) {
 		    $r{'https'} = \@https if scalar(@https) > 0;
 		    $r{'tcp'}   = \@tcp   if scalar(@tcp) > 0;
 		    $r{'syn'}   = \@syn   if scalar(@syn) > 0;
+		    $r{'dns'}   = \@dns   if scalar(@dns) > 0;
 		    
 		    $i{'rips'}{$_->{_addr}} = \%r;
 		}
@@ -218,12 +222,11 @@ sub policy {
 	    $leastconns = $policy{$pol}{'leastconns'};
 	}
 
-	
 	given($pol) {
 	    when('http' ) { $port =  80; }
 	    when('https') { $port = 443; }
 
-	    when('dns')     { $port = 53; $udp = 0; }
+	    when('dns')     { $port = 53; $udp = 1; }
 	    when('dns/tcp') { $port = 53; $udp = 0; }
 	    when('dns/udp') { $port = 53; $udp = 1; }
 	    
@@ -287,9 +290,11 @@ sub check {
 	given($p) {
 	    $path = '/' unless defined $path;
 	    $expt = 200 unless defined $expt;
-	    when('http' ) { push @c, { _type => "http",  _port => $port, _path => $path, _expt => $expt, _host => $host} };
-	    when('https') { push @c, { _type => "https", _port => $port, _path => $path, _expt => $expt, _host => $host} };
-	    when('dns' )  { push @c, { _type => "syn",   _port => $port } };
+	    when('http' )    { push @c, { _type => "http",  _port => $port, _path => $path, _expt => $expt, _host => $host} };
+	    when('https')    { push @c, { _type => "https", _port => $port, _path => $path, _expt => $expt, _host => $host} };
+	    when('dns' )     { push @c, { _type => "dns",   _port => $port } };
+	    when('dns/udp' ) { push @c, { _type => "dns",   _port => $port } };
+	    when('dns/tcp' ) { push @c, { _type => "syn",   _port => $port } };	    
 	}
     }
     

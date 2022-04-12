@@ -41,26 +41,23 @@ type HttpCheck struct {
 	Host   string `json:"host"`
 }
 
-type TcpCheck struct {
+type L4Check struct {
 	Port uint16 `json:"port"'`
 }
-
-type SynCheck struct {
-	Port uint16 `json:"port"'`
-}
-
 type Checks struct {
 	Http  []HttpCheck `json:"http"`
 	Https []HttpCheck `json:"https"`
-	Tcp   []TcpCheck  `json:"tcp"`
-	Syn   []SynCheck  `json:"syn"`
+	Tcp   []L4Check   `json:"tcp"`
+	Syn   []L4Check   `json:"syn"`
+	Dns   []L4Check   `json:"syn"`
 }
 
 type Real struct {
 	Http  []HttpCheck `json:"http,omitempty"`
 	Https []HttpCheck `json:"https,omitempty"`
-	Tcp   []TcpCheck  `json:"tcp,omitempty"`
-	Syn   []SynCheck  `json:"syn,omitempty"`
+	Tcp   []L4Check   `json:"tcp,omitempty"`
+	Syn   []L4Check   `json:"syn,omitempty"`
+	Dns   []L4Check   `json:"dns,omitempty"`
 
 	Rip IP4 `json:"rip"`
 	Nat IP4 `json:"nat"`

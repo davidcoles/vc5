@@ -79,6 +79,10 @@ func SYNCheck(ip IP4, port uint16) (bool, string) {
 	return check_client(&check{Type: "syn", Args: []string{ip.String(), ptoa(port)}})
 }
 
+func DNSCheck(ip IP4, port uint16) (bool, string) {
+	return check_client(&check{Type: "dns", Args: []string{ip.String(), ptoa(port)}})
+}
+
 var client *http.Client
 
 func check_client(c *check) (bool, string) {
@@ -198,6 +202,8 @@ func Daemon(path, ipaddr string) {
 			ok = tcpdial(c.Args[0], c.Args[1])
 		case "syn":
 			ok = syn.ProbeS(c.Args[0], c.Args[1])
+		case "dns":
+			ok = dnsquery(c.Args[0], c.Args[1])
 		}
 
 		w.WriteHeader(http.StatusOK)

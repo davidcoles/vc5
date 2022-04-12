@@ -299,6 +299,18 @@ static inline __u16 tcp_checksum(struct iphdr *iph, struct tcphdr *tcph, void *d
     return generic_checksum((unsigned short *) tcph, data_end, csum, MAX_TCP_SIZE);
 }
 
+static inline __u16 l4_checksum(struct iphdr *iph, void *l4, void *data_end)
+{
+    __u32 csum = 0;
+    csum += *(((__u16 *) &(iph->saddr))+0); // 1st 2 bytes
+    csum += *(((__u16 *) &(iph->saddr))+1); // 2nd 2 bytes
+    csum += *(((__u16 *) &(iph->daddr))+0); // 1st 2 bytes
+    csum += *(((__u16 *) &(iph->daddr))+1); // 2nd 2 bytes
+    csum += bpf_htons((__u16)iph->protocol); // protocol is a u8
+    csum += bpf_htons((__u16)(data_end - (void *)l4)); 
+    return generic_checksum((unsigned short *) l4, data_end, csum, MAX_TCP_SIZE);
+}
+
 /**********************************************************************/
 
 static inline void maccpy(unsigned char *dst, unsigned char *src) {
@@ -600,6 +612,10 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	return XDP_DROP;
     }
 
+
+    struct tcphdr *tcp = NULL;
+    struct udphdr *udp = NULL;
+
     switch(ipv4->protocol) {
     case IPPROTO_TCP:
 	goto tcp_packet;
@@ -615,7 +631,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
 
     /**********************************************************************/
-    struct tcphdr *tcp;
  tcp_packet:
 
     tcp = data + nh_off;
@@ -759,12 +774,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
 	return XDP_TX;
     }
+    
     goto nat_stuff;
 
 
     
     /**********************************************************************/
-    struct udphdr *udp;
  udp_packet:
 
     udp = data + nh_off;
@@ -791,7 +806,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	
 	return XDP_TX;
     }
-    return XDP_PASS;
+    goto nat_stuff;
 
 
 
@@ -875,8 +890,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
   if (!virif || !maccmp(virif->hwaddr, nulmac)) {
       return XDP_PASS;
   }
-
-
   
   if (rip) {
       struct viprip vr0;
@@ -890,11 +903,19 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	  ipv4->daddr = virif->rip;
 	  maccpy(eth_hdr->h_dest, virif->hwaddr);
 
-	  ipv4->check = 0;
-	  ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
-	  
-	  tcp->check = 0;
-	  tcp->check = tcp_checksum(ipv4, tcp, data_end);
+	  if(tcp != NULL) {
+	      ipv4->check = 0;
+	      ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
+	      
+	      tcp->check = 0;
+	      tcp->check = tcp_checksum(ipv4, tcp, data_end);
+	  } else if(udp != NULL) {
+	      ipv4->check = 0;
+	      ipv4->check = ipv4_checksum((void *) ipv4, (void *)udp);
+	      
+	      udp->check = 0;
+	      udp->check = l4_checksum(ipv4, udp, data_end);	      
+	  }
 	  
 	  /* if probe reply was received on a VLAN then remove the tag */
 	  if(tag != NULL) {
@@ -925,13 +946,21 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
       ipv4->daddr = vr->vip;
       maccpy(eth_hdr->h_dest, m);
       maccpy(eth_hdr->h_source, vr->hwaddr);
-            
-      ipv4->check = 0;
-      ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
       
-      tcp->check = 0;
-      tcp->check = tcp_checksum(ipv4, tcp, data_end);
-
+      if(tcp != NULL) {
+	  ipv4->check = 0;
+	  ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
+	  
+	  tcp->check = 0;
+	  tcp->check = tcp_checksum(ipv4, tcp, data_end);
+      } else if(udp != NULL) {
+	  ipv4->check = 0;
+	  ipv4->check = ipv4_checksum((void *) ipv4, (void *)udp);
+	  
+	  udp->check = 0;
+	  udp->check = l4_checksum(ipv4, udp, data_end);	      
+      }
+      
       // redirect probe packet out to either eth0, or vlanX
       return bpf_redirect(vr->ifindex, 0);
   }

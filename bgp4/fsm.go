@@ -44,7 +44,13 @@ func htons(h uint16) []byte {
 	return []byte{byte(h >> 8), byte(h)}
 }
 
-func debug(args ...interface{}) {
+func (p *Peer) debug(args ...interface{}) {
+	var a []interface{}
+	a = append(a, p.peer)
+	a = append(a, args...)
+	p.logs.DEBUG(a...)
+}
+func _debug(args ...interface{}) {
 	_, ok := os.LookupEnv("DEBUG")
 	if ok {
 		fmt.Println(args...)
@@ -132,7 +138,7 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 
 	defer close(conn.send)
 
-	debug("CONNECTED:", p.peer)
+	p.debug("CONNECTED:", p.peer)
 
 	keep := make(chan bool)
 	exit := make(chan bool)
@@ -153,11 +159,11 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 	for {
 		select {
 		case <-conn.dead: // tcp connection died
-			debug("TCP DIED", p.peer)
+			p.debug("TCP DIED", p.peer)
 			return
 
 		case <-pend.done: // tear down session
-			debug("CLOSING", p.peer)
+			p.debug("CLOSING", p.peer)
 			select {
 			case conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: CEASE}}:
 			case <-conn.dead: // tcp connection died
@@ -165,7 +171,7 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 			return
 
 		case <-hold:
-			debug("HOLD TIMER EXPIRED", p.peer)
+			p.debug("HOLD TIMER EXPIRED", p.peer)
 			select {
 			case conn.send <- message{mtype: M_NOTIFICATION, notification: notification{code: HOLD_TIMER_EXPIRED}}:
 			case <-conn.dead: // tcp connection died
@@ -196,7 +202,7 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 
 		case m, ok := <-conn.recv:
 			if !ok {
-				debug("RECV CLOSED")
+				p.debug("RECV CLOSED")
 				return
 			}
 
@@ -205,7 +211,7 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 			}
 
 			if m.mtype == M_NOTIFICATION {
-				debug("M_NOTIFICATION", m)
+				p.debug("M_NOTIFICATION", m)
 				return
 			}
 
@@ -220,7 +226,7 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 					}
 					if hold_time > 0 {
 						hold_timer = time.AfterFunc(time.Duration(hold_time)*time.Second, func() { close(hold) })
-						debug("hold_timer", hold_time)
+						p.debug("hold_timer", hold_time)
 						defer hold_timer.Stop()
 					}
 					select {
@@ -230,7 +236,7 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 					}
 
 				default:
-					debug("OPEN_SENT:", m)
+					p.debug("OPEN_SENT:", m)
 				}
 
 			case OPEN_CONFIRM:
@@ -240,18 +246,18 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 					pend.wait = false // start alerting via poll
 					go keepalive(keep, exit)
 				default:
-					debug("OPEN_CONFIRM:", m)
+					p.debug("OPEN_CONFIRM:", m)
 				}
 
 			case ESTABLISHED:
 				switch m.mtype {
 				case M_KEEPALIVE:
 				default:
-					debug("ESTABLISHED:", m)
+					p.debug("ESTABLISHED:", m)
 				}
 
 			default:
-				debug("DEFAULT:", p.state, m)
+				p.debug("DEFAULT:", p.state, m)
 			}
 		}
 	}
@@ -275,7 +281,7 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 
 	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:%d", peer, port))
 
-	debug("CONNECTION", peer, port, err)
+	//debug("CONNECTION", peer, port, err)
 
 	if err != nil {
 		return nil, err
@@ -293,15 +299,15 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 		defer close(done)
 		for m := range send {
 			if m.mtype != M_KEEPALIVE {
-				debug("SENDING:", m)
+				//debug("SENDING:", m)
 			}
-			n, err := conn.Write(m.headerise())
+			_, err := conn.Write(m.headerise())
 			if err != nil {
-				debug("WRITE FAILED:", n)
+				//debug("WRITE FAILED:", n)
 				return
 			}
 		}
-		debug("SEND CLOSED")
+		//debug("SEND CLOSED")
 	}()
 
 	go func() {
@@ -315,7 +321,7 @@ func connection(addr IP4, peer string, port uint16) (*bgpconn, error) {
 				return
 			}
 			if m.mtype != M_KEEPALIVE {
-				debug("RECEIVED:", *m)
+				//debug("RECEIVED:", *m)
 			}
 			select {
 			case recv <- *m:
@@ -378,7 +384,7 @@ func readmessage(conn net.Conn, done chan bool) *message {
 }
 
 func keepalive(keep, done chan bool) {
-	debug("STARTING KEEPALIVE")
+	//debug("STARTING KEEPALIVE")
 	for {
 		time.Sleep(2 * time.Second)
 		select {

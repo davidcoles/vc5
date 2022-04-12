@@ -129,6 +129,15 @@ func doChecks(real config.Real, was bool) bool {
 		return false
 	}
 
+	for _, c := range real.Dns {
+		if s, e := probes.DNSCheck(real.Nat, c.Port); !s {
+			if was {
+				fmt.Println("dns", real, e)
+			}
+			return false
+		}
+	}
+
 	for _, c := range real.Syn {
 		if s, e := probes.SYNCheck(real.Nat, c.Port); !s {
 			if was {

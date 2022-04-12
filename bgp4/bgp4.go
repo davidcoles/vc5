@@ -219,14 +219,14 @@ type logger interface {
 type Logger struct {
 }
 
-func (l *Logger) EMERG(e ...interface{})   { debug(e...) }
-func (l *Logger) ALERT(e ...interface{})   { debug(e...) }
-func (l *Logger) CRIT(e ...interface{})    { debug(e...) }
-func (l *Logger) ERR(e ...interface{})     { debug(e...) }
-func (l *Logger) WARNING(e ...interface{}) { debug(e...) }
-func (l *Logger) NOTICE(e ...interface{})  { debug(e...) }
-func (l *Logger) INFO(e ...interface{})    { debug(e...) }
-func (l *Logger) DEBUG(e ...interface{})   { debug(e...) }
+func (l *Logger) EMERG(e ...interface{})   { _debug(e...) }
+func (l *Logger) ALERT(e ...interface{})   { _debug(e...) }
+func (l *Logger) CRIT(e ...interface{})    { _debug(e...) }
+func (l *Logger) ERR(e ...interface{})     { _debug(e...) }
+func (l *Logger) WARNING(e ...interface{}) { _debug(e...) }
+func (l *Logger) NOTICE(e ...interface{})  { _debug(e...) }
+func (l *Logger) INFO(e ...interface{})    { _debug(e...) }
+func (l *Logger) DEBUG(e ...interface{})   { _debug(e...) }
 
 //func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool) *Peer {
 //	return Session_(peer, myip, rid, asn, hold, wait, nil)
