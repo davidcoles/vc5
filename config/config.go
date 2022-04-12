@@ -44,13 +44,14 @@ type HttpCheck struct {
 type L4Check struct {
 	Port uint16 `json:"port"'`
 }
-type Checks struct {
-	Http  []HttpCheck `json:"http"`
-	Https []HttpCheck `json:"https"`
-	Tcp   []L4Check   `json:"tcp"`
-	Syn   []L4Check   `json:"syn"`
-	Dns   []L4Check   `json:"syn"`
-}
+
+//type Checks struct {
+//	Http  []HttpCheck `json:"http"`
+//	Https []HttpCheck `json:"https"`
+//	Tcp   []L4Check   `json:"tcp"`
+//	Syn   []L4Check   `json:"syn"`
+//	Dns   []L4Check   `json:"dns"`
+//}
 
 type Real struct {
 	Http  []HttpCheck `json:"http,omitempty"`
@@ -381,6 +382,7 @@ func fix_reals(c *Config) error {
 					info.Source = c.Address
 					info.Iface = c._Interface
 					info.VLAN = 0
+					copy(info.MAC[:], c._Interface.HardwareAddr)
 				}
 
 				c.Real[rip] = info

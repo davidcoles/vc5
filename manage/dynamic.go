@@ -98,8 +98,12 @@ func do_nats(nats map[VR]NI) chan map[VR]NI {
 				//	fmt.Println("ADDING", k, v.NAT)
 				//}
 
-				//var mac MAC
+				var mac MAC
 				//copy(mac[:], v.Info.Iface.HardwareAddr)
+				if v.Info.MAC == mac {
+					logs.ALERT(v.Info.Iface.Name, "MAC is null - this is a bug. Sorry about that.")
+				}
+
 				ctrl.SetNatVipRip(v.NAT, k.VIP, k.RIP, v.Info.Source, v.Info.Iface.Name, v.Info.VLAN, v.Info.Iface.Index, v.Info.MAC)
 			}
 
