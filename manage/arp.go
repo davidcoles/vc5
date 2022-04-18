@@ -30,7 +30,7 @@ import (
 	"github.com/davidcoles/vc5/config"
 )
 
-func read_macs(r map[IP4]config.Info) (map[IP4]MAC, error) {
+func read_macs(r map[IP4]config.RI) (map[IP4]MAC, error) {
 
 	rip := make(map[IP4]bool)
 
@@ -110,9 +110,9 @@ func read_macs(r map[IP4]config.Info) (map[IP4]MAC, error) {
 	return ip2mac, nil
 }
 
-func arp(reals map[IP4]config.Info) chan map[IP4]config.Info {
+func arp(reals map[IP4]config.RI) chan map[IP4]config.RI {
 
-	c := make(chan map[IP4]config.Info, 100)
+	c := make(chan map[IP4]config.RI, 100)
 	c <- reals
 
 	go func() {

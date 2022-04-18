@@ -209,3 +209,12 @@ https://lpc.events/event/11/contributions/950/attachments/889/1704/lpc_from_xdp_
 https://github.com/xdp-project/xdp-tutorial.git
 
 https://lpc.events/event/2/contributions/71/attachments/17/9/presentation-lpc2018-xdp-tutorial.pdf
+
+
+Latencies - 120K clents virtual LB:
+802069 pps, 140 ns avg. latency, DEFCON 1
+794173 pps, 185 ns avg. latency, DEFCON 2
+795669 pps, 315 ns avg. latency, DEFCON 3
+801284 pps, 313 ns avg. latency, DEFCON 4
+801062 pps, 320 ns avg. latency, DEFCON 5
+

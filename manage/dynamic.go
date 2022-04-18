@@ -63,11 +63,11 @@ func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *sta
 	go func() {
 		bgp4 := do_bgp(conf.Address, conf.Learn, conf.RHI)
 		nats := do_nats(conf.NAT)
-		real := arp(conf.Real)
+		real := arp(conf.Reals)
 		vips := virtuals(conf.VIPs)
 
 		for n := range c {
-			real <- n.Real
+			real <- n.Reals
 			nats <- n.NAT
 			vips <- n.VIPs
 			bgp4 <- n.RHI
@@ -94,17 +94,7 @@ func do_nats(nats map[VR]NI) chan map[VR]NI {
 			}()
 
 			for k, v := range nats {
-				//if _, ok := state[k]; !ok {
-				//	fmt.Println("ADDING", k, v.NAT)
-				//}
-
-				var mac MAC
-				//copy(mac[:], v.Info.Iface.HardwareAddr)
-				if v.Info.MAC == mac {
-					logs.ALERT(v.Info.Iface.Name, "MAC is null - this is a bug. Sorry about that.")
-				}
-
-				ctrl.SetNatVipRip(v.NAT, k.VIP, k.RIP, v.Info.Source, v.Info.Iface.Name, v.Info.VLAN, v.Info.Iface.Index, v.Info.MAC)
+				ctrl.SetNatVipRip(v.NAT, k.VIP, k.RIP, v.Info.Source, v.Info.Iface.Name, v.Info.VLAN, v.Info.Iface.Index, v.Info.HWAddr())
 			}
 
 			for k, v := range state {
@@ -151,16 +141,10 @@ func global_stats(c *core.Control, counters chan types.Counters, l *logger.Logge
 		}
 
 		count.Latency = latency
-		count.Rx_pps = (count.Rx_packets - prev.Rx_packets) // uint64(interval)
-		count.Rx_bps = (count.Rx_octets - prev.Rx_octets)   // uint64(interval)
+		count.Rx_pps = (count.Rx_packets - prev.Rx_packets)
+		count.Rx_bps = (count.Rx_octets - prev.Rx_octets)
 		count.DEFCON = c.Defcon(0)
 		counters <- count
-
-		//if n%10 == 0 {
-		//	fmt.Printf("%d pps, %d ns avg. latency\n", count.Pps, count.Latency)
-		//s := fmt.Sprintf(">>> %d pps, %d ns avg. latency", count.Pps, count.Latency)
-		//l.INFO(s)
-		//}
 		prev = count
 	}
 }
@@ -216,7 +200,3 @@ func NewSplit(initial time.Duration, subsequent time.Duration) *Split {
 func (s *Split) Stop() {
 	close(s.done)
 }
-
-//func ping(ip IP4) {
-//	probes.Ping(ip)
-//}

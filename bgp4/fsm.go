@@ -182,8 +182,9 @@ func (p *Peer) bgp4fsm(wait chan bool, nlri chan nlri, done chan bool) {
 			if p.state == ESTABLISHED {
 				select {
 				case n := <-pend.nlri:
-					select {
+					select { // check for hold timer expiry here?
 					case conn.send <- message{mtype: M_UPDATE, body: bgpupdate(p.myip, p.asn, external, n)}:
+						p.debug("ADVERTISING ", n.ip, "AS", n.updown(), "TO", p.peer)
 					case <-conn.dead: // tcp connection died
 					case <-pend.done: // tear down session
 					}

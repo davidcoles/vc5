@@ -514,5 +514,11 @@ func (c *Control) SetVipSettings(vip IP4, up bool) {
 	if up {
 		v.up = 1
 	}
-	xdp.BpfMapUpdateElem(c.vip_settings, uP(&vip), uP(&v), xdp.BPF_ANY)
+
+	var vs [MAX_CPU]vip_settings
+	for n := 0; n < len(vs); n++ {
+		vs[n] = v
+	}
+
+	xdp.BpfMapUpdateElem(c.vip_settings, uP(&vip), uP(&vs), xdp.BPF_ANY)
 }

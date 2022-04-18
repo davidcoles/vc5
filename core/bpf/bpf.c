@@ -252,7 +252,7 @@ struct {
 } backend_idx SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
     __type(key, __be32);
     __type(value, struct vip_settings);
     __uint(max_entries, 256);
@@ -489,13 +489,14 @@ static __always_inline void update_counters(struct iphdr *ipv4, struct tcphdr *t
 	counter->rx_packets++;
 	counter->rx_bytes += rx_bytes;
     }
-    
+    /*
     if(new) {
 	__s32 *concurrent = NULL;
 	vrp.pad = era % 2;
 	concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
 	if(concurrent) (*concurrent)++;
     }
+    */
 }
 
 static __always_inline void save_state(struct iphdr *ipv4, struct tcphdr *tcp, struct backend_rec *rec) {
@@ -540,22 +541,32 @@ static inline __u8 defcon(__u8 d) {
     return 5;    
 }
 
-
+static __always_inline int fragmented(struct iphdr *ipv4) {
+    // 0b10111111 0b11111111
+    return ((ipv4->frag_off & bpf_htons(0xbfff)) != 0); // reserved bit set, more fragements flag set, or fragent offset is not 0
+}
 
 // POSSIBILITIES FOR DOS MITIGATION
-//DEFCON1: will switch traffic without referring to state
+//DEFCON1: will switch traffic without referring to state - no per-backend stats
 //DEFCON2: will switch traffic referencing existing state
 //DEFCON3: will create new state if syn|rst|fin flag not set
 //DEFCON4: will multicast state
-//DEFCON5: 
+//DEFCON5:
+
 static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 {
     __u64 start = bpf_ktime_get_ns();
+
+    struct counter *statsp = bpf_map_lookup_elem(&stats, &zero);
+    if (!statsp) {
+	return XDP_PASS;
+    }
     
     struct settings *setting = bpf_map_lookup_elem(&settings, &zero);
     if(!setting) {
 	return XDP_PASS;
     }
+
     __u8 DEFCON = defcon(setting->defcon);
     __u64 era = setting->era;
     __u64 wallclock = setting->time;
@@ -565,11 +576,6 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     void *data_end = (void *)(long)ctx->data_end;
     void *data     = (void *)(long)ctx->data;
     int rx_bytes = data_end - data;
-
-    struct counter *statsp = bpf_map_lookup_elem(&stats, &zero);
-    if (!statsp) {
-	return XDP_PASS;
-    }
 
     statsp->rx_packets++;
     statsp->rx_bytes += rx_bytes;
@@ -607,12 +613,15 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     struct iphdr *ipv4 = data + nh_off;
     
     nh_off += sizeof(struct iphdr);
-    
+
     if (data + nh_off > data_end) {
-	return XDP_DROP;
+        return XDP_DROP;
     }
 
-
+    if(ipv4->ihl != 5) {
+	return XDP_DROP;
+    }
+    
     struct tcphdr *tcp = NULL;
     struct udphdr *udp = NULL;
 
@@ -642,13 +651,12 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     }
     
     if(DEFCON <= 2) goto new_flow;
-
-
-    // this lookup adds ~100ns
+    
     struct flow f = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = tcp->source, .dport = tcp->dest };
     struct flow_state *fs = bpf_map_lookup_elem(&flows, &f);
     if (fs) {
-	
+	if(fragmented(ipv4)) return XDP_DROP;
+
 	// If we receive a SYN then we should start a new flow
 	// However, to prevent TCP sniping, the connection should
 	// have been idle for some time (60s?)
@@ -707,10 +715,10 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	
 	__s32 *concurrent = NULL;      
 	if (fs->era != era) {
-	    if((fs->era + 1) != era) {
+	    //if((fs->era + 1) != era) {
 		// probably transferred from a peer lb - correct it
-		fs->era = era;
-	    } else {		  
+	    //	fs->era = era;
+	    //} else {		  
 		fs->era = era;
 		
 		switch(fs->finrst) {
@@ -721,7 +729,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 		    if(concurrent) (*concurrent)++;
 		    break;
 		}
-	    }
+		//}
 	} else {
 	    switch(fs->finrst) {
 	    case 10:
@@ -755,6 +763,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
     rec = lookup_backend_tcp(ipv4, tcp, DEFCON);
     if(rec) {
+	if(fragmented(ipv4)) return XDP_DROP;
+
 	if (!maccmp(rec->hwaddr, nulmac)) {
 	    return XDP_DROP;
 	}
@@ -765,17 +775,16 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));	
 	
 	if(SAVE_STATE(DEFCON)) save_state(ipv4, tcp, rec);
-	
-	update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4), era);
-	
 	if(SAVE_STATE(DEFCON)) statsp->new_flows++;
+	if(DEFCON > 1) update_counters(ipv4, tcp, rec->rip, rx_bytes, (DEFCON >= 4), era);
+	
 	statsp->fp_count++;
 	statsp->fp_time += (bpf_ktime_get_ns()-start);
 
 	return XDP_TX;
     }
     
-    goto nat_stuff;
+    goto nat_packet;
 
 
     
@@ -792,6 +801,8 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 
     rec = lookup_backend_udp(ipv4, udp);
     if(rec) {
+	if(fragmented(ipv4)) return XDP_DROP;
+	
 	if (!maccmp(rec->hwaddr, nulmac)) {
             return XDP_DROP;
         }
@@ -801,12 +812,13 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
 	// if tagged with a vlan, update it
 	if(tag != NULL) tag->h_tci = (tag->h_tci & bpf_htons(0xf000))|(rec->vlan & bpf_htons(0x0fff));
 
-        statsp->fp_count++;
+	statsp->fp_count++;
         statsp->fp_time += (bpf_ktime_get_ns()-start);
 	
 	return XDP_TX;
     }
-    goto nat_stuff;
+
+    goto nat_packet;
 
 
 
@@ -820,16 +832,15 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
     if (data + nh_off > data_end) {
 	return XDP_DROP;
     }
+
+    struct vip_settings *vip = bpf_map_lookup_elem(&vip_settings, &(ipv4->daddr));
+    if(!vip) goto nat_packet;
+    if(fragmented(ipv4)) return XDP_DROP;    
     
     if(icmp->type != ICMP_ECHO || icmp->code != 0) {
 	return XDP_PASS;
     }
 
-    struct vip_settings *vip = bpf_map_lookup_elem(&vip_settings, &(ipv4->daddr));
-    if(!vip) {
-	return XDP_PASS;
-    }
-    
     __u8 mac[6];
     maccpy(mac, eth_hdr->h_dest);
     maccpy(eth_hdr->h_dest, eth_hdr->h_source);
@@ -882,7 +893,7 @@ static inline int xdp_main_func(struct xdp_md *ctx, int bridge, int redirect)
    
     /**********************************************************************/
   __be32 *rip = NULL;
- nat_stuff:
+ nat_packet:
   
   rip = bpf_map_lookup_elem(&mac_to_rip, &(eth_hdr->h_source));
 

@@ -114,6 +114,9 @@ func real_ip(real config.Real, service Thruple, wg *sync.WaitGroup, status_c cha
 				if !ok {
 					return
 				}
+				if r.Index != real.Index {
+					panic("Index changed for " + real.Rip.String())
+				}
 				real = r
 			}
 

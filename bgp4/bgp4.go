@@ -150,6 +150,13 @@ type nlri struct {
 	up bool
 }
 
+func (n *nlri) updown() string {
+	if n.up {
+		return "UP"
+	}
+	return "DOWN"
+}
+
 func newopen(d []byte) open {
 	var o open
 	o.version = d[0]

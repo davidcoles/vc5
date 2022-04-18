@@ -157,6 +157,7 @@ function updateStats(url) {
 
 	    var connections = {};
 	    var current = 0;
+	    var bps = {};
 
 	    switch(data.defcon) {
 	    case 1:
@@ -262,6 +263,11 @@ function updateStats(url) {
 		    }
 		    connections[b] += bh.current_connections;
 		    current += bh.current_connections;
+
+		    if(!bps[b]) {
+	                bps[b] = 0;
+			bps[b] += bh.rx_octets_per_second*8;
+		    }
 		    
 		}    
 		
@@ -269,14 +275,15 @@ function updateStats(url) {
 
 	    var xvals = [];
 	    var yvals = [];
-
+	    
 	    for(var c in connections) {
 		xvals.push(c);
-		yvals.push(connections[c]);
+		//yvals.push(connections[c]);
+		yvals.push(bps[c]);
 	    }
 	    //console.log(yvals);
 
-	    piechart("backend connections", xvals, yvals);
+	    piechart("backend bps", xvals, yvals);
 
 
 	    var nowd10 = Math.floor(Date.now() / 10000)

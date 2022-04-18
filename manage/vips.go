@@ -138,6 +138,7 @@ func virtual(vip IP4, s map[L4]config.Service, vip_c chan status_t, w *sync.Wait
 	c := make(chan map[L4]config.Service)
 	go func() {
 		logs.DEBUG("Starting", vip)
+		ctrl.SetVipSettings(vip, false)
 
 		var g uint64
 
