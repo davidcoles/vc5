@@ -130,6 +130,39 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 	return &xdp, nil
 }
 
+func LoadBpfFile_(bindata []byte, program string, native bool, eth ...string) (*XDP_, error) {
+	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write(bindata); err != nil {
+		return nil, err
+	}
+
+	if err := tmpfile.Close(); err != nil {
+		return nil, err
+	}
+
+	var xdp XDP_
+
+	xdp.p = C.load_bpf_file2(C.CString(tmpfile.Name()))
+
+	if xdp.p == nil {
+		return nil, errors.New("Oops")
+	}
+
+	for _, iface := range eth {
+		C.xdp_link_detach2(C.CString(iface))
+		if C.load_bpf_section(xdp.p, C.CString(iface), C.CString(program), C.int(boolint(native))) != 0 {
+			return nil, errors.New("load_bpf_section() failed for " + iface)
+		}
+	}
+
+	return &xdp, nil
+}
+
 func (x *XDP_) CheckMap(i int, ks, vs int) bool {
 
 	r := C.check_map_fd_info(C.int(i), C.int(ks), C.int(vs))

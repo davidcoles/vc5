@@ -56,3 +56,14 @@ distclean: clean
 	rm -rf libbpf
 	mkdir libbpf
 
+
+test:
+	rm -f cmd/test
+	$(MAKE) cmd/test
+
+cmd/test: cmd/test.go cmd/test_o
+	go build -o $@ $<
+
+cmd/test_o: core/bpf/test.o
+	cp $< $@
+

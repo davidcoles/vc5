@@ -205,18 +205,32 @@ func (i *IP4) UnmarshalText(t []byte) error {
 
 func (l *L4) UnmarshalText(t []byte) error {
 	pp := string(t)
-	re := regexp.MustCompile(`^(udp|tcp):([1-9][0-9]*)$`)
-	ma := re.FindStringSubmatch(pp)
-	if len(ma) != 3 {
-		return errors.New("Service is not of the form (tcp|udp):<port> : " + pp)
+	var pt, pr string
+	{
+		re := regexp.MustCompile(`^(udp|tcp):([1-9][0-9]*)$`)
+		ma := re.FindStringSubmatch(pp)
+		if len(ma) == 3 {
+			pr = ma[1]
+			pt = ma[2]
+		} else {
+			re := regexp.MustCompile(`^([1-9][0-9]*)/(udp|tcp)$`)
+			ma := re.FindStringSubmatch(pp)
+			if len(ma) == 3 {
+				pt = ma[1]
+				pr = ma[2]
+			} else {
+				return errors.New("Service is not of the form (tcp|udp):<port> or <port>/(udp|tcp): " + pp)
+			}
+		}
 	}
-	port, err := strconv.Atoi(ma[2])
+
+	port, err := strconv.Atoi(pt)
 	if err != nil || port < 1 || port > 65535 {
 		return errors.New("Invalid port number : " + pp)
 	}
 
 	var udp bool
-	if ma[1] == "udp" {
+	if pr == "udp" {
 		udp = true
 	}
 	l.Port = uint16(port)
@@ -258,6 +272,7 @@ func (i IP4) String() string {
 }
 
 func (l L4) string() string {
+	return fmt.Sprintf("%s:%d", l.Protocol, l.Port)
 	if l.Protocol {
 		return fmt.Sprint(l.Port, "/udp")
 	}
@@ -269,6 +284,7 @@ func (l L4) MarshalText() ([]byte, error) {
 }
 
 func (l L4) String() string {
+	return l.string()
 	if l.Protocol {
 		return fmt.Sprint(l.Port, "/udp")
 	}
