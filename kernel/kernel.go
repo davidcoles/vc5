@@ -16,394 +16,49 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package kernel
 
 import (
-	"bufio"
-	"bytes"
-	"compress/gzip"
 	_ "embed"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
-	"os"
-	"os/exec"
-	"regexp"
-	"time"
 	"unsafe"
 
-	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/healthchecks"
-	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
+	"github.com/davidcoles/vc5/rendezvous"
 	"github.com/davidcoles/vc5/types"
-	//"github.com/davidcoles/vc5/rendezvous"
-	//"github.com/davidcoles/vc5/xdp"
+	"github.com/davidcoles/vc5/xdp"
 )
+
+//go:embed bpf/test.o
+var TEST_O []byte
 
 type uP = unsafe.Pointer
 type IP4 = types.IP4
 type MAC = types.MAC
 type L4 = types.L4
-
-//type Protocol = types.Protocol
-
-type Config struct {
-	Virtuals  map[IP4]map[uint16][]uint16
-	Backends  map[uint16]Backend
-	Advertise []IP4
-}
-
-var s1ip [4]byte = [4]byte{192, 168, 0, 54}
-
-var locals map[IP4]bool = map[IP4]bool{s1ip: true}
-
-func main() {
-
-	file := os.Args[1]
-	bond := os.Args[2]
-	vc5a := "vc5a"
-	vc5b := "vc5b"
-
-	var eth []string
-	eth = append(eth, vc5a)
-	eth = append(eth, vc5b)
-	eth = append(eth, os.Args[3:]...)
-
-	conf, err := config2.Load(file, nil)
-	rips := conf.RIPs()
-	nats := conf.NATs()
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	setup1(vc5a, vc5b)
-
-	var vc5amac [6]byte
-	var vc5bmac [6]byte
-
-	iface, err := net.InterfaceByName(bond)
-	if err != nil {
-		log.Fatal(err)
-	}
-	bondidx := iface.Index
-
-	iface, err = net.InterfaceByName(vc5a)
-	if err != nil {
-		log.Fatal(err)
-	}
-	copy(vc5amac[:], iface.HardwareAddr[:])
-
-	vc5aidx := iface.Index
-
-	iface, err = net.InterfaceByName(vc5b)
-	if err != nil {
-		log.Fatal(err)
-	}
-	copy(vc5bmac[:], iface.HardwareAddr[:])
-
-	m := kernel.Open(eth...)
-
-	fmt.Println(rips, nats, bondidx, vc5aidx)
-
-	var ips []IP4
-	for _, v := range rips {
-		ips = append(ips, v)
-	}
-
-	mac := macs(ips)
-	loc := find_local(ips)
-
-	fmt.Println(m)
-
-	var vc5aip [4]byte = [4]byte{10, 255, 255, 253}
-	var vc5bip [4]byte = [4]byte{10, 255, 255, 254}
-
-	setup2("vc5", vc5a, vc5b, vc5aip, vc5bip)
-
-	done := make(chan bool)
-
-	hc, _ := healthchecks.ConfHealthchecks(conf)
-
-	//hc, _ := confHealthchecks(conf)
-
-	hc.Mappings = map[uint16]NAT{}
-
-	for k, v := range hc.Mapping {
-		hc.Mappings[k] = NAT{VIP: v[0], RIP: v[1], MAC: mac[v[1]], Loc: loc[v[1]]}
-	}
-
-	j, _ := json.MarshalIndent(&hc, "", "  ")
-	fmt.Println(string(j))
-
-	ns := kernel.Natstuff(s1ip, m, hc, done, bondidx, vc5aidx, mac, vc5aip, vc5bip, vc5amac, vc5bmac)
-
-	time.Sleep(2 * time.Second)
-
-	defer func() {
-		close(ns)
-		<-done
-	}()
-
-	done2 := make(chan bool)
-	fn := monitor.Monitor(hc)
-
-	time.Sleep(5 * time.Second)
-
-	cf := fn(nil, false)
-	j, _ = json.MarshalIndent(cf, "", "  ")
-	fmt.Println(string(j))
-
-	lb := kernel.Lbengine(m, cf, done2)
-
-	for {
-
-		lb <- fn(nil, false)
-
-		time.Sleep(30 * time.Second)
-
-		delete(hc.Virtuals[[4]byte{192, 168, 101, 3}].Services[L4{Protocol: false, Port: 8080}].Reals, 2)
-
-		fn(hc, false)
-	}
-
-	close(lb)
-
-	<-done2
-}
+type Protocol = types.Protocol
 
 type Backend = healthchecks.Backend
+type Metadata = healthchecks.Metadata
+type Reals map[uint16]Real
+type Real = healthchecks.Real
+type Service_ = healthchecks.Service_
+type Virtual_ = healthchecks.Virtual_
 type Healthchecks = healthchecks.Healthchecks
 type NAT = healthchecks.NAT
+
+type Status = monitor.Status
+type Virtual = monitor.Virtual
 type Report = monitor.Report
 
-func dump(r Report) Report {
-	j, _ := json.MarshalIndent(&r, "", "  ")
-	var g bytes.Buffer
-	w := gzip.NewWriter(&g)
-	w.Write(j)
-	w.Close()
-	b := base64.StdEncoding.EncodeToString(g.Bytes())
-	fmt.Println(b, string(j))
-	return r
-}
-
-type context struct {
-	vip IP4
-	l4  L4
-}
-
-/**********************************************************************/
-
-func setup1(if1, if2 string) {
-	script1 := `
-ip link del ` + if1 + ` >/dev/null 2>&1 || true
-ip link add ` + if1 + ` type veth peer name ` + if2 + `
-`
-	_, err := exec.Command("/bin/sh", "-e", "-c", script1).Output()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func setup2(ns, if1, if2 string, i1, i2 IP4) {
-	ip1 := i1.String()
-	ip2 := i2.String()
-	cb := i1
-	cb[2] = 0
-	cb[3] = 0
-	cbs := cb.String()
-
-	script1 := `
-ip netns del ` + ns + ` >/dev/null 2>&1 || true
-ip l set ` + if1 + ` up
-ip a add ` + ip1 + `/30 dev ` + if1 + `
-ip netns add ` + ns + `
-ip link set ` + if2 + ` netns ` + ns + `
-ip netns exec vc5 /bin/sh -c "ip l set ` + if2 + ` up && ip a add ` + ip2 + `/30 dev ` + if2 + ` && ip r replace default via ` + ip1 + ` && ip netns exec ` + ns + ` ethtool -K ` + if2 + ` tx off"
-ip r replace ` + cbs + `/16 via ` + ip2 + `
-`
-	_, err := exec.Command("/bin/sh", "-e", "-c", script1).Output()
-	if err != nil {
-		log.Fatal(err)
-	}
-}
-
-func read_macs(rip map[IP4]bool) (map[IP4]MAC, error) {
-
-	ip2mac := make(map[IP4]MAC)
-	ip2nic := make(map[IP4]*net.Interface)
-
-	re := regexp.MustCompile(`^(\S+)\s+0x1\s+0x.\s+(\S+)\s+\S+\s+(\S+)$`)
-
-	file, err := os.OpenFile("/proc/net/arp", os.O_RDONLY, os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	s := bufio.NewScanner(file)
-	for s.Scan() {
-		line := s.Text()
-
-		m := re.FindStringSubmatch(line)
-
-		if len(m) > 3 {
-
-			ip := net.ParseIP(m[1])
-
-			if ip == nil {
-				continue
-			}
-
-			ip = ip.To4()
-
-			if ip == nil || len(ip) != 4 {
-				continue
-			}
-
-			hw, err := net.ParseMAC(m[2])
-
-			if err != nil || len(hw) != 6 {
-				continue
-			}
-
-			iface, err := net.InterfaceByName(m[3])
-
-			if err != nil {
-				continue
-			}
-
-			var ip4 IP4
-			var mac [6]byte
-
-			copy(ip4[:], ip[:])
-			copy(mac[:], hw[:])
-
-			if ip4.String() == "0.0.0.0" {
-				continue
-			}
-
-			if mac == [6]byte{0, 0, 0, 0, 0, 0} {
-				continue
-			}
-
-			if _, ok := rip[ip4]; !ok {
-				continue
-			}
-
-			ip2mac[ip4] = mac
-			ip2nic[ip4] = iface
-		}
-	}
-
-	return ip2mac, nil
-}
-
-func macs(ips []IP4) map[IP4]MAC {
-	locals := map[IP4]bool{}
-	hwaddr := map[IP4]MAC{}
-
-	for _, v := range ips {
-		locals[v] = false
-	}
-
-	for k, _ := range locals {
-		hwaddr[k] = MAC{}
-	}
-
-	ifaces, err := net.Interfaces()
-
-	if err == nil {
-
-		for _, i := range ifaces {
-			addrs, err := i.Addrs()
-			if err != nil {
-				log.Print(fmt.Errorf("localAddresses: %v\n", err.Error()))
-				continue
-			}
-			for _, a := range addrs {
-
-				ip, _, err := net.ParseCIDR(a.String())
-
-				if err == nil {
-
-					ip4 := ip.To4()
-
-					if ip4 != nil {
-						x := IP4{ip4[0], ip4[1], ip4[2], ip4[3]}
-
-						if _, ok := locals[x]; ok {
-							locals[x] = true
-							var mac MAC
-							copy(mac[:], i.HardwareAddr)
-							hwaddr[x] = mac
-						}
-					}
-				}
-			}
-		}
-	}
-
-	remote := map[IP4]bool{}
-
-	for k, v := range locals {
-		if !v {
-			remote[k] = true
-		}
-	}
-
-	r, err := read_macs(remote)
-
-	if err == nil {
-		for k, v := range r {
-			hwaddr[k] = v
-		}
-	}
-
-	return hwaddr
-}
-
-/*
-func (r *RIP) xChecks() Checks {
-	var c Checks
-	c.Http = r.Http
-	c.Https = r.Https
-	c.Tcp = r.Tcp
-	c.Syn = r.Syn
-	c.Dns = r.Dns
-	return c
-}
-*/
-/*
-type xServ struct {
-	Name        string
-	Description string
-	Need        uint16
-	Leastconns  bool
-	Sticky      bool
-	RIPs        map[IP4]RIP
-}
-*/
-
-/*
-type xRIP struct {
-	Http  []Check `json:"http,omitempty"`
-	Https []Check `json:"https,omitempty"`
-	Tcp   []Check `json:"tcp,omitempty"`
-	Syn   []Check `json:"syn,omitempty"`
-	Dns   []Check `json:"dns,omitempty"`
-}
-*/
-/*
 type maps struct {
 	m map[string]int
 }
 
-func open(eth ...string) *maps {
+func Open(eth ...string) *maps {
 	var m maps
 	m.m = make(map[string]int)
 
@@ -431,7 +86,10 @@ func (m *maps) nat_to_vip_mac() int { return m.m["nat_to_vip_mac"] }
 func (m *maps) vip_mac_to_nat() int { return m.m["vip_mac_to_nat"] }
 
 //func natstuff(m *maps, mp Mapping, done chan bool, bond, veth int, mac map[IP4]MAC, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) chan Mapping {
-func natstuff(m *maps, h *Healthchecks, done chan bool, bond, veth int, mac map[IP4]MAC, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) chan *Healthchecks {
+func Natstuff(s1ip IP4, m *maps, h *Healthchecks, done chan bool, bond, veth int, mac map[IP4]MAC, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) chan *Healthchecks {
+
+	// nat -> vip + mac
+	// mac + vip -> nat
 
 	ch := make(chan *Healthchecks, 1)
 	ch <- h
@@ -461,7 +119,7 @@ func natstuff(m *maps, h *Healthchecks, done chan bool, bond, veth int, mac map[
 
 				var nat [4]byte
 
-				nat = Nat(n)
+				nat = Nat(n, vc5bip)
 				vm := VM{vip: be.VIP, mac: be.MAC}
 
 				srcmac := mac[s1ip]
@@ -484,17 +142,17 @@ func natstuff(m *maps, h *Healthchecks, done chan bool, bond, veth int, mac map[
 	return ch
 }
 
-func Nat(n uint16) [4]byte {
+func Nat(n uint16, ip IP4) [4]byte {
 	hl := htons(n)
 	var nat [4]byte
-	nat[0] = 10
-	nat[1] = 255
+	nat[0] = ip[0]
+	nat[1] = ip[1]
 	nat[2] = hl[0]
 	nat[3] = hl[1]
 	return nat
 }
 
-func lbengine(m *maps, c Report, done chan bool) chan Report {
+func Lbengine(m *maps, c Report, done chan bool) chan Report {
 	ch := make(chan Report, 1)
 	ch <- c
 
@@ -696,7 +354,7 @@ func htons(p uint16) [2]byte {
 	hl[1] = byte(p & 0xff)
 	return hl
 }
-*/
+
 func find_local(ips []IP4) map[IP4]bool {
 	locals := local_addrs()
 	ret := map[IP4]bool{}

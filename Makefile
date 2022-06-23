@@ -50,7 +50,7 @@ bpf: libbpf/src/libbpf.a
 	ln -s libbpf/src bpf
 
 clean:
-	rm -f cmd/vc5 cmd/vc5.json core/bpf/*.ll core/bpf/*.o bpf
+	rm -f cmd/vc5 cmd/vc5.json core/bpf/*.ll core/bpf/*.o bpf kernel/bpf/*.o kernel/bpf/*.ll cmd/test
 
 distclean: clean
 	rm -rf libbpf
@@ -61,9 +61,6 @@ test:
 	rm -f cmd/test
 	$(MAKE) cmd/test
 
-cmd/test: cmd/test.go cmd/test_o
+cmd/test: cmd/test.go kernel/bpf/test.o
 	go build -o $@ $<
-
-cmd/test_o: core/bpf/test.o
-	cp $< $@
 

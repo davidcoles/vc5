@@ -223,7 +223,7 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
   s.ip = ipv4->daddr;
   s.port = tcp->dest;
       
-  __u8 *table = NULL;
+  struct table *table = NULL;
   
   if((table = bpf_map_lookup_elem(&services, &s))) {
       struct tuple t;
@@ -236,12 +236,12 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 
       __u16 hash = sdbm((unsigned char *)&t, sizeof(t));
       
-      unsigned int i = table[hash>>3];
-      
+      unsigned int i = table->be[hash>>3];
+
       if(i == 0) {
 	  return XDP_DROP;
       }
-      
+
       struct backend *be = bpf_map_lookup_elem(&backends, &i);
 
       if(!be) {
