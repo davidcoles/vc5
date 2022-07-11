@@ -30,20 +30,23 @@ import (
 type IP4 = types.IP4
 type L4 = types.L4
 
-type Checks struct {
-	Http  []Check `json:"http,omitempty"`
-	Https []Check `json:"https,omitempty"`
-	Tcp   []Check `json:"tcp,omitempty"`
-	Syn   []Check `json:"syn,omitempty"`
-	Dns   []Check `json:"dns,omitempty"`
-}
+//type Check struct {
+//	Path   string `json:"path"`
+//	Port   uint16 `json:"port"'`
+//	Expect uint32 `json:"expect"`
+//	Host   string `json:"host"`
+//}
 
-type Check struct {
-	Path   string `json:"path"`
-	Port   uint16 `json:"port"'`
-	Expect uint32 `json:"expect"`
-	Host   string `json:"host"`
-}
+type Check = types.Check
+type Checks = types.Checks
+
+//type Checks struct {
+//	Http  []Check `json:"http,omitempty"`
+//	Https []Check `json:"https,omitempty"`
+//	Tcp   []Check `json:"tcp,omitempty"`
+//	Syn   []Check `json:"syn,omitempty"`
+//	Dns   []Check `json:"dns,omitempty"`
+//}
 
 type RIP struct {
 	Http  []Check `json:"http,omitempty"`
@@ -109,11 +112,11 @@ func Load(file string, old *Conf) (*Conf, error) {
 	c, err := load(file)
 	fmt.Println(c, err)
 
-	j, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(string(j), err)
+	//j, err := json.MarshalIndent(c, "", "  ")
+	//if err != nil {
+	//	return nil, err
+	//	}
+	//fmt.Println(string(j), err)
 
 	rip := map[IP4]bool{}
 	nat := map[[2]IP4]bool{}

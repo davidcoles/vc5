@@ -61,6 +61,6 @@ test:
 	rm -f cmd/test
 	$(MAKE) cmd/test
 
-cmd/test: cmd/test.go kernel/bpf/test.o
+cmd/test: cmd/test.go kernel/bpf/test.o core/bpf/bpf.o
 	go build -o $@ $<
 

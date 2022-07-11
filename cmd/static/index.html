@@ -1,0 +1,40 @@
+<!DOCTYPE HTML>
+<html>
+  <head>
+    <style>
+      #console {
+	  height: 150px;
+	  background: #e0e0e0;
+	  overflow-x: hidden;
+	  overflow-x: auto;
+      }
+      table, th, td {
+	  border: 1px solid black;
+	  border-collapse: collapse;
+	  text-align: center;
+      }
+      table {
+	  float: right;
+      }
+    </style>
+    <script>
+      window.onload = function() {
+	  lb();
+      }
+    </script>
+  </head>
+  <body id="body" bgcolor="#f0f0f0">
+
+    <a href="config.json">config</a> | 
+    <a href="status.json">status</a> |
+    <a href="stats.json">stats</a>    
+
+    <hr>
+    
+    <div id="services"></div>
+    
+    <script type="module" src="index.js"></script>
+    
+  </body>
+</html>
+

@@ -19,19 +19,19 @@
 package healthchecks
 
 import (
-	"bufio"
-	"fmt"
+	//"bufio"
+	//"fmt"
 	"log"
-	"net"
-	"os"
-	"regexp"
-	"unsafe"
+	//"net"
+	//"os"
+	//"regexp"
+	//"unsafe"
 
 	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/types"
 )
 
-type uP = unsafe.Pointer
+//type uP = unsafe.Pointer
 type IP4 = types.IP4
 type MAC = types.MAC
 type L4 = types.L4
@@ -46,16 +46,10 @@ type Metadata struct {
 }
 
 type NAT struct {
-	MAC MAC
 	VIP IP4
 	RIP IP4
-	Loc bool
 }
 
-type Backend struct {
-	MAC MAC
-	IP  IP4
-}
 type Reals map[uint16]Real
 type Real struct {
 	NAT    uint16
@@ -78,9 +72,12 @@ type Virtual_ struct {
 
 type Healthchecks struct {
 	Virtuals map[IP4]Virtual_
-	Backends map[uint16]Backend
+	Backends map[uint16]IP4
 	Mapping  map[uint16][2]IP4
-	Mappings map[uint16]NAT
+}
+
+func (h *Healthchecks) NAT() map[uint16][2]IP4 {
+	return h.Mapping
 }
 
 //func (c *Conf) Healthchecks() (*Healthchecks, error) {
@@ -116,12 +113,10 @@ func ConfHealthchecks(c *config2.Conf) (*Healthchecks, error) {
 		hc.Virtuals[vip] = v
 	}
 
-	m := macs(ips)
-
-	hc.Backends = map[uint16]Backend{}
+	hc.Backends = map[uint16]IP4{}
 
 	for k, v := range c.RIPs() {
-		hc.Backends[k] = Backend{IP: v, MAC: m[v]}
+		hc.Backends[k] = v
 	}
 
 	hc.Mapping = map[uint16][2]IP4{}
@@ -130,142 +125,4 @@ func ConfHealthchecks(c *config2.Conf) (*Healthchecks, error) {
 	}
 
 	return &hc, nil
-}
-
-func read_macs(rip map[IP4]bool) (map[IP4]MAC, error) {
-
-	ip2mac := make(map[IP4]MAC)
-	ip2nic := make(map[IP4]*net.Interface)
-
-	re := regexp.MustCompile(`^(\S+)\s+0x1\s+0x.\s+(\S+)\s+\S+\s+(\S+)$`)
-
-	file, err := os.OpenFile("/proc/net/arp", os.O_RDONLY, os.ModePerm)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	s := bufio.NewScanner(file)
-	for s.Scan() {
-		line := s.Text()
-
-		m := re.FindStringSubmatch(line)
-
-		if len(m) > 3 {
-
-			ip := net.ParseIP(m[1])
-
-			if ip == nil {
-				continue
-			}
-
-			ip = ip.To4()
-
-			if ip == nil || len(ip) != 4 {
-				continue
-			}
-
-			hw, err := net.ParseMAC(m[2])
-
-			if err != nil || len(hw) != 6 {
-				continue
-			}
-
-			iface, err := net.InterfaceByName(m[3])
-
-			if err != nil {
-				continue
-			}
-
-			var ip4 IP4
-			var mac [6]byte
-
-			copy(ip4[:], ip[:])
-			copy(mac[:], hw[:])
-
-			if ip4.String() == "0.0.0.0" {
-				continue
-			}
-
-			if mac == [6]byte{0, 0, 0, 0, 0, 0} {
-				continue
-			}
-
-			if _, ok := rip[ip4]; !ok {
-				continue
-			}
-
-			ip2mac[ip4] = mac
-			ip2nic[ip4] = iface
-		}
-	}
-
-	return ip2mac, nil
-}
-
-func Macs(ips []IP4) map[IP4]MAC {
-	return macs(ips)
-}
-func macs(ips []IP4) map[IP4]MAC {
-	locals := map[IP4]bool{}
-	hwaddr := map[IP4]MAC{}
-
-	for _, v := range ips {
-		locals[v] = false
-	}
-
-	for k, _ := range locals {
-		hwaddr[k] = MAC{}
-	}
-
-	ifaces, err := net.Interfaces()
-
-	if err == nil {
-
-		for _, i := range ifaces {
-			addrs, err := i.Addrs()
-			if err != nil {
-				log.Print(fmt.Errorf("localAddresses: %v\n", err.Error()))
-				continue
-			}
-			for _, a := range addrs {
-
-				ip, _, err := net.ParseCIDR(a.String())
-
-				if err == nil {
-
-					ip4 := ip.To4()
-
-					if ip4 != nil {
-						x := IP4{ip4[0], ip4[1], ip4[2], ip4[3]}
-
-						if _, ok := locals[x]; ok {
-							locals[x] = true
-							var mac MAC
-							copy(mac[:], i.HardwareAddr)
-							hwaddr[x] = mac
-						}
-					}
-				}
-			}
-		}
-	}
-
-	remote := map[IP4]bool{}
-
-	for k, v := range locals {
-		if !v {
-			remote[k] = true
-		}
-	}
-
-	r, err := read_macs(remote)
-
-	if err == nil {
-		for k, v := range r {
-			hwaddr[k] = v
-		}
-	}
-
-	return hwaddr
 }

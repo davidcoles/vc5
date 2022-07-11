@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+type Check struct {
+	Path   string `json:"path"`
+	Port   uint16 `json:"port"'`
+	Expect uint32 `json:"expect"`
+	Host   string `json:"host"`
+}
+
+type Checks struct {
+	Http  []Check `json:"http,omitempty"`
+	Https []Check `json:"https,omitempty"`
+	Tcp   []Check `json:"tcp,omitempty"`
+	Syn   []Check `json:"syn,omitempty"`
+	Dns   []Check `json:"dns,omitempty"`
+}
+
 type NIC struct {
 	Name  string
 	IP    net.IP
@@ -64,6 +79,15 @@ const (
 	UDP          = true
 )
 
+const IPPROTO_TCP = 0x06
+const IPPROTO_UDP = 0x11
+
+func (p Protocol) Number() uint8 {
+	if p {
+		return IPPROTO_UDP
+	}
+	return IPPROTO_TCP
+}
 func (p Protocol) string() string {
 
 	if p {
@@ -246,6 +270,9 @@ func (m MAC) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + m.String() + `"`), nil
 }
 
+func ParseIP(ip string) ([4]byte, bool) {
+	return parseIP(ip)
+}
 func parseIP(ip string) ([4]byte, bool) {
 	var addr [4]byte
 	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)

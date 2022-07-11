@@ -20,6 +20,7 @@ package rendezvous
 
 import (
 	"crypto/md5"
+	//"crypto/sha256"
 	"sort"
 	"time"
 )
@@ -55,7 +56,7 @@ func RipIndex(ips map[[4]byte]uint16) ([8192]uint8, Stats) {
 	return r, s
 }
 
-func _RipIndex(ips map[[4]byte]uint16, n uint16) ([]uint8, Stats) {
+func _RipIndex(ips map[[4]byte]uint16, n uint) ([]uint8, Stats) {
 
 	var s Stats
 	//var t [8192]uint8
@@ -79,7 +80,7 @@ func _RipIndex(ips map[[4]byte]uint16, n uint16) ([]uint8, Stats) {
 
 	for n := 0; n < len(t); n++ {
 		a := high(uint16(n), list)
-		if ips[a] > 255 {
+		if ips[a] == 0 || ips[a] > 255 {
 			panic("Backend out of range")
 		}
 		t[n] = uint8(ips[a])
@@ -127,6 +128,7 @@ func high(key uint16, nodes []IP4) IP4 {
 		copy(data[2:], n[:])
 
 		h := md5.Sum(data[:])
+		//h := sha256.Sum256(data[:])
 		s := (uint32(h[0]) << 24) | (uint32(h[1]) << 16) | (uint32(h[2]) << 8) | (uint32(h[3]))
 
 		if s >= high {
@@ -138,3 +140,36 @@ func high(key uint16, nodes []IP4) IP4 {
 	return best
 
 }
+
+// 256 {165 297.539541ms}
+// 100 {76.190475 126.545233ms}
+// 50 {46.043167 76.358566ms}
+// 20 {23.896105 26.480638ms}
+func Test(x uint16) ([8192]uint8, Stats) {
+	m := map[[4]byte]uint16{}
+	for n := uint16(1); n < x; n++ {
+		m[[4]byte{10, 255, byte(n >> 8), byte(n & 0xff)}] = n
+	}
+	return RipIndex(m)
+}
+
+func RipIndex64k(ips map[[4]byte]uint16) ([65536]uint8, Stats) {
+	var r [65536]uint8
+	a, s := _RipIndex(ips, 65536)
+	copy(r[:], a[:])
+	return r, s
+}
+
+// 256 {42.32558 2.332370579s}
+// 100 {18.2266 867.378658ms}
+// 20 {5.0163255 178.708765ms}
+func Test64k(x uint16) ([65536]uint8, Stats) {
+	m := map[[4]byte]uint16{}
+	for n := uint16(1); n < x; n++ {
+		m[[4]byte{10, 255, byte(n >> 8), byte(n & 0xff)}] = n
+	}
+	return RipIndex64k(m)
+}
+
+//fmt.Println(rendezvous.Test(20))
+//	return

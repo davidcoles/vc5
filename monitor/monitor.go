@@ -20,21 +20,25 @@ package monitor
 
 import (
 	"fmt"
-	"os/exec"
 	"time"
 
-	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/healthchecks"
+	"github.com/davidcoles/vc5/netns"
 	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4
+type MAC = types.MAC
 type L4 = types.L4
 
-type Checks = config2.Checks
-type Check = config2.Check
+type Checks = types.Checks
+type Check = types.Check
 
-type Backend = healthchecks.Backend
+type Backend struct {
+	MAC MAC
+	IP  IP4
+}
+
 type Metadata = healthchecks.Metadata
 type Reals map[uint16]Real
 type Real = healthchecks.Real
@@ -43,8 +47,10 @@ type Virtual_ = healthchecks.Virtual_
 type Healthchecks = healthchecks.Healthchecks
 
 type context struct {
-	vip IP4
-	l4  L4
+	sock string
+	nat  IP4
+	vip  IP4
+	l4   L4
 }
 
 type Status struct {
@@ -64,10 +70,12 @@ type Report struct {
 	Backends map[uint16]Backend
 }
 
-func Monitor(h *Healthchecks) func(*Healthchecks, bool) Report {
+func natify(t [4]byte, p uint16) [4]byte { return [4]byte{t[0], t[1], byte(p >> 8), byte(p & 0xff)} }
+
+func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) func(*Healthchecks, bool) Report {
 
 	x := map[IP4]func(*Virtual_, bool) Virtual{}
-	backends := map[uint16]Backend{}
+	backends := map[uint16]IP4{}
 
 	update := func(h *Healthchecks, fin bool) {
 
@@ -79,7 +87,7 @@ func Monitor(h *Healthchecks) func(*Healthchecks, bool) Report {
 				if fn, ok := x[vip]; ok {
 					fn(&services, false) // update sub-tree
 				} else {
-					x[vip] = virtual(&services, context{vip: vip})
+					x[vip] = virtual(&services, context{vip: vip, nat: ip, sock: sock})
 				}
 			}
 
@@ -115,15 +123,16 @@ func Monitor(h *Healthchecks) func(*Healthchecks, bool) Report {
 		all := []IP4{}
 
 		for _, v := range backends {
-			all = append(all, v.IP)
+			all = append(all, v)
 		}
-
-		m := healthchecks.Macs(all)
 
 		r.Backends = map[uint16]Backend{}
 		for k, v := range backends {
-
-			r.Backends[k] = Backend{IP: v.IP, MAC: m[v.IP]}
+			var mac MAC
+			if lookup != nil {
+				mac, _ = lookup(v)
+			}
+			r.Backends[k] = Backend{IP: v, MAC: mac}
 		}
 
 		update(nil, fin)
@@ -146,7 +155,10 @@ func virtual(services *Virtual_, c context) func(*Virtual_, bool) Virtual {
 				if _, ok := x[s]; ok {
 					x[s](&v, false)
 				} else {
-					x[s] = service_(&v, context{vip: c.vip, l4: s})
+					con := c
+					con.vip = c.vip
+					con.l4 = s
+					x[s] = service(&v, con)
 				}
 			}
 
@@ -190,7 +202,7 @@ func virtual(services *Virtual_, c context) func(*Virtual_, bool) Virtual {
 	}
 }
 
-func service_(service *Service_, c context) func(*Service_, bool) Status {
+func service(service *Service_, c context) func(*Service_, bool) Status {
 
 	x := map[uint16]func(*Real, bool) bool{}
 	var m Metadata
@@ -204,7 +216,7 @@ func service_(service *Service_, c context) func(*Service_, bool) Status {
 				if _, ok := x[real]; ok {
 					x[real](&r, false)
 				} else {
-					x[real] = rip(&r, c)
+					x[real] = rip(r, c)
 				}
 			}
 
@@ -252,96 +264,112 @@ func service_(service *Service_, c context) func(*Service_, bool) Status {
 	}
 }
 
-func rip(r *Real, c context) func(*Real, bool) bool {
-
-	x := *r
-
+func rip(real Real, c context) func(*Real, bool) bool {
+	//fmt.Println("RIP:", real, c)
 	var up bool
-
-	done := make(chan bool)
-	go foobar(done, &up, x.NAT, x.RIP)
-	//fmt.Println(c, r.RIP)
+	ch := checks(&up, natify(c.nat, real.NAT), real.RIP, c.vip, c.l4.Port, c.sock, real.Checks)
 
 	return func(ip *Real, fin bool) bool {
+
+		if ip != nil {
+			ch <- ip.Checks
+		}
+
 		if fin {
-			close(done)
+			close(ch)
 		}
 
 		return up
 	}
 }
 
-func foobar(d chan bool, up *bool, n uint16, x IP4) {
-	//fmt.Println("!!!!!!!", probe(1, Check{Port: 80, Path: "/alive", Host: "foo.bar.baz"}))
-
-	last := false
-
-	for {
-		select {
-		case <-time.After(2 * time.Second):
-
-			fmt.Println(">>>", n, x, last)
-
-			//fmt.Println("WAIT", x)
-			*up = probe(n, Check{Port: 80, Path: "/alive", Host: "foo.bar.baz"})
-
-			if *up != last {
-				fmt.Println(n, x, "went", *up)
-			}
-
-			last = *up
-
-		case <-d:
-			//fmt.Println("DONE", x)
-			return
-		}
-	}
+func rotate(b [5]bool, n bool) [5]bool {
+	b[0] = b[1]
+	b[1] = b[2]
+	b[2] = b[3]
+	b[3] = b[4]
+	b[4] = n
+	return b
 }
 
-func probe(n uint16, c Check) bool {
-	//ip netns exec vc5 /bin/bash -c 'curl -f http://10.255.0.1:8080/ && echo ok'
-
-	if n == 0 || c.Port == 0 {
-		return false
+func healthy(b [5]bool) bool {
+	var ok bool = true
+	for _, v := range b {
+		if !ok && !v {
+			return false // 2 strikes and you're out
+		}
+		if !v {
+			ok = false
+		}
 	}
-
-	hl := htons(n)
-	var nat IP4
-	nat[0] = 10
-	nat[1] = 255
-	nat[2] = hl[0]
-	nat[3] = hl[1]
-
-	cmd := []string{"netns", "exec", "vc5", "curl", "-f", "-m", "1"}
-
-	if c.Host != "" {
-		cmd = append(cmd, "-H", "Host: "+c.Host)
-	}
-
-	url := fmt.Sprintf("http://%s:%d/%s", nat.String(), c.Port, c.Path)
-
-	//fmt.Println(n, c, url)
-
-	cmd = append(cmd, url)
-
-	ret, err := exec.Command("/usr/sbin/ip", cmd...).Output()
-
-	if false {
-		fmt.Println(string(ret), err, cmd)
-	}
-
-	if err != nil {
-		//fmt.Println(nat, err)
-		//panic("dfdfdfd")
-		return false
-	}
-
 	return true
 }
 
-func htons(p uint16) [2]byte {
-	var hl [2]byte
-	hl[0] = byte(p >> 8)
-	hl[1] = byte(p & 0xff)
-	return hl
+func checks(up *bool, nat IP4, rip, vip IP4, port uint16, sock string, checks Checks) chan Checks {
+
+	ch := make(chan Checks)
+
+	go func() {
+
+		var last, ok bool
+		history := [5]bool{false, false, true, true, true}
+
+		for {
+			select {
+			case <-time.After(2 * time.Second):
+
+				history = rotate(history, probes(nat, sock, checks))
+
+				*up = healthy(history)
+
+				if *up != last {
+					fmt.Println(nat, rip, vip, port, "went", *up)
+				}
+
+				last = *up
+
+			case checks, ok = <-ch:
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
+
+	return ch
+}
+
+func probes(nat IP4, path string, checks Checks) bool {
+
+	for _, c := range checks.Http {
+		if !netns.Probe(path, nat, "http", c) {
+			return false
+		}
+	}
+
+	for _, c := range checks.Https {
+		if !netns.Probe(path, nat, "https", c) {
+			return false
+		}
+	}
+
+	for _, c := range checks.Tcp {
+		if !netns.Probe(path, nat, "tcp", c) {
+			return false
+		}
+	}
+
+	for _, c := range checks.Syn {
+		if !netns.Probe(path, nat, "syn", c) {
+			return false
+		}
+	}
+
+	for _, c := range checks.Dns {
+		if !netns.Probe(path, nat, "dns", c) {
+			return false
+		}
+	}
+
+	return true
 }
