@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"os"
 	"os/exec"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/davidcoles/vc5/types"
 	//"github.com/davidcoles/vc5/xdp"
 
+	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
@@ -67,21 +67,26 @@ func NewLogger() *logger.Logger {
 /**********************************************************************/
 
 type VC5 struct {
-	ns chan *healthchecks.Healthchecks
-	fn func(*healthchecks.Healthchecks, bool) monitor.Report
-	hc chan *healthchecks.Healthchecks
-	lb chan monitor.Report
-	ss func() map[kernel.Target]kernel.Counter
+	hc    chan *healthchecks.Healthchecks
+	mon   *monitor.Mon
+	nat   chan *healthchecks.Healthchecks
+	bal   chan monitor.Report
+	stats func() map[kernel.Target]kernel.Counter
+	maps  *kernel.Maps
 }
 
-func Server(sock string) {
+func NetnsServer(sock string) {
 	namespace.Server(sock)
+}
+
+func LoadConf(file string, old *config2.Conf) (*config2.Conf, error) {
+	return config2.Load(file, nil)
 }
 
 func (v *VC5) HC(hc *healthchecks.Healthchecks) {
 }
 
-func Controller(ip IP4, hc *healthchecks.Healthchecks, sock, bond string, peth ...string) (*VC5, error) {
+func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []string, sock, bond string, peth ...string) (*VC5, error) {
 
 	var cleanup bool = true
 
@@ -123,9 +128,9 @@ func Controller(ip IP4, hc *healthchecks.Healthchecks, sock, bond string, peth .
 	}
 	copy(vc5bmac[:], iface.HardwareAddr[:])
 
-	m := kernel.Open(eth...)
+	maps := kernel.Open(native, eth...)
 
-	fmt.Println(m)
+	fmt.Println(maps)
 
 	cleanup = false
 
@@ -134,32 +139,34 @@ func Controller(ip IP4, hc *healthchecks.Healthchecks, sock, bond string, peth .
 
 	setup2(netns, vc5a, vc5b, vc5aip, vc5bip)
 
-	go namespace.Go(netns, os.Args[0], "-s", sock)
+	go namespace.Spawn(netns, args...)
 
-	done := make(chan bool)
-	ns, lu := m.NAT(ip, hc, done, bondidx, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac)
-	fn := monitor.Monitor(hc, vc5bip, sock, lu)
+	nat, lookup := maps.NAT(ip, hc, bondidx, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac)
+	mon := monitor.Monitor(hc, vc5bip, sock, lookup)
+	bal, stats := maps.Balancer3(mon.Report())
 
-	cf := fn(nil, false)
-	lb, stats := kernel.Lbengine(m, cf, done)
+	vc5 := &VC5{hc: make(chan *healthchecks.Healthchecks), mon: mon, nat: nat, bal: bal, stats: stats, maps: maps}
 
-	vc5 := &VC5{ns: ns, fn: fn, hc: make(chan *healthchecks.Healthchecks), lb: lb, ss: stats}
-
-	go vc5.background(hc)
+	go vc5.background()
 
 	return vc5, nil
 }
 
+func (v *VC5) GlobalStats() (uint64, uint64, uint64, uint8) {
+	return v.maps.GlobalStats()
+}
+
 func (v *VC5) Config() monitor.Report {
-	return v.fn(nil, false)
+	return v.mon.Report()
+
 }
 
 func (v *VC5) Stats() map[kernel.Target]kernel.Counter {
-	return v.ss()
+	return v.stats()
 }
 
 func (v *VC5) Close() {
-	//close(v.hc)
+	close(v.hc)
 	clean("vc5a", "vc5")
 }
 
@@ -167,11 +174,11 @@ func (v *VC5) Update(hc *healthchecks.Healthchecks) {
 	v.hc <- hc
 }
 
-func (v *VC5) background(hc *healthchecks.Healthchecks) {
+func (v *VC5) background() {
 	defer func() {
-		v.fn(nil, true)
-		close(v.ns)
-		close(v.lb)
+		v.mon.Close()
+		close(v.nat)
+		close(v.bal)
 	}()
 
 	for {
@@ -180,12 +187,11 @@ func (v *VC5) background(hc *healthchecks.Healthchecks) {
 			if !ok {
 				return
 			}
-			hc = h
-			v.ns <- hc
-			v.fn(hc, false)
+			v.nat <- h
+			v.mon.Update(h)
 
 		case <-time.After(5 * time.Second):
-			v.lb <- v.fn(nil, false)
+			v.bal <- v.mon.Report()
 		}
 	}
 }

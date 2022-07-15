@@ -19,11 +19,12 @@
 package main
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"flag"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,38 +32,61 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5"
-	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/healthchecks"
+
+	//"github.com/davidcoles/vc5/xdp"
+	"fmt"
+	"github.com/davidcoles/vc5/maglev"
+	"github.com/davidcoles/vc5/rendezvous"
+	"sort"
 )
 
-//go:embed static/index.html
-var INDEX_HTML []byte
-
-//go:embed static/index.js
-var INDEX_JS []byte
+//go:embed static/*
+var STATIC embed.FS
 
 type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
 
 var sock = flag.String("s", "", "help message for flag s")
+var port = flag.String("w", ":9999", "help message for flag w")
+var native = flag.Bool("n", false, "help message for flag n")
+var testf = flag.Bool("t", false, "help message for flag t")
 
 func main() {
+	//test2()
+	//return
+	//test()
+	//return
+
 	flag.Parse()
 	args := flag.Args()
 
-	if *sock != "" {
-		signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
-		vc5.Server(*sock)
+	if *testf {
+		test2()
 		return
 	}
-	time.Sleep(2 * time.Second)
+
+	if *sock != "" {
+		signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
+		vc5.NetnsServer(*sock)
+		return
+	}
+	//time.Sleep(2 * time.Second)
+
+	s, err := net.Listen("tcp", *port)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	temp, err := ioutil.TempFile("/tmp", "prefix")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer os.Remove(temp.Name())
+
+	cmd := []string{os.Args[0], "-s", temp.Name()} // command to run in netns
 
 	file := args[0]
 	myip := args[1]
@@ -75,7 +99,7 @@ func main() {
 		log.Fatal(myip)
 	}
 
-	conf, err := config2.Load(file, nil)
+	conf, err := vc5.LoadConf(file, nil)
 
 	if err != nil {
 		log.Fatal(err)
@@ -83,7 +107,7 @@ func main() {
 
 	hc, err := healthchecks.ConfHealthchecks(conf)
 
-	vc5, err := vc5.Controller(ip, hc, temp.Name(), bond, peth...)
+	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), bond, peth...)
 
 	if err != nil {
 		log.Fatal(err)
@@ -96,14 +120,15 @@ func main() {
 		for {
 			switch <-sig {
 			default:
-				vc5.Close()
+				v5.Close()
 				time.Sleep(1 * time.Second)
+				os.Remove(temp.Name())
 				log.Fatal("EXITING")
 			case syscall.SIGQUIT:
 				log.Println("RELOAD")
 				time.Sleep(1 * time.Second)
 
-				conf, err = config2.Load(file, conf)
+				conf, err = vc5.LoadConf(file, conf)
 
 				if err != nil {
 					log.Fatal(err)
@@ -115,26 +140,17 @@ func main() {
 					log.Fatal(err)
 				}
 
-				vc5.Update(hc)
+				v5.Update(hc)
 			}
 		}
 	}()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if len(r.URL.Path) != 1 || r.URL.Path != "/" {
-			w.Header().Set("Content-Type", "text/plain")
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html")
-		w.WriteHeader(http.StatusOK)
-		w.Write(INDEX_HTML)
-	})
+	static := http.FS(STATIC)
+	handler := http.FileServer(static)
 
-	http.HandleFunc("/index.js", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/javascript")
-		w.WriteHeader(http.StatusOK)
-		w.Write(INDEX_JS)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "static" + r.URL.Path
+		handler.ServeHTTP(w, r)
 	})
 
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +168,7 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		cf := vc5.Config()
+		cf := v5.Config()
 		j, err := json.MarshalIndent(cf, "", "  ")
 
 		if err != nil {
@@ -168,46 +184,155 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 
-		cf := vc5.Config()
-		ss := vc5.Stats()
+		cf := v5.Config()
+		ss := v5.Stats()
 
-		var foo Foo
-		foo.VIPs = map[IP4]map[L4]map[IP4]Bar{}
-		foo.Advertise = map[IP4]bool{}
+		var stats Stats
+		stats.VIPs = map[IP4]map[L4]map[IP4]Real{}
+		stats.Advertise = map[IP4]bool{}
+
+		stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
+
+		log.Printf("DEFCON%d %dns\n", stats.DEFCON, stats.Latency)
 
 		for vip, v := range cf.Virtuals {
-			foo.VIPs[vip] = map[L4]map[IP4]Bar{}
-			foo.Advertise[vip] = v.Healthy
+			stats.VIPs[vip] = map[L4]map[IP4]Real{}
+			stats.Advertise[vip] = v.Healthy
 			for l4, s := range v.Services {
-				bar := map[IP4]Bar{}
+				reals := map[IP4]Real{}
 				for n, up := range s.Health {
 					r := cf.Backends[n]
 					t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
 					c := ss[t]
-					bar[r.IP] = Bar{Up: up, Octets: c.Octets, Packets: c.Packets}
-					foo.Octets += c.Octets
-					foo.Packets += c.Packets
+					reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets}
+					//stats.Octets += c.Octets
+					//stats.Packets += c.Packets
 				}
-				foo.VIPs[vip][l4] = bar
+				stats.VIPs[vip][l4] = reals
 			}
 		}
 
-		j, _ := json.MarshalIndent(&foo, "", "  ")
+		j, _ := json.MarshalIndent(&stats, "", "  ")
 		w.Write(j)
 	})
 
-	log.Fatal(http.ListenAndServe(":9999", nil))
+	server := http.Server{}
+
+	log.Fatal(server.Serve(s))
 }
 
-type Bar struct {
+type Real struct {
 	Up      bool   `json:"up"`
 	Octets  uint64 `json:"octets"`
 	Packets uint64 `json:"packets"`
 }
 
-type Foo struct {
-	Octets    uint64
-	Packets   uint64
-	Advertise map[IP4]bool
-	VIPs      map[IP4]map[L4]map[IP4]Bar `json:"vips"`
+type Stats struct {
+	Octets    uint64                      `json:"octets"`
+	Packets   uint64                      `json:"packets"`
+	Latency   uint64                      `json:"latency"`
+	DEFCON    uint8                       `json:"defcon"`
+	Advertise map[IP4]bool                `json:"advertise"`
+	VIPs      map[IP4]map[L4]map[IP4]Real `json:"vips"`
+}
+
+func test() {
+	//log.Fatal(xdp.BpfNumPossibleCpus())
+	x, xx := rendezvous.Test(100)
+
+	d := map[byte]int{}
+
+	for _, v := range x {
+		d[v] = d[v] + 1
+	}
+
+	h := []int{}
+
+	max := 0
+
+	for _, v := range d {
+		if v > max {
+			max = v
+		}
+		h = append(h, v)
+	}
+
+	fmt.Println(max)
+	sort.Ints(h)
+
+	for _, v := range h {
+		fmt.Printf("%03d ", v)
+		for n := 0; n < ((v * 80) / max); n++ {
+			fmt.Print("#")
+		}
+		fmt.Println()
+	}
+
+	fmt.Println(xx)
+
+	return
+}
+
+func test2() {
+	//var nodes [][]byte
+	//for i := 0; i < 128; i++ {
+	//	s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
+	//	nodes = append(nodes, s[:])
+	//}
+
+	for grr := 255; grr > 0; grr-- {
+
+		m := map[[4]byte]uint16{}
+
+		for i := 0; i < grr; i++ {
+			s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
+			m[s] = uint16(i)
+		}
+
+		var nodes [][]byte
+
+		for k, _ := range m {
+			nodes = append(nodes, k[:])
+		}
+
+		//s := time.Now()
+		table := maglev.Maglev65536(nodes)
+
+		var t2 [65536]uint16
+
+		for k, v := range table {
+			i := nodes[v]
+			ip := [4]byte{i[0], i[1], i[2], i[3]}
+			n, ok := m[ip]
+			if !ok {
+				panic("poo")
+			}
+
+			t2[k] = n
+		}
+		//d := time.Now().Sub(s)
+
+		//fmt.Println(d)
+
+		dst := map[uint16]int{}
+		max := 0
+
+		for _, v := range table {
+			g := uint16(v)
+			dst[g] = dst[g] + 1
+			if dst[g] > max {
+				max = dst[g]
+			}
+		}
+
+		for k, v := range dst {
+			//fmt.Println(k, v)
+
+			fmt.Printf("%03d ", k)
+			for n := 0; n < ((v * 80) / max); n++ {
+				fmt.Print("#")
+			}
+			fmt.Println()
+		}
+	}
 }

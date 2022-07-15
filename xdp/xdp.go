@@ -197,3 +197,7 @@ func BpfMapDeleteElem(i int, k unsafe.Pointer) int {
 func BpfMapLookupElem(i int, k, v unsafe.Pointer) int {
 	return int(C.bpf_map_lookup_elem(C.int(i), k, v))
 }
+
+func BpfNumPossibleCpus() int {
+	return int(C.libbpf_num_possible_cpus())
+}

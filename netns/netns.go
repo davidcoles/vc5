@@ -37,7 +37,7 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
-func Go(netns string, args ...string) {
+func Spawn(netns string, args ...string) {
 	for {
 		fmt.Println(args[0], args[1], args[2])
 

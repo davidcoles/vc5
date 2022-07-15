@@ -74,6 +74,7 @@ type Healthchecks struct {
 	Virtuals map[IP4]Virtual_
 	Backends map[uint16]IP4
 	Mapping  map[uint16][2]IP4
+	VLANs    map[uint16]uint16
 }
 
 func (h *Healthchecks) NAT() map[uint16][2]IP4 {
@@ -117,6 +118,12 @@ func ConfHealthchecks(c *config2.Conf) (*Healthchecks, error) {
 
 	for k, v := range c.RIPs() {
 		hc.Backends[k] = v
+	}
+
+	hc.VLANs = map[uint16]uint16{}
+
+	for k, v := range c.VIDs() {
+		hc.VLANs[k] = v
 	}
 
 	hc.Mapping = map[uint16][2]IP4{}

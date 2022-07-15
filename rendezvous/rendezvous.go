@@ -19,8 +19,10 @@
 package rendezvous
 
 import (
-	"crypto/md5"
-	//"crypto/sha256"
+	//"crypto/md5"
+	"crypto/sha256"
+	//"crypto/sha1"
+	//"crypto/sha512"
 	"sort"
 	"time"
 )
@@ -84,12 +86,12 @@ func _RipIndex(ips map[[4]byte]uint16, n uint) ([]uint8, Stats) {
 			panic("Backend out of range")
 		}
 		t[n] = uint8(ips[a])
-
-		if _, ok := m[a]; ok {
-			m[a]++
-		} else {
-			m[a] = 1
-		}
+		m[a] = m[a] + 1
+		//if _, ok := m[a]; ok {
+		//	m[a]++
+		//} else {
+		//	m[a] = 1
+		//}
 	}
 
 	s.Duration = time.Now().Sub(t1)
@@ -127,8 +129,10 @@ func high(key uint16, nodes []IP4) IP4 {
 		data[1] = byte(key & 0xff)
 		copy(data[2:], n[:])
 
-		h := md5.Sum(data[:])
-		//h := sha256.Sum256(data[:])
+		//h := sha512.Sum512_256(data[:])
+		//h := sha1.Sum(data[:])
+		//h := md5.Sum(data[:])
+		h := sha256.Sum256(data[:])
 		s := (uint32(h[0]) << 24) | (uint32(h[1]) << 16) | (uint32(h[2]) << 8) | (uint32(h[3]))
 
 		if s >= high {

@@ -55,6 +55,11 @@ function updateStats(url) {
 	    
 	    var newdiv = document.createElement("div");
 
+	    var n = document.createElement("div");
+	    n.innerHTML = tsf(data.packets) + "packets " +
+		tsf(data.octets) + "bytes " + data.latency +" ns " + "DEFCON" + data.defcon
+	    newdiv.appendChild(n)
+	    
 	    for(var s in data.vips) {
 		for(var l in data.vips[s]) {
 		    var n = document.createElement("div");
@@ -64,7 +69,7 @@ function updateStats(url) {
 {			var n = document.createElement("div");
 			var c = data.vips[s][l][b]
 			n.innerHTML = "&nbsp;&nbsp;&nbsp;&nbsp;" + b + " " +
-			tsf(c.octets) + "bytes " + tsf(c.packets) + "packets " +
+			tsf(c.packets) + "packets " + tsf(c.octets) + "bytes " +
 			(c.up ? "UP" : "DOWN")
 			newdiv.appendChild(n)
 		    }

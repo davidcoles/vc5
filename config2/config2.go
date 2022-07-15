@@ -20,8 +20,10 @@ package config2
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 
 	"github.com/davidcoles/vc5/types"
@@ -76,9 +78,11 @@ type Serv struct {
 }
 
 type Conf struct {
-	VIPs map[IP4]map[L4]Serv
-	rip  map[uint16]IP4
-	nat  map[uint16][2]IP4
+	VIPs  map[IP4]map[L4]Serv
+	VLANs map[uint16]string
+	rip   map[uint16]IP4
+	nat   map[uint16][2]IP4
+	vid   map[uint16]uint16
 }
 
 func load(file string) (*Conf, error) {
@@ -112,11 +116,11 @@ func Load(file string, old *Conf) (*Conf, error) {
 	c, err := load(file)
 	fmt.Println(c, err)
 
-	//j, err := json.MarshalIndent(c, "", "  ")
-	//if err != nil {
-	//	return nil, err
-	//	}
-	//fmt.Println(string(j), err)
+	j, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println(string(j), err)
 
 	rip := map[IP4]bool{}
 	nat := map[[2]IP4]bool{}
@@ -134,11 +138,53 @@ func Load(file string, old *Conf) (*Conf, error) {
 	c.rip = rips(old.rip, rip)
 	c.nat = nats(old.nat, nat)
 
+	err = c.vlans()
+	if err != nil {
+		return nil, err
+	}
+
 	return c, nil
+}
+
+func (c *Conf) vlans() error {
+
+	if len(c.VLANs) == 0 {
+		return nil
+	}
+
+	vlan := map[uint16]*net.IPNet{}
+
+	for k, v := range c.VLANs {
+		_, ipnet, err := net.ParseCIDR(v)
+		if err != nil {
+			return err
+		}
+		vlan[k] = ipnet
+	}
+
+	vid := map[uint16]uint16{}
+
+rips:
+	for n, i := range c.rip {
+		for k, v := range vlan {
+			if v.Contains(net.IPv4(i[0], i[1], i[2], i[3])) {
+				vid[n] = k
+				continue rips
+			}
+		}
+		return errors.New("No VLAN for " + i.String())
+	}
+
+	c.vid = vid
+
+	fmt.Println(vid)
+
+	return nil
 }
 
 func (c *Conf) NATs() map[uint16][2]IP4 { return c.nat }
 func (c *Conf) RIPs() map[uint16]IP4    { return c.rip }
+func (c *Conf) VIDs() map[uint16]uint16 { return c.vid }
 
 func nats(old map[uint16][2]IP4, new map[[2]IP4]bool) map[uint16][2]IP4 {
 	o := map[[2]IP4]uint16{}

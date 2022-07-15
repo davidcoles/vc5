@@ -32,6 +32,7 @@ import (
 	"unsafe"
 
 	"github.com/davidcoles/vc5/healthchecks"
+	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/rendezvous"
 	"github.com/davidcoles/vc5/types"
@@ -64,6 +65,21 @@ type Maps struct {
 	m map[string]int
 }
 
+type mag struct {
+	vip      [4]byte
+	port     [2]byte
+	hash     uint16
+	protocol uint8
+	pad      [3]uint8
+}
+
+type real struct {
+	rip [4]byte
+	mac [6]byte
+	vid [2]byte //__be16
+	pad [4]byte
+}
+
 type vrpp struct {
 	vip      [4]byte //__be32 vip;
 	rip      [4]byte //__be32 rip;
@@ -77,11 +93,39 @@ type counter struct {
 	octets  uint64 //__u64 octets;
 }
 
-func Open(eth ...string) *Maps {
+type setting struct {
+	defcon uint8
+	era    uint8
+}
+
+type global struct {
+	rx_packets     uint64
+	rx_octets      uint64
+	packets        uint64
+	timens         uint64
+	perf_timer     uint64
+	settings_timer uint64
+	defcon         uint64
+}
+
+func (c *counter) add(a counter) {
+	c.octets += a.octets
+	c.packets += a.packets
+}
+
+func (g *global) add(a global) {
+	g.rx_packets += a.rx_packets
+	g.rx_octets += a.rx_octets
+	g.packets += a.packets
+	g.timens += a.timens
+	g.defcon = a.defcon
+}
+
+func Open(native bool, eth ...string) *Maps {
 	var m maps
 	m.m = make(map[string]int)
 
-	var native bool
+	//var native bool
 
 	x, err := xdp.LoadBpfFile_(TEST_O, "xdp_main", native, eth...)
 
@@ -89,25 +133,122 @@ func Open(eth ...string) *Maps {
 		log.Fatal(err)
 	}
 
-	m.m["services"] = find_map(x, "services", 8, 8192)
-	m.m["backends"] = find_map(x, "backends", 4, 12)
+	// balancer
+	m.m["maglev_real"] = find_map(x, "maglev_real", 12, 16)
 
+	m.m["service_backend"] = find_map(x, "service_backend", 8, 8192+(256*16))
+
+	// nat
 	m.m["nat_to_vip_mac"] = find_map(x, "nat_to_vip_mac", 4, 24)
 	m.m["vip_mac_to_nat"] = find_map(x, "vip_mac_to_nat", 10, 24)
 
+	// stats
+	m.m["globals"] = find_map(x, "globals", 4, 56)
 	m.m["vrpp_counter"] = find_map(x, "vrpp_counter", 12, 16)
+
+	// control
+	m.m["settings"] = find_map(x, "settings", 4, 2)
+
+	var zero uint32
+	s := setting{defcon: 2, era: 0}
+
+	if xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&s), xdp.BPF_ANY) != 0 {
+		panic("oops")
+	}
 
 	return &m
 }
 
-func (m *maps) backends() int { return m.m["backends"] }
-func (m *maps) services() int { return m.m["services"] }
+func (m *maps) maglev_real() int     { return m.m["maglev_real"] }
+func (m *maps) service_backend() int { return m.m["service_backend"] }
 
 func (m *maps) nat_to_vip_mac() int { return m.m["nat_to_vip_mac"] }
 func (m *maps) vip_mac_to_nat() int { return m.m["vip_mac_to_nat"] }
 func (m *maps) vrpp_counter() int   { return m.m["vrpp_counter"] }
+func (m *maps) globals() int        { return m.m["globals"] }
+func (m *maps) settings() int       { return m.m["settings"] }
 
-func (m *maps) NAT(myi IP4, h *Healthchecks, done chan bool, bond, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) (chan *Healthchecks, func(ip IP4) (MAC, bool)) {
+func (m *maps) update_service_backend(key *service, b *backend, flag uint64) int {
+
+	all := make([]backend, xdp.BpfNumPossibleCpus())
+
+	for n, _ := range all {
+		all[n] = *b
+	}
+
+	return xdp.BpfMapUpdateElem(m.service_backend(), uP(key), uP(&(all[0])), flag)
+}
+
+func (m *maps) update_maglev_real(key *mag, b *real, flag uint64) int {
+
+	all := make([]real, xdp.BpfNumPossibleCpus())
+
+	for n, _ := range all {
+		all[n] = *b
+	}
+
+	return xdp.BpfMapUpdateElem(m.maglev_real(), uP(key), uP(&(all[0])), flag)
+}
+
+func (m *maps) update_vrpp_counter(v *vrpp, c *counter, flag uint64) int {
+
+	all := make([]counter, xdp.BpfNumPossibleCpus())
+
+	for n, _ := range all {
+		all[n] = *c
+	}
+
+	return xdp.BpfMapUpdateElem(m.vrpp_counter(), uP(v), uP(&(all[0])), flag)
+}
+
+func (m *maps) lookup_vrpp_counter(v *vrpp, c *counter) int {
+
+	co := make([]counter, xdp.BpfNumPossibleCpus())
+
+	ret := xdp.BpfMapLookupElem(m.vrpp_counter(), uP(v), uP(&(co[0])))
+
+	var x counter
+
+	for _, v := range co {
+		x.add(v)
+	}
+
+	*c = x
+
+	return ret
+}
+
+func (m *maps) GlobalStats() (uint64, uint64, uint64, uint8) {
+	var g global
+	m.lookup_globals(&g)
+
+	var latency uint64
+	if g.packets > 0 {
+		latency = g.timens / g.packets
+	}
+
+	return g.rx_packets, g.rx_octets, latency, uint8(g.defcon)
+}
+
+func (m *maps) lookup_globals(g *global) int {
+
+	all := make([]global, xdp.BpfNumPossibleCpus())
+	var zero uint32
+
+	ret := xdp.BpfMapLookupElem(m.globals(), uP(&zero), uP(&(all[0])))
+
+	var x global
+
+	for _, v := range all {
+		x.add(v)
+	}
+
+	*g = x
+
+	return ret
+}
+
+func (m *maps) NAT(myi IP4, h *Healthchecks, bond, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) (chan *Healthchecks, func(ip IP4) (MAC, bool)) {
 
 	var mu sync.Mutex
 
@@ -194,8 +335,6 @@ func (m *maps) NAT(myi IP4, h *Healthchecks, done chan bool, bond, veth int, vc5
 				}
 				h = x
 			}
-
-			defer close(done)
 
 			mapping := h.NAT()
 
@@ -303,243 +442,6 @@ type Target struct {
 type Counter struct {
 	Octets  uint64
 	Packets uint64
-}
-
-func Lbengine(m *maps, c Report, done chan bool) (chan Report, func() map[Target]Counter) {
-	ch := make(chan Report, 1)
-	ch <- c
-
-	mapequ := func(a, b map[[4]byte]uint16) bool {
-		for k, v := range a {
-			x, ok := b[k]
-
-			if !ok || v != x {
-				return false
-			}
-		}
-
-		for k, v := range b {
-			x, ok := a[k]
-
-			if !ok || v != x {
-				return false
-			}
-		}
-
-		return true
-	}
-
-	stats := map[Target]bool{}
-
-	get_stats := func() map[Target]Counter {
-		r := map[Target]Counter{}
-		for v, _ := range stats {
-			vr := vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol}
-			co := counter{}
-			xdp.BpfMapLookupElem(m.vrpp_counter(), uP(&vr), uP(&co))
-			r[v] = Counter{Octets: co.octets, Packets: co.packets}
-		}
-		return r
-	}
-
-	go func() {
-
-		type service struct {
-			ip       [4]byte
-			port     [2]byte
-			protocol byte
-			pad      byte
-		}
-
-		type backend struct {
-			ip    [4]byte
-			mac   [6]byte
-			local [1]byte
-			ps    [1]byte
-			// could pack local/mode(l2,l3) flags in top 4 bits of a vlan field
-		}
-
-		defer close(done)
-
-		//var old Report
-		oldloc := map[uint16]backend{}
-		oldmap := map[IP4]map[L4]map[[4]byte]uint16{}
-
-		done := make(chan bool)
-
-		for config := range ch {
-			//fmt.Println("setting")
-
-			close(done)
-			done = make(chan bool)
-
-			var all []IP4
-			for _, b := range config.Backends {
-				all = append(all, b.IP)
-			}
-			locals := find_local(all)
-
-			for n, b := range config.Backends {
-
-				s := backend{ip: b.IP, mac: b.MAC}
-
-				if locals[b.IP] {
-					//fmt.Println(b.IP, "IS LOCAL")
-					s.local[0] = 1
-				}
-
-				var change bool
-
-				if o, ok := oldloc[n]; ok {
-					if o != s {
-						change = true
-					}
-				} else {
-					change = true
-				}
-
-				oldloc[n] = s
-
-				if change {
-					//fmt.Println("!!!!!!!!", n, s)
-					r := xdp.BpfMapUpdateElem(m.backends(), uP(&n), uP(&s), xdp.BPF_ANY)
-
-					if r != 0 {
-						log.Fatal("backends", n, b)
-					}
-				}
-			}
-
-			for ip, _ := range oldmap {
-				if _, ok := config.Virtuals[ip]; ok {
-					// virtual IP exists still, check services
-					for l4, _ := range oldmap[ip] {
-						if _, ok := config.Virtuals[ip].Services[l4]; !ok {
-							// service no longer exists - delete
-							fmt.Println("deleteing", ip, l4)
-							serv := service{ip: ip, port: htons(l4.Port), protocol: l4.Protocol.Number()}
-
-							r := xdp.BpfMapDeleteElem(m.services(), uP(&serv))
-							if r != 0 {
-								log.Fatal("deleteing", ip, l4)
-							}
-
-						}
-					}
-				} else {
-					// virtual IP no longer exists
-					// remove all servces for this virtual IP
-
-					fmt.Println("deleteing ...", ip)
-					for l4, _ := range oldmap[ip] {
-						fmt.Println("deleteing    ", ip, l4)
-						serv := service{ip: ip, port: htons(l4.Port), protocol: l4.Protocol.Number()}
-						r := xdp.BpfMapDeleteElem(m.services(), uP(&serv))
-						if r != 0 {
-							log.Fatal("deleteing", ip, l4)
-						}
-					}
-
-					// remove catch-all drop for vip
-					serv := service{ip: ip, port: htons(0)}
-					bes, _ := rendezvous.RipIndex(map[[4]byte]uint16{})
-					xdp.BpfMapUpdateElem(m.services(), uP(&serv), uP(&bes), xdp.BPF_ANY)
-
-				}
-			}
-
-			newmap := map[IP4]map[L4]map[[4]byte]uint16{}
-
-			for v, s := range config.Virtuals {
-
-				newmap[v] = map[L4]map[[4]byte]uint16{}
-
-				// catch-all drop for vip
-				serv := service{ip: v, port: htons(0)}
-				bes, _ := rendezvous.RipIndex(map[[4]byte]uint16{})
-				xdp.BpfMapUpdateElem(m.services(), uP(&serv), uP(&bes), xdp.BPF_ANY)
-
-				for l4, serv := range s.Services {
-
-					foo := make(map[[4]byte]uint16)
-
-					for n, up := range serv.Health {
-						if be, ok := config.Backends[n]; up && ok {
-							foo[be.IP] = uint16(n)
-						}
-					}
-
-					for n, _ := range serv.Health {
-						if be, ok := config.Backends[n]; ok {
-
-							vip := v
-							rip := be.IP
-							port := l4.Port
-							protocol := l4.Protocol.Number()
-
-							vr := vrpp{vip: vip, rip: rip, port: htons(port), protocol: protocol}
-							co := counter{}
-
-							//r := xdp.BpfMapUpdateElem(m.vrpp_counter(), uP(&vr), uP(&co), xdp.BPF_ANY)
-							xdp.BpfMapUpdateElem(m.vrpp_counter(), uP(&vr), uP(&co), xdp.BPF_NOEXIST)
-							b := Target{VIP: vip, RIP: rip, Port: port, Protocol: protocol}
-							stats[b] = true
-						}
-					}
-
-					newmap[v][l4] = foo
-
-					changed := true
-
-					if oldmap != nil {
-						if x, ok := oldmap[v]; ok {
-							if y, ok := x[l4]; ok {
-								if mapequ(y, foo) {
-									changed = false
-								}
-							}
-						}
-					}
-
-					if changed {
-						sv := service{ip: v, port: htons(l4.Port), protocol: l4.Protocol.Number()}
-
-						bes, stats := rendezvous.RipIndex(foo)
-
-						fmt.Println("SETTING", v, l4, serv.Healthy)
-
-						r := xdp.BpfMapUpdateElem(m.services(), uP(&sv), uP(&bes), xdp.BPF_ANY)
-
-						if r != 0 {
-							log.Fatal("services", v, l4)
-						}
-
-						fmt.Println(v, l4, sv, bes[0:64], stats)
-					}
-				}
-			}
-
-			oldmap = newmap
-			//old = config
-		}
-	}()
-	return ch, get_stats
-}
-
-func Foo(m *maps) {
-	vip := [4]byte{192, 168, 101, 2}
-	rip := [4]byte{192, 168, 0, 54}
-	por := 8080
-	pro := 6
-
-	for {
-		vr := vrpp{vip: vip, rip: rip, port: htons(uint16(por)), protocol: uint8(pro)}
-		co := counter{}
-		xdp.BpfMapLookupElem(m.vrpp_counter(), uP(&vr), uP(&co))
-
-		fmt.Println("********************************************************************************", vr, co)
-		time.Sleep(1 * time.Second)
-	}
 }
 
 func find_map(x *xdp.XDP_, name string, ks int, rs int) int {
@@ -728,4 +630,216 @@ func ping(ip IP4) chan bool {
 		}
 	}()
 	return done
+}
+
+func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
+	ch := make(chan Report, 1)
+	ch <- c
+
+	stats := map[Target]bool{}
+	var mu sync.Mutex
+
+	get_stats := func() map[Target]Counter {
+		r := map[Target]Counter{}
+		//mu.Lock()
+		for v, _ := range stats {
+			vr := vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol}
+			co := counter{}
+			//xdp.BpfMapLookupElem(m.vrpp_counter(), uP(&vr), uP(&co))
+			m.lookup_vrpp_counter(&vr, &co)
+			r[v] = Counter{Octets: co.octets, Packets: co.packets}
+		}
+		//mu.Unlock()
+		return r
+	}
+
+	go func() {
+
+		type mysvc struct {
+			vip IP4
+			svc L4
+		}
+
+		type mydat struct {
+			//foo      map[[4]byte]uint16
+			rinfo   map[IP4]rinfo
+			backend *backend
+		}
+
+		mystate := map[mysvc]mydat{}
+
+		for config := range ch {
+
+			var intcache [256]real
+			for n, b := range config.Backends {
+				intcache[n] = real{rip: b.IP, mac: b.MAC}
+			}
+
+			for k, _ := range mystate {
+				s, ok := config.Virtuals[k.vip]
+
+				if ok {
+					_, ok = s.Services[k.svc]
+				}
+
+				if !ok {
+					delete(mystate, k)
+					fmt.Println("DDELETE", k.vip, k.svc)
+
+					s := service{vip: k.vip, port: htons(k.svc.Port), protocol: k.svc.Protocol.Number()}
+					xdp.BpfMapDeleteElem(m.service_backend(), uP(&s))
+
+				}
+
+			}
+
+			for vip, s := range config.Virtuals {
+
+				co := counter{}
+				vr := vrpp{vip: vip, rip: [4]byte{}, port: htons(0), protocol: 0}
+				m.update_vrpp_counter(&vr, &co, xdp.BPF_NOEXIST)
+				m.lookup_vrpp_counter(&vr, &co)
+				fmt.Println("MISSES", vr, co)
+
+				for l4, serv := range s.Services {
+					for n, _ := range serv.Health {
+						if be, ok := config.Backends[n]; ok {
+							vr := vrpp{vip: vip, rip: be.IP, port: htons(l4.Port), protocol: l4.Protocol.Number()}
+							m.update_vrpp_counter(&vr, &counter{}, xdp.BPF_NOEXIST)
+							b := Target{VIP: vip, RIP: be.IP, Port: l4.Port, Protocol: l4.Protocol.Number()}
+							mu.Lock()
+							stats[b] = true
+							mu.Unlock()
+						}
+					}
+
+					/**********************************************************************/
+
+					{
+						nodes := map[[4]byte][6]byte{}
+
+						for n, up := range serv.Health {
+							if be, ok := config.Backends[n]; up && ok {
+								nodes[be.IP] = be.MAC
+							}
+						}
+
+						table := maglev.IPs(nodes)
+
+						for i, v := range table {
+							mg := mag{vip: vip, port: htons(l4.Port), protocol: l4.Protocol.Number(), hash: uint16(i)}
+							be := real{rip: v, mac: nodes[v]}
+							m.update_maglev_real(&mg, &be, xdp.BPF_ANY)
+						}
+					}
+
+					/**********************************************************************/
+
+					{
+						mys := mysvc{vip: vip, svc: l4}
+
+						sv, ok := mystate[mys]
+
+						c := map[IP4]rinfo{}
+						o := map[IP4]rinfo{}
+						var b *backend
+
+						if ok {
+							o = sv.rinfo
+							b = sv.backend
+						}
+
+						for n, up := range serv.Health {
+							if be, ok := config.Backends[n]; up && ok {
+								c[be.IP] = rinfo{idx: n, mac: be.MAC}
+							}
+						}
+
+						b = m.update_backend(vip, l4, c, o, b)
+
+						mystate[mys] = mydat{rinfo: c, backend: b}
+					}
+
+				}
+			}
+		}
+	}()
+	return ch, get_stats
+}
+
+type service struct {
+	vip      [4]byte
+	port     [2]byte
+	protocol uint8
+	pad      uint8
+}
+
+type backend struct {
+	hash [8192]byte
+	real [256]real
+}
+
+type rinfo struct {
+	idx uint16
+	mac MAC
+}
+
+func ip4mackeys(a map[IP4]rinfo, b map[IP4]rinfo, v bool) bool {
+
+	for k, _ := range a {
+		if _, ok := b[k]; !ok {
+			return false
+		}
+		if v && a[k] != b[k] {
+			return false
+		}
+	}
+
+	for k, _ := range b {
+		if _, ok := a[k]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
+func (m *maps) update_backend(vip IP4, l4 L4, curr map[IP4]rinfo, old map[IP4]rinfo, b *backend) *backend {
+
+	var be backend
+
+	if b != nil {
+		be = *b
+	}
+
+	if b == nil || !ip4mackeys(curr, old, false) {
+		nodes := map[[4]byte]uint16{}
+		for k, v := range curr {
+			nodes[k] = v.idx
+		}
+		// recalculate hashes
+		hash, stats := rendezvous.RipIndex(nodes)
+		be.hash = hash
+		fmt.Println("RECALC", vip, l4, stats)
+	}
+
+	for k, v := range curr {
+		var r real
+		r.rip = k
+		r.mac = v.mac
+		be.real[v.idx] = r
+	}
+
+	if b != nil && be == *b {
+		return b
+	}
+
+	s := service{vip: vip, port: htons(l4.Port), protocol: l4.Protocol.Number()}
+
+	//fmt.Println(s, be, curr)
+	fmt.Println("WRITING", vip, l4)
+
+	m.update_service_backend(&s, &be, xdp.BPF_ANY)
+
+	return &be
 }

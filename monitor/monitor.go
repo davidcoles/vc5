@@ -70,9 +70,29 @@ type Report struct {
 	Backends map[uint16]Backend
 }
 
+type Mon struct {
+	fn func(*healthchecks.Healthchecks, bool) Report
+}
+
+func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) *Mon {
+	fn := Monitor_(h, ip, sock, lookup)
+	return &Mon{fn: fn}
+}
+
+func (m *Mon) Update(h *Healthchecks) Report {
+	return m.fn(h, false)
+}
+func (m *Mon) Report() Report {
+	return m.fn(nil, false)
+}
+
+func (m *Mon) Close() {
+	m.fn(nil, true)
+}
+
 func natify(t [4]byte, p uint16) [4]byte { return [4]byte{t[0], t[1], byte(p >> 8), byte(p & 0xff)} }
 
-func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) func(*Healthchecks, bool) Report {
+func Monitor_(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) func(*Healthchecks, bool) Report {
 
 	x := map[IP4]func(*Virtual_, bool) Virtual{}
 	backends := map[uint16]IP4{}
