@@ -106,6 +106,7 @@ type global struct {
 	perf_timer     uint64
 	settings_timer uint64
 	defcon         uint64
+	dropped        uint64
 }
 
 func (c *counter) add(a counter) {
@@ -134,9 +135,7 @@ func Open(native bool, eth ...string) *Maps {
 	}
 
 	// balancer
-	m.m["foobar"] = find_map(x, "foobar", 4, 16)
 	m.m["maglev_real"] = find_map(x, "maglev_real", 12, 16)
-
 	m.m["service_backend"] = find_map(x, "service_backend", 8, 8192+(256*16))
 
 	// nat
@@ -144,7 +143,7 @@ func Open(native bool, eth ...string) *Maps {
 	m.m["vip_mac_to_nat"] = find_map(x, "vip_mac_to_nat", 10, 24)
 
 	// stats
-	m.m["globals"] = find_map(x, "globals", 4, 56)
+	m.m["globals"] = find_map(x, "globals", 4, 64)
 	m.m["vrpp_counter"] = find_map(x, "vrpp_counter", 12, 16)
 
 	// control
@@ -160,7 +159,6 @@ func Open(native bool, eth ...string) *Maps {
 	return &m
 }
 
-func (m *maps) foobar() int          { return m.m["foobar"] }
 func (m *maps) maglev_real() int     { return m.m["maglev_real"] }
 func (m *maps) service_backend() int { return m.m["service_backend"] }
 
@@ -188,9 +186,6 @@ func (m *maps) update_maglev_real(key *mag, b *real, flag uint64) int {
 	for n, _ := range all {
 		all[n] = *b
 	}
-
-	var index uint32 = uint32(key.hash)
-	xdp.BpfMapUpdateElem(m.foobar(), uP(&index), uP(&(all[0])), flag)
 
 	return xdp.BpfMapUpdateElem(m.maglev_real(), uP(key), uP(&(all[0])), flag)
 }
@@ -666,7 +661,7 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 
 	get_stats := func() map[Target]Counter {
 		r := map[Target]Counter{}
-		//mu.Lock()
+		mu.Lock()
 		for v, _ := range stats {
 			vr := vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol}
 			co := counter{}
@@ -674,7 +669,7 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 			m.lookup_vrpp_counter(&vr, &co)
 			r[v] = Counter{Octets: co.octets, Packets: co.packets}
 		}
-		//mu.Unlock()
+		mu.Unlock()
 		return r
 	}
 
@@ -686,7 +681,6 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 		}
 
 		type mydat struct {
-			//foo      map[[4]byte]uint16
 			rinfo   map[IP4]rinfo
 			backend *backend
 		}
@@ -700,8 +694,15 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 				intcache[n] = real{rip: b.IP, mac: b.MAC}
 			}
 
+			// remove any entries which no longer exist in config
+			// might be useful to leave real server counters in place to record
+			// residual traffic for hosts which have been removed from config
 			for k, _ := range mystate {
-				s, ok := config.Virtuals[k.vip]
+				vip := k.vip
+				port := htons(k.svc.Port)
+				proto := k.svc.Protocol.Number()
+
+				s, ok := config.Virtuals[vip]
 
 				if ok {
 					_, ok = s.Services[k.svc]
@@ -709,13 +710,16 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 
 				if !ok {
 					delete(mystate, k)
-					fmt.Println("DDELETE", k.vip, k.svc)
+					fmt.Println("DELETE", k.vip, k.svc)
 
-					s := service{vip: k.vip, port: htons(k.svc.Port), protocol: k.svc.Protocol.Number()}
+					s := service{vip: k.vip, port: port, protocol: proto}
 					xdp.BpfMapDeleteElem(m.service_backend(), uP(&s))
 
+					for n := 0; n < 65536; n++ {
+						mg := mag{vip: k.vip, port: port, protocol: proto, hash: uint16(n)}
+						xdp.BpfMapDeleteElem(m.maglev_real(), uP(&mg))
+					}
 				}
-
 			}
 
 			for vip, s := range config.Virtuals {
@@ -727,11 +731,15 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 				fmt.Println("MISSES", vr, co)
 
 				for l4, serv := range s.Services {
+					port := htons(l4.Port)
+					proto := l4.Protocol.Number()
+
 					for n, _ := range serv.Health {
+
 						if be, ok := config.Backends[n]; ok {
-							vr := vrpp{vip: vip, rip: be.IP, port: htons(l4.Port), protocol: l4.Protocol.Number()}
+							vr := vrpp{vip: vip, rip: be.IP, port: port, protocol: proto}
 							m.update_vrpp_counter(&vr, &counter{}, xdp.BPF_NOEXIST)
-							b := Target{VIP: vip, RIP: be.IP, Port: l4.Port, Protocol: l4.Protocol.Number()}
+							b := Target{VIP: vip, RIP: be.IP, Port: l4.Port, Protocol: proto}
 							mu.Lock()
 							stats[b] = true
 							mu.Unlock()
@@ -752,11 +760,10 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 						table := maglev.IPs(nodes)
 
 						for i, v := range table {
-							mg := mag{vip: vip, port: htons(l4.Port), protocol: l4.Protocol.Number(), hash: uint16(i)}
+							mg := mag{vip: vip, port: port, protocol: proto, hash: uint16(i)}
 							be := real{rip: v, mac: nodes[v]}
 							m.update_maglev_real(&mg, &be, xdp.BPF_ANY)
 						}
-
 					}
 
 					/**********************************************************************/

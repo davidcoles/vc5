@@ -48,21 +48,22 @@ type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
 
-var sock = flag.String("s", "", "help message for flag s")
-var port = flag.String("w", ":9999", "help message for flag w")
-var native = flag.Bool("n", false, "help message for flag n")
-var testf = flag.Bool("t", false, "help message for flag t")
+var sock = flag.String("s", "", "used when spawning healthcheck server")
+var bond = flag.String("b", "", "name of bonded ethernet device if using multiple interfaces")
+var port = flag.String("w", ":9999", "webserver address:port to listen on")
+var native = flag.Bool("n", false, "load xdp program in native mode")
+var test = flag.Bool("t", false, "run hashing tests")
 
 func main() {
 	//test2()
 	//return
-	//test()
+	//test1()
 	//return
 
 	flag.Parse()
 	args := flag.Args()
 
-	if *testf {
+	if *test {
 		test2()
 		return
 	}
@@ -90,8 +91,7 @@ func main() {
 
 	file := args[0]
 	myip := args[1]
-	bond := args[2]
-	peth := args[3:]
+	peth := args[2:]
 
 	ip, ok := vc5.ParseIP(myip)
 
@@ -107,7 +107,7 @@ func main() {
 
 	hc, err := healthchecks.ConfHealthchecks(conf)
 
-	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), bond, peth...)
+	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), *bond, peth...)
 
 	if err != nil {
 		log.Fatal(err)
@@ -278,7 +278,7 @@ type Stats struct {
 	VIPs      map[IP4]map[L4]map[IP4]Real `json:"vips"`
 }
 
-func test() {
+func test1() {
 	//log.Fatal(xdp.BpfNumPossibleCpus())
 	x, xx := rendezvous.Test(100)
 

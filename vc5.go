@@ -106,15 +106,25 @@ func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []strin
 	var vc5amac [6]byte
 	var vc5bmac [6]byte
 
-	iface, err := net.InterfaceByName(bond)
-	if err != nil {
-		return nil, err
+	var bondidx int
+
+	if bond != "" {
+		iface, err := net.InterfaceByName(bond)
+		if err != nil {
+			return nil, err
+		}
+		bondidx = iface.Index
+	} else {
+		iface, err := net.InterfaceByName(peth[0])
+		if err != nil {
+			return nil, err
+		}
+		bondidx = iface.Index
 	}
-	bondidx := iface.Index
 
 	setup1(vc5a, vc5b)
 
-	iface, err = net.InterfaceByName(vc5a)
+	iface, err := net.InterfaceByName(vc5a)
 	if err != nil {
 		return nil, err
 	}
