@@ -37,6 +37,7 @@
 #include <bpf/bpf_endian.h>
 
 #define SECOND_NS 1000000000
+#define MAGLEV 1
 
 struct tuple {
     __be32 src;
@@ -117,6 +118,13 @@ static inline __u16 sdbm(unsigned char *ptr, __u8 len) {
 }
 
 
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, unsigned int);
+    __type(value, struct real);
+    __uint(max_entries, 65536 * 128);
+} foobar SEC(".maps");
+
 /**********************************************************************/
 
 struct flow {
@@ -133,10 +141,11 @@ struct state {
 };
 
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
     __type(key, struct flow);
     __type(value, struct state);
-    __uint(max_entries, 30000000);
+    //__uint(max_entries, 30000000);
+    __uint(max_entries, 1000000);
 } flow_state SEC(".maps");
 
 
@@ -274,6 +283,7 @@ struct {
 
 __u8 DEFCON = 5;
 
+/*
 static inline __u16 tcp_hasher(struct iphdr *ipv4, struct tcphdr *tcp)
 {
     struct tuple t;
@@ -285,14 +295,115 @@ static inline __u16 tcp_hasher(struct iphdr *ipv4, struct tcphdr *tcp)
     t.protocol = ipv4->protocol;
     return sdbm((unsigned char *)&t, sizeof(t));
 }
-
-static inline void store_flow(struct flow *flow, __be32 rip, __u8 *mac)
+*/
+static inline __u16 l4_hasher(struct iphdr *ipv4, void *l4)
 {
+    struct tuple t;
+    memset(&t, 0, sizeof(t));
+    t.src = ipv4->saddr;
+    t.dst = ipv4->daddr;
+    //t.sport = tcp->source;
+    //t.dport = tcp->dest;
+    t.protocol = ipv4->protocol;
+    switch(ipv4->protocol) {
+    case IPPROTO_TCP:
+	t.sport = ((struct tcphdr *) l4)->source;
+	t.dport = ((struct tcphdr *) l4)->dest;
+	break;
+	
+    case IPPROTO_UDP:
+	t.sport = ((struct udphdr *) l4)->source;
+	t.dport = ((struct udphdr *) l4)->dest;
+	break;
+    }
+    
+    return sdbm((unsigned char *)&t, sizeof(t));
+}
+
+//static inline void store_flow(struct flow *flow, __be32 rip, __u8 *mac)
+//{
+//    struct state new_state;
+//    memset(&new_state, 0, sizeof(new_state));
+//    new_state.rip = rip;
+//    maccpy(new_state.mac, mac);
+//    bpf_map_update_elem(&flow_state, flow, &new_state, BPF_ANY);
+//}
+
+static inline struct real *find_real(struct iphdr *ipv4, void *l4, struct real *r) {
+#ifdef MAGLEV
+    struct maglev maglev;
+    memset(&maglev, 0, sizeof(maglev));
+    maglev.ip = ipv4->daddr;
+    //maglev.port = tcp->dest;
+    maglev.port = 0;
+    maglev.hash = l4_hasher(ipv4, l4);
+    maglev.protocol = IPPROTO_TCP;
+
+    switch(ipv4->protocol) {
+    case IPPROTO_TCP:
+        maglev.port = ((struct tcphdr *) l4)->dest;
+        break;
+	
+    case IPPROTO_UDP:
+	maglev.port = ((struct udphdr *) l4)->dest;
+	break;
+    }
+    //return bpf_map_lookup_elem(&maglev_real, &maglev);
+    struct real *real;
+    if(!(real = bpf_map_lookup_elem(&maglev_real, &maglev)))
+	return NULL;
+    *r = *real;
+    return r;
+#else
+    struct service s;
+    memset(&s, 0, sizeof(s));
+    s.vip = ipv4->daddr;
+    //s.port = tcp->dest;
+    s.port = 0;
+    s.protocol = ipv4->protocol;
+
+    switch(ipv4->protocol) {
+    case IPPROTO_TCP:
+        s.port = ((struct tcphdr *) l4)->dest;
+        break;
+
+    case IPPROTO_UDP:
+        s.port = ((struct udphdr *) l4)->dest;
+        break;
+    }
+    
+    struct backend *backend = bpf_map_lookup_elem(&service_backend, &s);
+
+    if(!backend)
+	return NULL;
+    
+    __u16 hash = l4_hasher(ipv4, l4);
+    __u8 i = backend->hash[hash>>3];
+    
+    if(i == 0) {
+	return NULL;
+    }
+
+    *r = backend->real[i];
+    
+    return r; //&(backend->real[i]);
+#endif
+}
+
+static inline void store_tcp_flow(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, __u8 *mac)
+{
+    struct flow flow;
+    flow.src = ipv4->saddr;
+    flow.dst = ipv4->daddr;
+    flow.sport = tcp->source;
+    flow.dport = tcp->dest;
+    
     struct state new_state;
-    memset(&new_state, 0, sizeof(new_state));
     new_state.rip = rip;
     maccpy(new_state.mac, mac);
-    bpf_map_update_elem(&flow_state, flow, &new_state, BPF_ANY);
+    maccpy(new_state.pad, mac);
+    
+    bpf_map_update_elem(&flow_state, &flow, &new_state, BPF_ANY);
 }
 
 static inline void be_tcp_counter(__be32 vip, __be16 port, __be32 rip, int n)
@@ -318,6 +429,7 @@ const int zero = 0;
 // DEFCON4 - flow state table written to
 // DEFCON5 - flow conncurrency?
 
+__u8 FOO[65536];
 
 #define DEFCON1 1
 #define DEFCON2 2
@@ -374,6 +486,11 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 	global->rx_packets++;
 	global->rx_octets += (data_end - data);
 	global->defcon = DEFCON;
+	
+	// ~90ns to here
+	//global->perf_timens += (bpf_ktime_get_ns() - start);
+	//global->perf_packets++;
+	//global = NULL;
     }
     
     struct ethhdr *eth_hdr = data;
@@ -381,11 +498,11 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
     __be16 eth_proto;
     
   if (data + nh_off > data_end) {
-    return XDP_DROP;
+      return XDP_DROP;
   }
-
+  
   eth_proto = eth_hdr->h_proto;
-
+  
   if (eth_proto != bpf_ntohs(ETH_P_IP)) {
       return XDP_PASS;
   }
@@ -420,50 +537,64 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
       return XDP_DROP;
   }
 
-  struct flow flow;
-  memset(&flow, 0, sizeof(flow));
-  flow.src = ipv4->saddr;
-  flow.dst = ipv4->daddr;
-  flow.sport = tcp->source;
-  flow.dport = tcp->dest;
+  // ~130ns to here ...
+  //if(global) {
+  //  global->perf_timens += (bpf_ktime_get_ns() - start);
+  //  global->perf_packets++;
+  //}
+  //global = NULL;
 
-  struct state *state = NULL;
-  
-  if(DEFCON >= DEFCON3 && (state = bpf_map_lookup_elem(&flow_state, &flow))) {
-      if(nulmac(state->mac)) {
-	  return XDP_DROP;
-      }
+  if(DEFCON >= DEFCON3) {
+      struct flow flow;
+      flow.src = ipv4->saddr;
+      flow.dst = ipv4->daddr;
+      flow.sport = tcp->source;
+      flow.dport = tcp->dest;
       
-      if(equmac(state->mac, eth_hdr->h_dest)) {
-          return XDP_DROP; // looks like local NIC
+      // failed lookup takes ~70ns
+      struct state *state = NULL;
+      if((state = bpf_map_lookup_elem(&flow_state, &flow))) {
+	  // ~230ns to here
+	  //if(global) {
+	  //    global->perf_timens += (bpf_ktime_get_ns() - start);
+	  //    global->perf_packets++;
+	  //}
+	  //global = NULL;
+	  
+	  if(nulmac(state->mac)) {
+	      return XDP_DROP;
+	  }
+	  
+	  if(equmac(state->mac, eth_hdr->h_dest)) {
+	      return XDP_DROP; // looks like local NIC
+	  }
+	  
+	  if(equmac(state->mac, eth_hdr->h_source)) {
+	      return XDP_DROP; // unlikely that we would want to echo packet back to source on l2lb
+	  }
+	  
+	  maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+	  maccpy(eth_hdr->h_dest, state->mac);
+	  
+	  be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, data_end - data);
+	  
+	  if(global) {
+	      global->perf_timens += (bpf_ktime_get_ns() - start);
+	      global->perf_packets++;
+	  }
+	  
+	  return XDP_TX;
       }
-
-      if(equmac(state->mac, eth_hdr->h_source)) {
-          return XDP_DROP; // unlikely that we would want to echo packet back to source on l2lb
-      }
-
-      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-      maccpy(eth_hdr->h_dest, state->mac);
-      
-      be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, data_end - data);
-      
-      if(global) {
-          global->perf_timens += (bpf_ktime_get_ns() - start);
-          global->perf_packets++;
-      }
-      
-      return XDP_TX;
   }
-  
-  struct maglev maglev;
-  memset(&maglev, 0, sizeof(maglev));
-  maglev.ip = ipv4->daddr;
-  maglev.port = tcp->dest;
-  maglev.hash = tcp_hasher(ipv4, tcp);
-  maglev.protocol = IPPROTO_TCP;
-  
-  struct real *real = NULL;
-  if(0 && (real = bpf_map_lookup_elem(&maglev_real, &maglev))) {
+
+  struct real r;
+  struct real *real = find_real(ipv4, (void *) tcp, &r);
+  if(real) {
+      //if(global) {
+      //  global->perf_timens += (bpf_ktime_get_ns() - start);
+      //  global->perf_packets++;
+      //}
+      global = NULL;
       
       if(nulmac(real->mac)) {
           return XDP_DROP;
@@ -480,7 +611,8 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
       maccpy(eth_hdr->h_source, eth_hdr->h_dest);
       maccpy(eth_hdr->h_dest, real->mac);
       
-      if(DEFCON >= DEFCON4) store_flow(&flow, real->rip, real->mac);
+      //if(DEFCON >= DEFCON4) store_flow(&flow, real->rip, real->mac);
+      if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, tcp, real->rip, real->mac);
       if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, tcp->dest, real->rip, data_end - data);
       
       if(global) {
@@ -491,52 +623,8 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
       return XDP_TX;
   }
 
-  struct service s;
-  memset(&s, 0, sizeof(s));
-  s.vip = ipv4->daddr;
-  s.port = tcp->dest;
-  s.protocol = ipv4->protocol;
 
-  struct backend *backend = NULL;
-  if((backend = bpf_map_lookup_elem(&service_backend, &s))) {
-
-      __u16 hash = tcp_hasher(ipv4, tcp);
-      __u8 i = backend->hash[hash>>3];
-      
-      if(i == 0) {
-	  return XDP_DROP;
-      }
-      
-      struct real real = backend->real[i];
-      
-      if(nulmac(real.mac)) {
-          return XDP_DROP;
-      }
-
-      if(equmac(real.mac, eth_hdr->h_dest)) {
-          return XDP_DROP; // looks like local NIC, but not declared as such
-      }
-
-      if(equmac(real.mac, eth_hdr->h_source)) {
-          return XDP_DROP; // unlikely that we would want to echo packet back to source on an l2lb
-      }
-      
-      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-      maccpy(eth_hdr->h_dest, real.mac);
-      
-      if(DEFCON >= DEFCON4) store_flow(&flow, real.rip, real.mac);
-      if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, tcp->dest, real.rip, data_end - data);
-      
-      if(global) {
-        global->perf_timens += (bpf_ktime_get_ns() - start);
-        global->perf_packets++;
-      }
-    
-      return XDP_TX;
-      
-  }
-
-  
+  global = NULL; // don't time-non-balanced traffic
 
   // DROP PACKETS TO PORTS ON VIPS WHICH HAVEN'T BEEN CAUGHT BY A SERVICE
   struct vrpp vr;

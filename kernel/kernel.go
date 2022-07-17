@@ -134,6 +134,7 @@ func Open(native bool, eth ...string) *Maps {
 	}
 
 	// balancer
+	m.m["foobar"] = find_map(x, "foobar", 4, 16)
 	m.m["maglev_real"] = find_map(x, "maglev_real", 12, 16)
 
 	m.m["service_backend"] = find_map(x, "service_backend", 8, 8192+(256*16))
@@ -150,7 +151,7 @@ func Open(native bool, eth ...string) *Maps {
 	m.m["settings"] = find_map(x, "settings", 4, 2)
 
 	var zero uint32
-	s := setting{defcon: 2, era: 0}
+	s := setting{defcon: 5, era: 0}
 
 	if xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&s), xdp.BPF_ANY) != 0 {
 		panic("oops")
@@ -159,6 +160,7 @@ func Open(native bool, eth ...string) *Maps {
 	return &m
 }
 
+func (m *maps) foobar() int          { return m.m["foobar"] }
 func (m *maps) maglev_real() int     { return m.m["maglev_real"] }
 func (m *maps) service_backend() int { return m.m["service_backend"] }
 
@@ -186,6 +188,9 @@ func (m *maps) update_maglev_real(key *mag, b *real, flag uint64) int {
 	for n, _ := range all {
 		all[n] = *b
 	}
+
+	var index uint32 = uint32(key.hash)
+	xdp.BpfMapUpdateElem(m.foobar(), uP(&index), uP(&(all[0])), flag)
 
 	return xdp.BpfMapUpdateElem(m.maglev_real(), uP(key), uP(&(all[0])), flag)
 }
@@ -228,6 +233,26 @@ func (m *maps) GlobalStats() (uint64, uint64, uint64, uint8) {
 	}
 
 	return g.rx_packets, g.rx_octets, latency, uint8(g.defcon)
+}
+
+func (m *maps) DEFCON(d uint8) uint8 {
+
+	var zero uint32
+	var s setting
+
+	if d >= 1 && d <= 5 {
+		s.defcon = d
+
+		if xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&s), xdp.BPF_ANY) != 0 {
+			panic("oops")
+		}
+	}
+
+	if xdp.BpfMapLookupElem(m.settings(), uP(&zero), uP(&s)) != 0 {
+		panic("oops")
+	}
+
+	return s.defcon
 }
 
 func (m *maps) lookup_globals(g *global) int {
@@ -731,6 +756,7 @@ func (m *maps) Balancer3(c Report) (chan Report, func() map[Target]Counter) {
 							be := real{rip: v, mac: nodes[v]}
 							m.update_maglev_real(&mg, &be, xdp.BPF_ANY)
 						}
+
 					}
 
 					/**********************************************************************/

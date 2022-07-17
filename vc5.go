@@ -80,7 +80,7 @@ func NetnsServer(sock string) {
 }
 
 func LoadConf(file string, old *config2.Conf) (*config2.Conf, error) {
-	return config2.Load(file, nil)
+	return config2.Load(file, old)
 }
 
 func (v *VC5) HC(hc *healthchecks.Healthchecks) {
@@ -163,6 +163,10 @@ func (v *VC5) Config() monitor.Report {
 
 func (v *VC5) Stats() map[kernel.Target]kernel.Counter {
 	return v.stats()
+}
+
+func (v *VC5) DEFCON(d uint8) uint8 {
+	return v.maps.DEFCON(d)
 }
 
 func (v *VC5) Close() {

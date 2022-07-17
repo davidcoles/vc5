@@ -153,6 +153,31 @@ func main() {
 		handler.ServeHTTP(w, r)
 	})
 
+	http.HandleFunc("/defcon1", func(w http.ResponseWriter, r *http.Request) {
+		v5.DEFCON(1)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/defcon2", func(w http.ResponseWriter, r *http.Request) {
+		v5.DEFCON(2)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/defcon3", func(w http.ResponseWriter, r *http.Request) {
+		v5.DEFCON(3)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/defcon4", func(w http.ResponseWriter, r *http.Request) {
+		v5.DEFCON(4)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/defcon5", func(w http.ResponseWriter, r *http.Request) {
+		v5.DEFCON(5)
+		w.WriteHeader(http.StatusOK)
+	})
+
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		j, err := json.MarshalIndent(hc, "", "  ")
@@ -180,6 +205,8 @@ func main() {
 		w.Write(j)
 	})
 
+	var latency []uint64
+
 	http.HandleFunc("/stats.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -192,6 +219,21 @@ func main() {
 		stats.Advertise = map[IP4]bool{}
 
 		stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
+
+		latency = append(latency, stats.Latency)
+		for len(latency) > 10 {
+			latency = latency[1:]
+		}
+
+		var l uint64
+
+		for _, v := range latency {
+			l += v
+		}
+
+		l /= uint64(len(latency))
+
+		stats.Latency = l
 
 		log.Printf("DEFCON%d %dns\n", stats.DEFCON, stats.Latency)
 
