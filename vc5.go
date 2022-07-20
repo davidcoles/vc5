@@ -79,7 +79,10 @@ func NetnsServer(sock string) {
 	namespace.Server(sock)
 }
 
-func LoadConf(file string, old *config2.Conf) (*config2.Conf, error) {
+func LoadConf(file string) (*config2.Conf, error) {
+	return config2.Load(file, nil)
+}
+func _LoadConf(file string, old *config2.Conf) (*config2.Conf, error) {
 	return config2.Load(file, old)
 }
 

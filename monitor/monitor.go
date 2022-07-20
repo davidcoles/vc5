@@ -42,8 +42,8 @@ type Backend struct {
 type Metadata = healthchecks.Metadata
 type Reals map[uint16]Real
 type Real = healthchecks.Real
-type Service_ = healthchecks.Service_
-type Virtual_ = healthchecks.Virtual_
+type Service_ = healthchecks.Service
+type Virtual_ = healthchecks.Virtual
 type Healthchecks = healthchecks.Healthchecks
 
 type context struct {
@@ -101,9 +101,9 @@ func Monitor_(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bo
 
 		if h != nil {
 
-			backends = h.Backends
+			backends = h.Backend
 
-			for vip, services := range h.Virtuals {
+			for vip, services := range h.Virtual {
 				if fn, ok := x[vip]; ok {
 					fn(&services, false) // update sub-tree
 				} else {
@@ -112,7 +112,7 @@ func Monitor_(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bo
 			}
 
 			for k, fn := range x {
-				if _, ok := h.Virtuals[k]; !ok {
+				if _, ok := h.Virtual[k]; !ok {
 					fn(nil, true)
 					delete(x, k)
 				}

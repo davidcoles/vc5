@@ -19,24 +19,17 @@
 package healthchecks
 
 import (
-	//"bufio"
-	//"fmt"
-	"log"
-	//"net"
-	//"os"
-	//"regexp"
-	//"unsafe"
+	"errors"
+	"fmt"
 
 	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/types"
 )
 
-//type uP = unsafe.Pointer
 type IP4 = types.IP4
 type MAC = types.MAC
 type L4 = types.L4
 type Protocol = types.Protocol
-
 type Checks = config2.Checks
 type Check = config2.Check
 
@@ -57,7 +50,7 @@ type Real struct {
 	Checks Checks
 }
 
-type Service_ struct {
+type Service struct {
 	Reals      map[uint16]Real
 	Minimum    uint16
 	Sticky     bool
@@ -65,70 +58,175 @@ type Service_ struct {
 	Metadata   Metadata
 }
 
-type Virtual_ struct {
+type Virtual struct {
 	Metadata Metadata
-	Services map[L4]Service_
+	Services map[L4]Service
 }
 
 type Healthchecks struct {
-	Virtuals map[IP4]Virtual_
-	Backends map[uint16]IP4
-	Mapping  map[uint16][2]IP4
-	VLANs    map[uint16]uint16
+	Virtual map[IP4]Virtual
+	Backend map[uint16]IP4
+	Mapping map[uint16][2]IP4
+	xVLANs  map[uint16]uint16
+	vlan    map[IP4]uint16
+}
+
+func (h *Healthchecks) VLAN(ip IP4) uint16 {
+	return h.vlan[ip]
 }
 
 func (h *Healthchecks) NAT() map[uint16][2]IP4 {
 	return h.Mapping
 }
 
-//func (c *Conf) Healthchecks() (*Healthchecks, error) {
-func ConfHealthchecks(c *config2.Conf) (*Healthchecks, error) {
+func nats(hc *Healthchecks, list [][2]IP4) (map[uint16][2]IP4, error) {
+	old := map[uint16][2]IP4{}
+
+	if hc != nil {
+		old = hc.Mapping
+	}
+
+	new := map[[2]IP4]bool{}
+	for _, v := range list {
+		new[v] = true
+	}
+
+	o := map[[2]IP4]uint16{}
+	r := map[uint16][2]IP4{}
+	var n uint16
+	for k, v := range old {
+		o[v] = k
+	}
+
+	for k, _ := range new {
+		if x, ok := o[k]; ok {
+			r[x] = k
+		} else {
+		find:
+			n++
+			if n > 65000 {
+				return nil, errors.New("NAT mapping limit exceeded")
+			}
+
+			if _, ok := old[n]; ok {
+				goto find
+			}
+
+			r[n] = k
+		}
+	}
+
+	return r, nil
+}
+
+func rips(hc *Healthchecks, new []IP4) (map[uint16]IP4, error) {
+
+	old := map[uint16]IP4{}
+
+	if hc != nil {
+		old = hc.Backend
+	}
+
+	o := map[IP4]uint16{}
+	r := map[uint16]IP4{}
+	var n uint16
+
+	for k, v := range old {
+		o[v] = k
+	}
+
+	for _, k := range new {
+		if x, ok := o[k]; ok {
+			r[x] = k
+		} else {
+		find:
+			n++
+			if n > 255 {
+				return nil, errors.New("Real server limit exceeded")
+			}
+
+			if _, ok := old[n]; ok {
+				goto find
+			}
+
+			r[n] = k
+		}
+	}
+
+	return r, nil
+}
+
+func (c *Healthchecks) _RIP(r IP4) uint16 {
+	for k, v := range c.Backend {
+		if v == r {
+			return k
+		}
+	}
+
+	return 0
+}
+func (c *Healthchecks) _NAT(vip, rip IP4) uint16 {
+	for k, v := range c.Mapping {
+		if v[0] == vip && v[1] == rip {
+			return k
+		}
+	}
+
+	return 0
+}
+
+func Load(c *config2.Conf) (*Healthchecks, error) {
+	return _ConfHealthchecks(c, nil)
+}
+
+func (h *Healthchecks) Reload(c *config2.Conf) (*Healthchecks, error) {
+	return _ConfHealthchecks(c, h)
+}
+
+func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error) {
 	var hc Healthchecks
 
-	hc.Virtuals = map[IP4]Virtual_{}
+	hc.Virtual = map[IP4]Virtual{}
+
+	var err error = nil
+
+	hc.Backend, err = rips(old, c.Reals())
+	if err != nil {
+		return nil, err
+	}
+
+	hc.vlan = c.Vlans()
+
+	hc.Mapping, err = nats(old, c.Nats())
+	if err != nil {
+		return nil, err
+	}
 
 	ips := []IP4{}
 
 	for vip, x := range c.VIPs {
 
-		v := Virtual_{Services: map[L4]Service_{}}
+		v := Virtual{Services: map[L4]Service{}}
 
 		for l4, y := range x {
 			reals := map[uint16]Real{}
 			for rip, z := range y.RIPs {
 				ips = append(ips, rip)
-				r := c.RIP(rip)
-				n := c.NAT(vip, rip)
-				reals[r] = Real{RIP: rip, NAT: n, Checks: z.Checks()}
-
+				r := hc._RIP(rip)
+				n := hc._NAT(vip, rip)
 				if r == 0 || n == 0 {
-					log.Fatal("real", vip, rip, r, n)
+					msg := fmt.Sprintf("%s/%s: %d %d", vip.String(), rip.String(), r, n)
+					return nil, errors.New(msg)
 				}
+				reals[r] = Real{RIP: rip, NAT: n, Checks: z.Checks()}
 			}
 
 			m := Metadata{Name: y.Name, Description: y.Description}
-			s := Service_{Reals: reals, Metadata: m}
+			s := Service{Reals: reals, Metadata: m}
 			v.Services[l4] = s
 		}
 
-		hc.Virtuals[vip] = v
-	}
-
-	hc.Backends = map[uint16]IP4{}
-
-	for k, v := range c.RIPs() {
-		hc.Backends[k] = v
-	}
-
-	hc.VLANs = map[uint16]uint16{}
-
-	for k, v := range c.VIDs() {
-		hc.VLANs[k] = v
-	}
-
-	hc.Mapping = map[uint16][2]IP4{}
-	for k, v := range c.NATs() {
-		hc.Mapping[k] = v
+		hc.Virtual[vip] = v
 	}
 
 	return &hc, nil

@@ -51,8 +51,8 @@ type Protocol = types.Protocol
 type Metadata = healthchecks.Metadata
 type Reals map[uint16]Real
 type Real = healthchecks.Real
-type Service_ = healthchecks.Service_
-type Virtual_ = healthchecks.Virtual_
+type Service_ = healthchecks.Service
+type Virtual_ = healthchecks.Virtual
 type Healthchecks = healthchecks.Healthchecks
 type NAT = healthchecks.NAT
 

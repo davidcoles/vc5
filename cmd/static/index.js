@@ -56,8 +56,8 @@ function updateStats(url) {
 	    var newdiv = document.createElement("div");
 
 	    var n = document.createElement("div");
-	    n.innerHTML = tsf(data.packets) + "packets " +
-		tsf(data.octets) + "bytes " + data.latency +" ns " + "DEFCON" + data.defcon
+	    n.innerHTML = tsf(data.packets) + "pps " +
+		tsf(data.octets*8) + "bps " + data.latency +"ns " + "DEFCON" + data.defcon
 	    newdiv.appendChild(n)
 	    
 	    for(var s in data.vips) {
@@ -65,12 +65,12 @@ function updateStats(url) {
 		    var n = document.createElement("div");
 		    n.innerHTML = s + ":" + l
 		    newdiv.appendChild(n)
-		    for(var b in data.vips[s][l]) 
-{			var n = document.createElement("div");
+		    for(var b in data.vips[s][l]) {
+			var n = document.createElement("div");
 			var c = data.vips[s][l][b]
 			n.innerHTML = "&nbsp;&nbsp;&nbsp;&nbsp;" + b + " " +
-			tsf(c.packets) + "packets " + tsf(c.octets) + "bytes " +
-			(c.up ? "UP" : "DOWN")
+			    tsf(c.packets) + "pps " + tsf(c.octets*8) + "bps " +
+			    (c.up ? "UP" : "DOWN")
 			newdiv.appendChild(n)
 		    }
 		}

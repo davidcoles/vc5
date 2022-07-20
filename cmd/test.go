@@ -16,6 +16,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+// TODO
+// concurrent connections
+// manage existing connection (SYN/RST/etc)
+// BGP
+// VLANs
+// sticky
+
 package main
 
 import (
@@ -99,13 +106,17 @@ func main() {
 		log.Fatal(myip)
 	}
 
-	conf, err := vc5.LoadConf(file, nil)
+	conf, err := vc5.LoadConf(file)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	hc, err := healthchecks.ConfHealthchecks(conf)
+	hc, err := healthchecks.Load(conf)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), *bond, peth...)
 
@@ -128,13 +139,13 @@ func main() {
 				log.Println("RELOAD")
 				time.Sleep(1 * time.Second)
 
-				conf, err = vc5.LoadConf(file, conf)
+				conf, err = vc5.LoadConf(file)
 
 				if err != nil {
 					log.Fatal(err)
 				}
 
-				hc, err = healthchecks.ConfHealthchecks(conf)
+				hc, err = hc.Reload(conf)
 
 				if err != nil {
 					log.Fatal(err)
@@ -142,6 +153,29 @@ func main() {
 
 				v5.Update(hc)
 			}
+		}
+	}()
+
+	var stats *Stats
+
+	go func() {
+		var latency []uint64
+		var n *Stats
+		var o *Stats
+		var t time.Time
+
+		for {
+			o = n
+			n = getStats(v5)
+
+			r := n.Sub(o, time.Now().Sub(t))
+			t = time.Now()
+
+			r.Latency, latency = Latency(n.Latency, latency)
+
+			stats = r
+
+			time.Sleep(1 * time.Second)
 		}
 	}()
 
@@ -205,56 +239,16 @@ func main() {
 		w.Write(j)
 	})
 
-	var latency []uint64
-
 	http.HandleFunc("/stats.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		j, _ := json.MarshalIndent(stats, "", "  ")
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
-
-		cf := v5.Config()
-		ss := v5.Stats()
-
-		var stats Stats
-		stats.VIPs = map[IP4]map[L4]map[IP4]Real{}
-		stats.Advertise = map[IP4]bool{}
-
-		stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
-
-		latency = append(latency, stats.Latency)
-		for len(latency) > 10 {
-			latency = latency[1:]
-		}
-
-		var l uint64
-
-		for _, v := range latency {
-			l += v
-		}
-
-		l /= uint64(len(latency))
-
-		stats.Latency = l
-
-		log.Printf("DEFCON%d %dns\n", stats.DEFCON, stats.Latency)
-
-		for vip, v := range cf.Virtuals {
-			stats.VIPs[vip] = map[L4]map[IP4]Real{}
-			stats.Advertise[vip] = v.Healthy
-			for l4, s := range v.Services {
-				reals := map[IP4]Real{}
-				for n, up := range s.Health {
-					r := cf.Backends[n]
-					t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
-					c := ss[t]
-					reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets}
-					//stats.Octets += c.Octets
-					//stats.Packets += c.Packets
-				}
-				stats.VIPs[vip][l4] = reals
-			}
-		}
-
-		j, _ := json.MarshalIndent(&stats, "", "  ")
 		w.Write(j)
 	})
 
@@ -269,6 +263,17 @@ type Real struct {
 	Packets uint64 `json:"packets"`
 }
 
+func (r Real) Sub(o Real, dur time.Duration) Real {
+
+	d := uint64(dur)
+
+	var n Real
+	n.Up = r.Up
+	n.Octets = (uint64(time.Second) * (r.Octets - o.Octets)) / d
+	n.Packets = (uint64(time.Second) * (r.Packets - o.Packets)) / d
+	return n
+}
+
 type Stats struct {
 	Octets    uint64                      `json:"octets"`
 	Packets   uint64                      `json:"packets"`
@@ -276,6 +281,60 @@ type Stats struct {
 	DEFCON    uint8                       `json:"defcon"`
 	Advertise map[IP4]bool                `json:"advertise"`
 	VIPs      map[IP4]map[L4]map[IP4]Real `json:"vips"`
+}
+
+func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
+
+	d := uint64(dur)
+
+	var r Stats
+
+	r.VIPs = map[IP4]map[L4]map[IP4]Real{}
+
+	if o != nil {
+
+		r.Octets = (uint64(time.Second) * (n.Octets - o.Octets)) / d
+		r.Packets = (uint64(time.Second) * (n.Packets - o.Packets)) / d
+		r.Latency = n.Latency
+		r.DEFCON = n.DEFCON
+
+		for v, _ := range n.VIPs {
+			r.VIPs[v] = map[L4]map[IP4]Real{}
+			if _, ok := o.VIPs[v]; ok {
+				for l, _ := range n.VIPs[v] {
+					if _, ok := o.VIPs[v][l]; ok {
+						r.VIPs[v][l] = map[IP4]Real{}
+						for k, n := range n.VIPs[v][l] {
+							if o, ok := o.VIPs[v][l][k]; ok {
+								r.VIPs[v][l][k] = n.Sub(o, dur)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return &r
+}
+
+func Latency(l uint64, latency []uint64) (uint64, []uint64) {
+
+	latency = append(latency, l)
+
+	for len(latency) > 10 {
+		latency = latency[1:]
+	}
+
+	l = 0
+
+	for _, v := range latency {
+		l += v
+	}
+
+	l /= uint64(len(latency))
+
+	return l, latency
 }
 
 func test1() {
@@ -316,17 +375,12 @@ func test1() {
 }
 
 func test2() {
-	//var nodes [][]byte
-	//for i := 0; i < 128; i++ {
-	//	s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
-	//	nodes = append(nodes, s[:])
-	//}
 
-	for grr := 255; grr > 0; grr-- {
+	for n := 255; n > 0; n-- {
 
 		m := map[[4]byte]uint16{}
 
-		for i := 0; i < grr; i++ {
+		for i := 0; i < n; i++ {
 			s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
 			m[s] = uint16(i)
 		}
@@ -337,7 +391,6 @@ func test2() {
 			nodes = append(nodes, k[:])
 		}
 
-		//s := time.Now()
 		table := maglev.Maglev65536(nodes)
 
 		var t2 [65536]uint16
@@ -347,7 +400,7 @@ func test2() {
 			ip := [4]byte{i[0], i[1], i[2], i[3]}
 			n, ok := m[ip]
 			if !ok {
-				panic("poo")
+				panic("oops")
 			}
 
 			t2[k] = n
@@ -377,4 +430,33 @@ func test2() {
 			fmt.Println()
 		}
 	}
+}
+
+func getStats(v5 *vc5.VC5) *Stats {
+
+	cf := v5.Config()
+	ss := v5.Stats()
+
+	var stats Stats
+	stats.VIPs = map[IP4]map[L4]map[IP4]Real{}
+	stats.Advertise = map[IP4]bool{}
+
+	stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
+
+	for vip, v := range cf.Virtuals {
+		stats.VIPs[vip] = map[L4]map[IP4]Real{}
+		stats.Advertise[vip] = v.Healthy
+		for l4, s := range v.Services {
+			reals := map[IP4]Real{}
+			for n, up := range s.Health {
+				r := cf.Backends[n]
+				t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
+				c := ss[t]
+				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets}
+			}
+			stats.VIPs[vip][l4] = reals
+		}
+	}
+
+	return &stats
 }

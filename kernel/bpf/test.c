@@ -130,7 +130,10 @@ struct flow {
 struct state {
     __be32 rip;
     __u8 mac[6];
-    __u8 pad[6];
+    __u8 finrst;
+    __u8 era;
+    __u8 pad[4];
+    __u64 time;
 };
 
 struct {
@@ -241,6 +244,13 @@ struct {
     __type(value, struct counter);
     __uint(max_entries, 1024);
 } vrpp_counter SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+    __type(key, struct vrpp);
+    __type(value, __s32);
+    __uint(max_entries, 1024);
+} vrpp_concurrent SEC(".maps");
 
 
 struct global {
@@ -388,9 +398,11 @@ static inline void store_tcp_flow(struct iphdr *ipv4, struct tcphdr *tcp, __be32
     flow.dport = tcp->dest;
     
     struct state new_state;
+    memset(&new_state, 0, sizeof(new_state));
     new_state.rip = rip;
     maccpy(new_state.mac, mac);
     maccpy(new_state.pad, mac);
+    new_state.time = bpf_ktime_get_ns();
     
     bpf_map_update_elem(&flow_state, &flow, &new_state, BPF_ANY);
 }
@@ -410,6 +422,57 @@ static inline void be_tcp_counter(__be32 vip, __be16 port, __be32 rip, int n)
     }
 }
 
+
+static inline __s32 * _be_tcp_concurrent(__be32 vip, __be16 port, __be32 rip, __u8 era)
+{   
+    struct vrpp vr;
+    vr.vip = vip;
+    vr.rip = rip;
+    vr.port = port;
+    vr.protocol = IPPROTO_TCP;
+    vr.pad = era;
+    return (__s32 *) bpf_map_lookup_elem(&vrpp_concurrent, &vr);
+}
+
+static inline void be_tcp_concurrent(struct state *state, struct iphdr *ipv4, struct tcphdr *tcp, __u8 era)
+{
+
+    
+    if (state->finrst == 0 && ((tcp->rst == 1) || (tcp->fin == 1))) {
+	state->finrst = 10;
+    } else {
+	if (state->finrst > 0) {
+	    (state->finrst)--;
+	}
+    }
+    
+    __s32 *concurrent = NULL;      
+    if (state->era != era) {
+	state->era = era;
+	
+	switch(state->finrst) {
+	case 10:
+	    break;
+	case 0:
+	    concurrent = _be_tcp_concurrent(ipv4->daddr, tcp->dest, state->rip, era);
+	    //concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+	    if(concurrent) (*concurrent)++;
+	    break;
+	}
+    } else {
+	switch(state->finrst) {
+	case 10:
+	    concurrent = _be_tcp_concurrent(ipv4->daddr, tcp->dest, state->rip, era);
+	    //concurrent = bpf_map_lookup_elem(&vip_rip_port_concurrent, &vrp);
+	    if(concurrent) (*concurrent)--;
+	    break;
+	case 0:
+	    break;
+	}
+    }
+}
+
+
 const int zero = 0;
 
 // DEFCON1 - only global stats (and periodic check for settings) and stateless forwarding done
@@ -426,6 +489,8 @@ __u8 FOO[65536];
 #define DEFCON4 4
 #define DEFCON5 5
 
+__u8 ERA = 0;
+
 SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 {
     __u64 start = bpf_ktime_get_ns();
@@ -440,7 +505,7 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
     if(global) {
 	
 	// if 10s since last reset ...
-	if((global->perf_timer - start) > ((__u64) 10 * SECOND_NS)) {
+	if((global->perf_timer + (10l * SECOND_NS)) < start) {
 	    global->perf_timer = start;
 	    if(global->perf_packets > 1) {
 		global->perf_timens = (global->perf_timens / global->perf_packets) * 100;
@@ -457,6 +522,8 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 
 	    struct setting *setting = bpf_map_lookup_elem(&settings, &zero);
 	    if(setting) {
+		ERA = setting->era % 2;
+		
 		switch(setting->defcon) {
 		case DEFCON1:
 		case DEFCON2:
@@ -540,6 +607,14 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 	  // ~230ns to here
 	  //write_perf(global, start); global = NULL;
 	  
+	  if((state->time + (60l * SECOND_NS)) < start) {
+	      goto new_flow;
+	  }
+
+	  if((state->time + (20l * SECOND_NS)) < start) {
+	      state->time = start;
+	  }
+	  
 	  if(state->rip == 0) {
 	      goto invalid_state;
 	  }
@@ -553,9 +628,14 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 	  }
 	  
 	  if(equmac(state->mac, eth_hdr->h_source)) {
-	      goto invalid_state; // unlikely that we would want to echo packet back to source on l2lb
+	      goto invalid_state; // unlikely that we should echo packet back to source on l2lb
 	  }
-	  
+
+
+	  /**********************************************************************/
+	  if(0) be_tcp_concurrent(state, ipv4, tcp, ERA);
+	  /**********************************************************************/
+
 	  maccpy(eth_hdr->h_source, eth_hdr->h_dest);
 	  maccpy(eth_hdr->h_dest, state->mac);
 	  
@@ -574,7 +654,11 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
   }
 
   struct real real_s;
-  struct real *real = find_real(ipv4, (void *) tcp, &real_s);
+  struct real *real;
+      
+ new_flow:
+  
+  real = find_real(ipv4, (void *) tcp, &real_s);
   if(real) {
       //write_perf(global, start); global = NULL;
 
@@ -721,74 +805,3 @@ struct xdp_md {
 	__u32 rx_queue_index;  // rxq->queue_index
 };
 */
-
-
-/*
-  if(0) { // && (table = bpf_map_lookup_elem(&services, &s))) {
-      
-      struct tuple t;
-      memset(&t, 0, sizeof(t));
-      t.src = ipv4->saddr;
-      t.dst = ipv4->daddr;
-      t.sport = tcp->source;
-      t.dport = tcp->dest;
-      t.protocol = ipv4->protocol;
-
-      __u16 hash = sdbm((unsigned char *)&t, sizeof(t));
-      
-      unsigned int i = table->be[hash>>3];
-
-      if(i == 0) {
-	  return XDP_DROP;
-      }
-
-      struct backend *be = bpf_map_lookup_elem(&backends, &i);
-
-      if(!be) {
-	  return XDP_DROP;
-      }
-
-      be_tcp_counter(ipv4->daddr, tcp->dest, be->ip, data_end - data);
-      
-      if(be->local) {
-	  return XDP_PASS;
-      }
-
-      if(nulmac(be->mac)) {
-	  return XDP_DROP;
-      }
-      
-      if(equmac(be->mac, eth_hdr->h_dest)) {
-          return XDP_DROP; // looks like local NIC, but not declared as such
-      }
-
-      if(equmac(be->mac, eth_hdr->h_source)) {
-          return XDP_DROP; // unlikely that we would want to echo packet back to source on an l2lb
-      }
-      
-      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-      maccpy(eth_hdr->h_dest, be->mac);
-
-      struct state new_state;
-      memset(&new_state, 0, sizeof(new_state));
-      maccpy(new_state.mac, be->mac);
-      bpf_map_update_elem(&flow_state, &flow, &new_state, BPF_ANY);
-
-      
-      if(global) {
-        global->timens += (bpf_ktime_get_ns() - start);
-        global->packets++;
-      }
-    
-      return XDP_TX;
-  }
-*/
-
-
-
-  /*
-  s.port = 0;
-  if((table = bpf_map_lookup_elem(&services, &s))) {
-      return XDP_DROP;
-  }
-  */

@@ -31,24 +31,8 @@ import (
 
 type IP4 = types.IP4
 type L4 = types.L4
-
-//type Check struct {
-//	Path   string `json:"path"`
-//	Port   uint16 `json:"port"'`
-//	Expect uint32 `json:"expect"`
-//	Host   string `json:"host"`
-//}
-
 type Check = types.Check
 type Checks = types.Checks
-
-//type Checks struct {
-//	Http  []Check `json:"http,omitempty"`
-//	Https []Check `json:"https,omitempty"`
-//	Tcp   []Check `json:"tcp,omitempty"`
-//	Syn   []Check `json:"syn,omitempty"`
-//	Dns   []Check `json:"dns,omitempty"`
-//}
 
 type RIP struct {
 	Http  []Check `json:"http,omitempty"`
@@ -83,6 +67,7 @@ type Conf struct {
 	rip   map[uint16]IP4
 	nat   map[uint16][2]IP4
 	vid   map[uint16]uint16
+	vlan  map[IP4]uint16
 }
 
 func load(file string) (*Conf, error) {
@@ -114,31 +99,8 @@ func Load(file string, old *Conf) (*Conf, error) {
 	}
 
 	c, err := load(file)
-	fmt.Println(c, err)
 
-	j, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	fmt.Println(string(j), err)
-
-	rip := map[IP4]bool{}
-	nat := map[[2]IP4]bool{}
-
-	for v, l := range c.VIPs {
-		for l4, s := range l {
-			for r, x := range s.RIPs {
-				nat[[2]IP4{v, r}] = false
-				rip[r] = false
-				fmt.Println(v, l4, r, x)
-			}
-		}
-	}
-
-	c.rip = rips(old.rip, rip)
-	c.nat = nats(old.nat, nat)
-
-	err = c.vlans()
+	c.vlan, err = c.vlans()
 	if err != nil {
 		return nil, err
 	}
@@ -146,10 +108,12 @@ func Load(file string, old *Conf) (*Conf, error) {
 	return c, nil
 }
 
-func (c *Conf) vlans() error {
+func (c *Conf) vlans() (map[IP4]uint16, error) {
+
+	foo := map[IP4]uint16{}
 
 	if len(c.VLANs) == 0 {
-		return nil
+		return foo, nil
 	}
 
 	vlan := map[uint16]*net.IPNet{}
@@ -157,7 +121,7 @@ func (c *Conf) vlans() error {
 	for k, v := range c.VLANs {
 		_, ipnet, err := net.ParseCIDR(v)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		vlan[k] = ipnet
 	}
@@ -172,21 +136,35 @@ rips:
 				continue rips
 			}
 		}
-		return errors.New("No VLAN for " + i.String())
+		return foo, errors.New("No VLAN for " + i.String())
+	}
+
+rips2:
+	for _, i := range c.Reals() {
+		for k, v := range vlan {
+			if v.Contains(net.IPv4(i[0], i[1], i[2], i[3])) {
+				foo[i] = k
+				continue rips2
+			}
+		}
+		return foo, errors.New("No VLAN for " + i.String())
 	}
 
 	c.vid = vid
 
 	fmt.Println(vid)
 
-	return nil
+	return foo, nil
 }
 
-func (c *Conf) NATs() map[uint16][2]IP4 { return c.nat }
-func (c *Conf) RIPs() map[uint16]IP4    { return c.rip }
+func (c *Conf) Vlans() map[IP4]uint16   { return c.vlan }
 func (c *Conf) VIDs() map[uint16]uint16 { return c.vid }
 
-func nats(old map[uint16][2]IP4, new map[[2]IP4]bool) map[uint16][2]IP4 {
+/*
+func (c *Conf) NATs() map[uint16][2]IP4 { return c.nat }
+func (c *Conf) RIPs() map[uint16]IP4    { return c.rip }
+
+func _nats(old map[uint16][2]IP4, new map[[2]IP4]bool) map[uint16][2]IP4 {
 	o := map[[2]IP4]uint16{}
 	r := map[uint16][2]IP4{}
 	var n uint16
@@ -214,8 +192,70 @@ func nats(old map[uint16][2]IP4, new map[[2]IP4]bool) map[uint16][2]IP4 {
 
 	return r
 }
+*/
+/*
+func (c *Conf) _Reals() []IP4 {
+	var l []IP4
 
-func rips(old map[uint16]IP4, new map[IP4]bool) map[uint16]IP4 {
+	for _, ip := range c.RIPs() {
+		l = append(l, ip)
+	}
+
+	return l
+}
+func (c *Conf) _Nats() [][2]IP4 {
+	var l [][2]IP4
+
+	for _, p := range c.NATs() {
+		l = append(l, p)
+	}
+
+	return l
+}
+*/
+
+func (c *Conf) Reals() []IP4 {
+
+	real := map[IP4]bool{}
+
+	for _, l := range c.VIPs {
+		for _, s := range l {
+			for r, _ := range s.RIPs {
+				real[r] = false
+			}
+		}
+	}
+
+	var n []IP4
+	for k, _ := range real {
+		n = append(n, k)
+	}
+
+	return n
+}
+
+func (c *Conf) Nats() [][2]IP4 {
+
+	nat := map[[2]IP4]bool{}
+
+	for v, l := range c.VIPs {
+		for _, s := range l {
+			for r, _ := range s.RIPs {
+				nat[[2]IP4{v, r}] = false
+			}
+		}
+	}
+
+	var n [][2]IP4
+	for k, _ := range nat {
+		n = append(n, k)
+	}
+
+	return n
+}
+
+/*
+func _rips(old map[uint16]IP4, new map[IP4]bool) map[uint16]IP4 {
 	o := map[IP4]uint16{}
 	r := map[uint16]IP4{}
 	var n uint16
@@ -230,7 +270,7 @@ func rips(old map[uint16]IP4, new map[IP4]bool) map[uint16]IP4 {
 		find:
 			n++
 			if n > 255 {
-				panic("nats")
+				panic("rips")
 			}
 
 			if _, ok := old[n]; ok {
@@ -244,7 +284,7 @@ func rips(old map[uint16]IP4, new map[IP4]bool) map[uint16]IP4 {
 	return r
 }
 
-func (c *Conf) RIP(r IP4) uint16 {
+func (c *Conf) _RIP(r IP4) uint16 {
 	for k, v := range c.rip {
 		if v == r {
 			return k
@@ -253,7 +293,7 @@ func (c *Conf) RIP(r IP4) uint16 {
 
 	return 0
 }
-func (c *Conf) NAT(vip, rip IP4) uint16 {
+func (c *Conf) _NAT(vip, rip IP4) uint16 {
 	for k, v := range c.nat {
 		if v[0] == vip && v[1] == rip {
 			return k
@@ -262,3 +302,4 @@ func (c *Conf) NAT(vip, rip IP4) uint16 {
 
 	return 0
 }
+*/
