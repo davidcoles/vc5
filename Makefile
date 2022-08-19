@@ -4,6 +4,9 @@ LIBBPF_LIB := $(PWD)/bpf
 export CGO_CFLAGS = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 
+OBJ := core/bpf/bpf.o core/bpf/simple.o kernel/bpf/test.o
+BIN := cmd/vc5 cmd/vc5ng
+
 ## If this is increased to 34000000 it seems to fail on my systems.
 ## No idea why. Even on sysems with obscene amount of RAM (>200GB)
 ## libbpf: map 'flows': failed to create: Argument list too long(-7)
@@ -12,16 +15,19 @@ export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 MAX_FLOWS    ?= 10000000
 MAX_SERVICES ?= 100
 
-all: clean cmd/vc5 cmd/vc5.json
-
-cmd/vc5: cmd/main.go core/bpf/bpf.o core/bpf/simple.o 
-	cd cmd && go build -o vc5 main.go
+all: clean cmd/vc5.json $(BIN)
 
 cmd/vc5.yaml:
 	cp docs/config.yaml $@
 
 cmd/vc5.json: tools/config.pl cmd/vc5.yaml
 	tools/config.pl cmd/vc5.yaml >$@
+
+cmd/vc5: cmd/main.go $(OBJ)
+	go build -o $@ $<
+
+cmd/vc5ng: cmd/vc5ng.go $(OBJ)
+	go build -o $@ $<
 
 %.o: %.c bpf
 	clang -S \
@@ -37,7 +43,7 @@ cmd/vc5.json: tools/config.pl cmd/vc5.yaml
 	    -Wno-compare-distinct-pointer-types \
 	    -g -O2 -emit-llvm -c -o $*.ll $*.c
 	llc -march=bpf -filetype=obj -o $@ $*.ll
-
+	rm $*.ll
 
 libbpf/src:
 	git submodule init
@@ -50,17 +56,8 @@ bpf: libbpf/src/libbpf.a
 	ln -s libbpf/src bpf
 
 clean:
-	rm -f cmd/vc5 cmd/vc5.json core/bpf/*.ll core/bpf/*.o bpf kernel/bpf/*.o kernel/bpf/*.ll cmd/test
+	rm -f $(BIN) $(OBJ) cmd/vc5.json
 
 distclean: clean
 	rm -rf libbpf
 	mkdir libbpf
-
-
-test:
-	rm -f cmd/test
-	$(MAKE) cmd/test
-
-cmd/test: cmd/test.go kernel/bpf/test.o core/bpf/bpf.o
-	go build -o $@ $<
-

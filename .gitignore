@@ -1,5 +1,7 @@
 cmd/vc5.json
 cmd/vc5.yaml
 cmd/vc5
-core/bpf/*.ll
-core/bpf/*.o
+cmd/vc5ng
+**/*.o
+**/*.ll
+bpf
