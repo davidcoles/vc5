@@ -59,6 +59,13 @@ type Serv struct {
 	Leastconns  bool
 	Sticky      bool
 	RIPs        map[IP4]RIP
+	Local       Checks
+}
+
+type RHI struct {
+	AS_Number uint16
+	Hold_Time uint16
+	Peers     []string
 }
 
 type Conf struct {
@@ -68,6 +75,7 @@ type Conf struct {
 	nat   map[uint16][2]IP4
 	vid   map[uint16]uint16
 	vlan  map[IP4]uint16
+	RHI   RHI
 }
 
 func load(file string) (*Conf, error) {
@@ -239,6 +247,7 @@ func (c *Conf) Nats() [][2]IP4 {
 	nat := map[[2]IP4]bool{}
 
 	for v, l := range c.VIPs {
+		nat[[2]IP4{v, IP4{127, 0, 0, 1}}] = false
 		for _, s := range l {
 			for r, _ := range s.RIPs {
 				nat[[2]IP4{v, r}] = false

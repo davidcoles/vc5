@@ -56,6 +56,7 @@ type Service struct {
 	Sticky     bool
 	Leastconns bool
 	Metadata   Metadata
+	Local      Real
 }
 
 type Virtual struct {
@@ -221,8 +222,12 @@ func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error
 				reals[r] = Real{RIP: rip, NAT: n, Checks: z.Checks()}
 			}
 
+			r := IP4{127, 0, 0, 1}
+			n := hc._NAT(vip, r)
+			local := Real{RIP: r, NAT: n, Checks: y.Local}
+
 			m := Metadata{Name: y.Name, Description: y.Description}
-			s := Service{Reals: reals, Metadata: m}
+			s := Service{Reals: reals, Metadata: m, Local: local, Minimum: y.Need}
 			v.Services[l4] = s
 		}
 

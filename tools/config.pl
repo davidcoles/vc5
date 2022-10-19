@@ -54,6 +54,7 @@ if(1) {
 
 	    $i{'name'} = $s->{_name};
 	    $i{'description'} = $s->{_desc};
+	    $i{'fallback'} = $s->{_fall} ? JSON::true : JSON::false;
 	    $i{'sticky'} = $s->{_sticky} ? JSON::true : JSON::false;
 	    $i{'leastconns'} = $s->{_leastconns} ? JSON::true : JSON::false;	    
 	    
@@ -104,6 +105,15 @@ if(1) {
 		    
 		    $i{'rips'}{$_->{_addr}} = \%r;
 		}
+
+		my %l;
+		$l{'http'}  = \@http  if scalar(@http) > 0;
+		$l{'https'} = \@https if scalar(@https) > 0;
+		$l{'tcp'}   = \@tcp   if scalar(@tcp) > 0;
+		$l{'syn'}   = \@syn   if scalar(@syn) > 0;
+		$l{'dns'}   = \@dns   if scalar(@dns) > 0;
+
+		$i{'local'} = \%l if $s->{_fall} eq JSON::true;
 	    }
 	    
 	    push(@S, \%i);	
@@ -155,6 +165,7 @@ sub readconf {
 	my $need = $_->{'need'};	
 	my $sticky = $_->{'sticky'} ? JSON::true : JSON::false;
 	my $leastconns = $_->{'leastconns'} ? JSON::true : JSON::false;	
+	my $fall = $_->{'fallback'} =~ /^(yes|true|on|y)$/i ? JSON::true : JSON::false;
 	my %r;
 
 	if(ref($_->{'servers'}) eq 'HASH') {
@@ -177,7 +188,7 @@ sub readconf {
 
 	my %policy = %$policy;
 
-	my @ret = policy($addr, $host, $path, $name, $desc, $need, $sticky, $leastconns, \%r, %policy);
+	my @ret = policy($addr, $host, $path, $name, $desc, $fall, $need, $sticky, $leastconns, \%r, %policy);
 	
 	push(@s, @ret);
 	
@@ -188,7 +199,7 @@ sub readconf {
 
 
 sub policy {
-    my($a, $host_, $path_, $name_, $desc_, $need_, $sticky_, $leastconns_, $r, %policy) = @_;
+    my($a, $host_, $path_, $name_, $desc_, $fall_, $need_, $sticky_, $leastconns_, $r, %policy) = @_;
 
     my %r = %$r;
     my @s;
@@ -247,6 +258,7 @@ sub policy {
 	    _port => $port,
 	    _name => $name_,
 	    _desc => $desc_,
+	    _fall => $fall_,	    
 	    _need => $need,
 	    _real => \@R,
 	    _udp => $udp,

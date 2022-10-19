@@ -50,34 +50,57 @@ function updateStats(url) {
 	if (err !== null) {
 	    alert('Something went wrong: ' + err);
 	} else {
-
-	    var services = document.getElementById("services");
 	    
-	    var newdiv = document.createElement("div");
+	    var summary = document.createElement("div");
+	    summary.innerHTML = "DEFCON" + data.defcon + " " + data.latency +"ns " +
+		tsf(data.octets_ps*8) + "bps " + tsf(data.packets_ps) + "pps "
 
-	    var n = document.createElement("div");
-	    n.innerHTML = tsf(data.packets) + "pps " +
-		tsf(data.octets*8) + "bps " + data.latency +"ns " + "DEFCON" + data.defcon
-	    newdiv.appendChild(n)
+	    document.getElementById("summary").replaceWith(summary);
+	    summary.id = "summary";
 	    
-	    for(var s in data.vips) {
-		for(var l in data.vips[s]) {
-		    var n = document.createElement("div");
-		    n.innerHTML = s + ":" + l
-		    newdiv.appendChild(n)
-		    for(var b in data.vips[s][l]) {
+	    
+	    var rhi = document.createElement("div");
+	    for(var vip in data.rhi) {
+		var v = document.createElement("div");
+		v.innerHTML = vip + ": " + (data.rhi[vip] ? "UP" : "DOWN")
+		rhi.appendChild(v)
+	    }
+	    document.getElementById("rhi").replaceWith(rhi);
+	    rhi.id = "rhi";
+
+	    
+	    var services = document.createElement("div");
+	    	    
+	    for(var vip in data.vips) {
+		for(var l4 in data.vips[vip]) {
+		    var service =  data.vips[vip][l4]
+		    var n = document.createElement("div")
+		    var up = service.up ? "UP" : "DOWN"
+		    if(service.fallback)  {
+			up = "FALLBACK"
+		    }
+		    
+		    n.innerHTML = vip + ":" + l4 + " " + up + " " +
+			tsf(service.octets_ps*8) + "bps " + tsf(service.packets_ps) + "pps "
+		    
+		    services.appendChild(n)
+		    
+		    var rips = service.rips
+		    for(var rip in rips) {
 			var n = document.createElement("div");
-			var c = data.vips[s][l][b]
-			n.innerHTML = "&nbsp;&nbsp;&nbsp;&nbsp;" + b + " " +
-			    tsf(c.packets) + "pps " + tsf(c.octets*8) + "bps " +
-			    (c.up ? "UP" : "DOWN")
-			newdiv.appendChild(n)
+			var r = rips[rip]
+			n.innerHTML = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
+			    rip + " " + (r.up ? "UP" : "DOWN") + " " +
+			     tsf(r.octets_ps*8) + "bps " + tsf(r.packets_ps) + "pps " 
+			    
+			services.appendChild(n)
 		    }
 		}
 	    }
 	    
-	    newdiv.id = "services";
-	    services.replaceWith(newdiv);
+	    document.getElementById("services").replaceWith(services);
+	    services.id = "services";
+	    
 	}
     });
 

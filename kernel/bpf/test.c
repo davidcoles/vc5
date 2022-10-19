@@ -37,7 +37,6 @@
 #include <bpf/bpf_endian.h>
 
 #define SECOND_NS 1000000000
-#define MAGLEV 1
 
 struct tuple {
     __be32 src;
@@ -185,22 +184,6 @@ struct real {
     __u8 pad[4];
 };
     
-struct maglev {
-    __be32 ip;
-    __be16 port;
-    __u16 hash;
-    __u8 protocol;
-    __u8 pad[3];
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
-    __type(key, struct maglev);
-    __type(value, struct real);
-    __uint(max_entries, 128*65536);
-} maglev_real SEC(".maps");
-
-
 /**********************************************************************/
 
 struct service {
@@ -213,6 +196,7 @@ struct service {
 struct backend {
     __u8 hash[8192];
     struct real real[256];
+    __u8 flag[8];
 };
 
 struct {
@@ -328,32 +312,7 @@ static inline void write_perf(struct global *global, __u64 start) {
 //    bpf_map_update_elem(&flow_state, flow, &new_state, BPF_ANY);
 //}
 
-static inline struct real *find_real(struct iphdr *ipv4, void *l4, struct real *r) {
-#if MAGLEV
-    struct maglev maglev;
-    memset(&maglev, 0, sizeof(maglev));
-    maglev.ip = ipv4->daddr;
-    //maglev.port = tcp->dest;
-    maglev.port = 0;
-    maglev.hash = l4_hash(ipv4, l4);
-    maglev.protocol = IPPROTO_TCP;
-
-    switch(ipv4->protocol) {
-    case IPPROTO_TCP:
-        maglev.port = ((struct tcphdr *) l4)->dest;
-        break;
-	
-    case IPPROTO_UDP:
-	maglev.port = ((struct udphdr *) l4)->dest;
-	break;
-    }
-    //return bpf_map_lookup_elem(&maglev_real, &maglev);
-    struct real *real;
-    if(!(real = bpf_map_lookup_elem(&maglev_real, &maglev)))
-	return NULL;
-    *r = *real;
-    return r;
-#else
+static inline int find_real(struct iphdr *ipv4, void *l4, struct real *r) {
     struct service s;
     memset(&s, 0, sizeof(s));
     s.vip = ipv4->daddr;
@@ -374,19 +333,23 @@ static inline struct real *find_real(struct iphdr *ipv4, void *l4, struct real *
     struct backend *backend = bpf_map_lookup_elem(&service_backend, &s);
 
     if(!backend)
-	return NULL;
+	return 0; //return NULL;
+    
+    if(backend->flag[0] != 0) {
+	return 2;
+    }
     
     __u16 hash = l4_hash(ipv4, l4);
     __u8 i = backend->hash[hash>>3];
     
     if(i == 0) {
-	return NULL;
+	return 0; //return NULL;
     }
 
     *r = backend->real[i];
     
-    return r; //&(backend->real[i]);
-#endif
+    //return r; //&(backend->real[i]);
+    return 1;
 }
 
 static inline void store_tcp_flow(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, __u8 *mac)
@@ -546,233 +509,241 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 	// ~90ns to here
 	//write_perf(global, start); global = NULL;
     }
-    
+
     struct ethhdr *eth_hdr = data;
     __u32 nh_off = sizeof(struct ethhdr);
     __be16 eth_proto;
     
-  if (data + nh_off > data_end) {
-      return XDP_DROP;
-  }
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
+    
+    eth_proto = eth_hdr->h_proto;
+    
+    if (eth_proto != bpf_ntohs(ETH_P_IP)) {
+	return XDP_PASS;
+    }
+    
+    struct iphdr *ipv4 = data + nh_off;
+    
+    nh_off += sizeof(struct iphdr);
+    
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
+    
+    // we don't support ip options
+    if (ipv4->ihl != 5) {
+	return XDP_DROP;
+    }
+    
+    // ignore evil bit and DF, drop if more fragments flag set, or fragent offset is not 0
+    if ((ipv4->frag_off & bpf_htons(0x3fff)) != 0) {
+	return XDP_DROP;
+    }
+    
+    if (ipv4->protocol != IPPROTO_TCP) {
+	return XDP_PASS;
+    }
+    
+    struct tcphdr *tcp = data + nh_off;
+    
+    nh_off += sizeof(struct tcphdr);
+    
+    if (data + nh_off > data_end) {
+	return XDP_DROP;
+    }
+    
   
-  eth_proto = eth_hdr->h_proto;
-  
-  if (eth_proto != bpf_ntohs(ETH_P_IP)) {
-      return XDP_PASS;
-  }
-  
-  struct iphdr *ipv4 = data + nh_off;
-  
-  nh_off += sizeof(struct iphdr);
-
-  if (data + nh_off > data_end) {
-      return XDP_DROP;
-  }
-  
-  // we don't support ip options
-  if (ipv4->ihl != 5) {
-      return XDP_DROP;
-  }
-  
-  // ignore evil bit and DF, drop if more fragments flag set, or fragent offset is not 0
-  if ((ipv4->frag_off & bpf_htons(0x3fff)) != 0) {
-      return XDP_DROP;
-  }
-  
-  if (ipv4->protocol != IPPROTO_TCP) {
-      return XDP_PASS;
-  }
-
-  struct tcphdr *tcp = data + nh_off;
-
-  nh_off += sizeof(struct tcphdr);
-  
-  if (data + nh_off > data_end) {
-      return XDP_DROP;
-  }
-
-  // ~130ns to here ...
-  //write_perf(global, start); global = NULL;
-
-  if(DEFCON >= DEFCON3) {
-      struct flow flow;
-      flow.src = ipv4->saddr;
-      flow.dst = ipv4->daddr;
-      flow.sport = tcp->source;
-      flow.dport = tcp->dest;
-      
-      // failed lookup takes ~70ns
-      struct state *state = NULL;
-      if((state = bpf_map_lookup_elem(&flow_state, &flow))) {
-	  // ~230ns to here
-	  //write_perf(global, start); global = NULL;
+    // ~130ns to here ...
+    //write_perf(global, start); global = NULL;
+    
+    if(DEFCON >= DEFCON3) {
+	struct flow flow;
+	flow.src = ipv4->saddr;
+	flow.dst = ipv4->daddr;
+	flow.sport = tcp->source;
+	flow.dport = tcp->dest;
+	
+	// failed lookup takes ~70ns
+	struct state *state = NULL;
+	if((state = bpf_map_lookup_elem(&flow_state, &flow))) {
+	    // ~230ns to here
+	    //write_perf(global, start); global = NULL;
+	    
+	    if((state->time + (60l * SECOND_NS)) < start) {
+		goto new_flow;
+	    }
+	    
+	    if((state->time + (20l * SECOND_NS)) < start) {
+		state->time = start;
+	    }
+	    
+	    if(state->rip == 0) {
+		goto invalid_state;
+	    }
 	  
-	  if((state->time + (60l * SECOND_NS)) < start) {
-	      goto new_flow;
-	  }
-
-	  if((state->time + (20l * SECOND_NS)) < start) {
-	      state->time = start;
-	  }
+	    if(nulmac(state->mac)) {
+		goto invalid_state;
+	    }
+	    
+	    if(equmac(state->mac, eth_hdr->h_dest)) {
+		goto invalid_state; // looks like local NIC
+	    }
 	  
-	  if(state->rip == 0) {
-	      goto invalid_state;
-	  }
-	  
-	  if(nulmac(state->mac)) {
-	      goto invalid_state;
-	  }
-	  
-	  if(equmac(state->mac, eth_hdr->h_dest)) {
-	      goto invalid_state; // looks like local NIC
-	  }
-	  
-	  if(equmac(state->mac, eth_hdr->h_source)) {
-	      goto invalid_state; // unlikely that we should echo packet back to source on l2lb
-	  }
-
-
-	  /**********************************************************************/
-	  if(0) be_tcp_concurrent(state, ipv4, tcp, ERA);
-	  /**********************************************************************/
-
-	  maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-	  maccpy(eth_hdr->h_dest, state->mac);
-	  
-	  be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, data_end - data);
-
-	  write_perf(global, start);
-	  
-	  return XDP_TX;
-
-      invalid_state:
-	  bpf_map_delete_elem(&flow_state, &flow);
-	  if(global) global->dropped++;
-	  write_perf(global, start);
-	  return XDP_DROP;
-      }
-  }
-
-  struct real real_s;
-  struct real *real;
-      
+	    if(equmac(state->mac, eth_hdr->h_source)) {
+		goto invalid_state; // unlikely that we should echo packet back to source on l2lb
+	    }
+	    
+	    
+	    /**********************************************************************/
+	    if(0) be_tcp_concurrent(state, ipv4, tcp, ERA);
+	    /**********************************************************************/
+	    
+	    maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+	    maccpy(eth_hdr->h_dest, state->mac);
+	    
+	    be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, data_end - data);
+	    
+	    write_perf(global, start);
+	    
+	    return XDP_TX;
+	    
+	invalid_state:
+	    bpf_map_delete_elem(&flow_state, &flow);
+	    if(global) global->dropped++;
+	    write_perf(global, start);
+	    return XDP_DROP;
+	}
+    }
+    global = NULL;
+    struct real real_s;
+    struct real *real = &real_s;
+    
  new_flow:
+    
+    switch(find_real(ipv4, (void *) tcp, &real_s)) {
+    case 0:
+	break;
+    case 2:
+	return XDP_PASS;
+    case 1:
+	//return XDP_PASS;
+	//if(real) {
+	//write_perf(global, start); global = NULL;
+
+	if(real->rip == 0) {
+	    goto invalid_real;
+	}
+	
+	if(nulmac(real->mac)) {
+	    goto invalid_real;
+	}
+      
+	if(equmac(real->mac, eth_hdr->h_dest)) {
+	    goto invalid_real; // looks like local NIC, but not declared as such
+	}
+
+	if(equmac(real->mac, eth_hdr->h_source)) {
+	    goto invalid_real; // unlikely that we would want to echo packet back to source on an l2lb
+	}
+      
+	maccpy(eth_hdr->h_source, eth_hdr->h_dest);
+	maccpy(eth_hdr->h_dest, real->mac);
+      
+	if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, tcp, real->rip, real->mac);
+	if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, tcp->dest, real->rip, data_end - data);
+
+	write_perf(global, start);
+      
+	return XDP_TX;
+
+    invalid_real:
+	if(global) global->dropped++;
+	write_perf(global, start);
+	return XDP_DROP;
+    }
+
+
+
+    global = NULL; // don't time-non-balanced traffic
+
+    // DROP PACKETS TO PORTS ON VIPS WHICH HAVEN'T BEEN CAUGHT BY A SERVICE
+    struct vrpp vr;
+    vr.vip = ipv4->daddr;
+    vr.rip = 0;
+    vr.port = 0;
+    vr.protocol = 0;
+    vr.pad = 0;
+    struct counter *co = bpf_map_lookup_elem(&vrpp_counter, &vr);
+    if(co) {
+	co->octets += data_end - data;
+	co->packets++;
+	return XDP_DROP;
+    }
   
-  real = find_real(ipv4, (void *) tcp, &real_s);
-  if(real) {
-      //write_perf(global, start); global = NULL;
 
-      if(real->rip == 0) {
-	  goto invalid_real;
-      }
-      
-      if(nulmac(real->mac)) {
-          goto invalid_real;
-      }
-      
-      if(equmac(real->mac, eth_hdr->h_dest)) {
-          goto invalid_real; // looks like local NIC, but not declared as such
-      }
-
-      if(equmac(real->mac, eth_hdr->h_source)) {
-	  goto invalid_real; // unlikely that we would want to echo packet back to source on an l2lb
-      }
-      
-      maccpy(eth_hdr->h_source, eth_hdr->h_dest);
-      maccpy(eth_hdr->h_dest, real->mac);
-      
-      if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, tcp, real->rip, real->mac);
-      if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, tcp->dest, real->rip, data_end - data);
-
-      write_perf(global, start);
-      
-      return XDP_TX;
-
-  invalid_real:
-      if(global) global->dropped++;
-      write_perf(global, start);
-      return XDP_DROP;
-  }
-
-
-  global = NULL; // don't time-non-balanced traffic
-
-  // DROP PACKETS TO PORTS ON VIPS WHICH HAVEN'T BEEN CAUGHT BY A SERVICE
-  struct vrpp vr;
-  vr.vip = ipv4->daddr;
-  vr.rip = 0;
-  vr.port = 0;
-  vr.protocol = 0;
-  vr.pad = 0;
-  struct counter *co = bpf_map_lookup_elem(&vrpp_counter, &vr);
-  if(co) {
-      co->octets += data_end - data;
-      co->packets++;
-      return XDP_DROP;
-  }
+    //OUTGOING_PROBE:
   
+    struct nat *vme = bpf_map_lookup_elem(&nat_to_vip_mac, &(ipv4->daddr));
+    if (vme) {
 
-  //OUTGOING_PROBE:
+	if(!(vme->ifindex)) {         // local backend
+	    ipv4->daddr = vme->dstip; // vip addr, but keep x.y.255.254 as src
+	    ipv4->ttl = 1;            // prevent packet from escaping into the wild
+	} else {
+	    ipv4->saddr = vme->srcip;
+	    ipv4->daddr = vme->dstip;
+	    maccpy(eth_hdr->h_source, vme->srcmac);
+	    maccpy(eth_hdr->h_dest, vme->dstmac);
+	}
+      
+	ipv4->check = 0;
+	ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
+      
+	tcp->check = 0;
+	tcp->check = l4_checksum(ipv4, tcp, data_end);
+
+	if(!(vme->ifindex)) {
+	    return XDP_PASS;
+	}
+      
+	return bpf_redirect(vme->ifindex, 0);
+    }
+
+
+    struct vipmac vm;
+    vm.vip = ipv4->saddr;
+    maccpy(vm.mac, eth_hdr->h_source);
+
+    //RETURNING_PROBE:
   
-  struct nat *vme = bpf_map_lookup_elem(&nat_to_vip_mac, &(ipv4->daddr));
-  if (vme) {
-
-      if(!(vme->ifindex)) {         // local backend
-	  ipv4->daddr = vme->dstip; // vip addr, but keep x.y.255.254 as src
-	  ipv4->ttl = 1;            // prevent packet from escaping into the wild
-      } else {
-	  ipv4->saddr = vme->srcip;
-	  ipv4->daddr = vme->dstip;
-	  maccpy(eth_hdr->h_source, vme->srcmac);
-	  maccpy(eth_hdr->h_dest, vme->dstmac);
-      }
+    vme = bpf_map_lookup_elem(&vip_mac_to_nat, &vm);
+    if (vme) {
+	if(!(vme->ifindex)) {         // local backend
+	    ipv4->saddr = vme->srcip; // change vip to nat, but dst should be unchanged
+	    ipv4->ttl = 1;            // prevent packet from escaping into the wild	  
+	} else {
+	    ipv4->saddr = vme->srcip; // (nat addr)
+	    ipv4->daddr = vme->dstip; // (vc5vb adr)
+	    maccpy(eth_hdr->h_dest, vme->dstmac);
+	    //maccpy(eth_hdr->h_source, vme->srcmac);
+	}
       
-      ipv4->check = 0;
-      ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
+	ipv4->check = 0;
+	ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
       
-      tcp->check = 0;
-      tcp->check = l4_checksum(ipv4, tcp, data_end);
+	tcp->check = 0;
+	tcp->check = l4_checksum(ipv4, tcp, data_end);
 
-      if(!(vme->ifindex)) {
-	  return XDP_PASS;
-      }
+	if(!(vme->ifindex)) {
+	    return XDP_PASS;
+	}
       
-      return bpf_redirect(vme->ifindex, 0);
-  }
-
-
-  struct vipmac vm;
-  vm.vip = ipv4->saddr;
-  maccpy(vm.mac, eth_hdr->h_source);
-
-  //RETURNING_PROBE:
+	return bpf_redirect(vme->ifindex, 0);
+    }
   
-  vme = bpf_map_lookup_elem(&vip_mac_to_nat, &vm);
-  if (vme) {
-      if(!(vme->ifindex)) {         // local backend
-	  ipv4->saddr = vme->srcip; // change vip to nat, but dst should be unchanged
-	  ipv4->ttl = 1;            // prevent packet from escaping into the wild	  
-      } else {
-	  ipv4->saddr = vme->srcip; // (nat addr)
-	  ipv4->daddr = vme->dstip; // (vc5vb adr)
-	  maccpy(eth_hdr->h_dest, vme->dstmac);
-	  //maccpy(eth_hdr->h_source, vme->srcmac);
-      }
-      
-      ipv4->check = 0;
-      ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
-      
-      tcp->check = 0;
-      tcp->check = l4_checksum(ipv4, tcp, data_end);
-
-      if(!(vme->ifindex)) {
-	  return XDP_PASS;
-      }
-      
-      return bpf_redirect(vme->ifindex, 0);
-  }
-  
-  return XDP_PASS;
+    return XDP_PASS;
 }
 
 char _license[] SEC("license") = "GPL";
@@ -784,24 +755,24 @@ char _license[] SEC("license") = "GPL";
  * return codes are reserved for future use. Unknown return codes will
  * result in packet drops and a warning via bpf_warn_invalid_xdp_action().
  *
-enum xdp_action {
-	XDP_ABORTED = 0,
-	XDP_DROP,
-	XDP_PASS,
-	XDP_TX,
-	XDP_REDIRECT,
-};
+ enum xdp_action {
+ XDP_ABORTED = 0,
+ XDP_DROP,
+ XDP_PASS,
+ XDP_TX,
+ XDP_REDIRECT,
+ };
 
  * user accessible metadata for XDP packet hook
  * new fields must be added to the end of this structure
  *
-struct xdp_md {
-	// (Note: type __u32 is NOT the real-type)
-	__u32 data;
-	__u32 data_end;
-	__u32 data_meta;
-	// Below access go through struct xdp_rxq_info
-	__u32 ingress_ifindex; // rxq->dev->ifindex
-	__u32 rx_queue_index;  // rxq->queue_index
-};
+ struct xdp_md {
+ // (Note: type __u32 is NOT the real-type)
+ __u32 data;
+ __u32 data_end;
+ __u32 data_meta;
+ // Below access go through struct xdp_rxq_info
+ __u32 ingress_ifindex; // rxq->dev->ifindex
+ __u32 rx_queue_index;  // rxq->queue_index
+ };
 */

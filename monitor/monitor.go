@@ -57,6 +57,7 @@ type Status struct {
 	Metadata Metadata
 	Health   map[uint16]bool `json:"health"`
 	Healthy  bool            `json:"healthy"`
+	Fallback bool            `json:"fallback"`
 }
 
 type Virtual struct {
@@ -225,10 +226,14 @@ func virtual(services *Virtual_, c context) func(*Virtual_, bool) Virtual {
 func service(service *Service_, c context) func(*Service_, bool) Status {
 
 	x := map[uint16]func(*Real, bool) bool{}
+	l := rip(service.Local, c)
 	var m Metadata
+	var minimum uint16
 
 	update := func(service *Service_, fin bool) {
 		if service != nil {
+
+			minimum = service.Minimum
 
 			m = service.Metadata
 
@@ -240,6 +245,8 @@ func service(service *Service_, c context) func(*Service_, bool) Status {
 				}
 			}
 
+			l(&(service.Local), false)
+
 			for real, fn := range x {
 				if _, ok := service.Reals[real]; !ok {
 					fn(nil, true)
@@ -249,6 +256,7 @@ func service(service *Service_, c context) func(*Service_, bool) Status {
 		}
 
 		if fin {
+			l(nil, fin)
 			for k, fn := range x {
 				fn(nil, fin)
 				delete(x, k)
@@ -274,8 +282,11 @@ func service(service *Service_, c context) func(*Service_, bool) Status {
 			status.Health[k] = b
 		}
 
-		if healthy > 0 {
+		if healthy >= minimum {
 			status.Healthy = true
+		} else if l(nil, false) {
+			status.Healthy = true
+			status.Fallback = true
 		}
 
 		update(nil, fin)

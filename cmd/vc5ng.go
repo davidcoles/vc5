@@ -17,11 +17,11 @@
  */
 
 // TODO
-// concurrent connections
+// concurrent connections count
 // manage existing connection (SYN/RST/etc)
 // BGP
 // VLANs
-// sticky
+// sticky sessions
 
 package main
 
@@ -29,23 +29,21 @@ import (
 	"embed"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
 	"github.com/davidcoles/vc5"
 	"github.com/davidcoles/vc5/healthchecks"
-
-	//"github.com/davidcoles/vc5/xdp"
-	"fmt"
 	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/rendezvous"
-	"sort"
 )
 
 //go:embed static/*
@@ -62,25 +60,22 @@ var native = flag.Bool("n", false, "load xdp program in native mode")
 var test = flag.Bool("t", false, "run hashing tests")
 
 func main() {
-	//test2()
-	//return
-	//test1()
-	//return
 
 	flag.Parse()
 	args := flag.Args()
 
 	if *test {
-		test2()
+		test3()
 		return
 	}
+
+	ulimit()
 
 	if *sock != "" {
 		signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
 		vc5.NetnsServer(*sock)
 		return
 	}
-	//time.Sleep(2 * time.Second)
 
 	s, err := net.Listen("tcp", *port)
 
@@ -124,6 +119,9 @@ func main() {
 		log.Fatal(err)
 	}
 
+	pool := NewBGPPool(conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Peers)
+	pool.Peer(conf.RHI.Peers)
+
 	sig := make(chan os.Signal)
 	signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
 
@@ -151,6 +149,8 @@ func main() {
 					log.Fatal(err)
 				}
 
+				pool.Peer(conf.RHI.Peers)
+
 				v5.Update(hc)
 			}
 		}
@@ -158,33 +158,19 @@ func main() {
 
 	var stats *Stats
 
-	go func() {
-		var latency []uint64
-		var n *Stats
-		var o *Stats
-		var t time.Time
-
-		for {
-			o = n
-			n = getStats(v5)
-
-			r := n.Sub(o, time.Now().Sub(t))
-			t = time.Now()
-
-			r.Latency, latency = Latency(n.Latency, latency)
-
-			stats = r
-
-			time.Sleep(1 * time.Second)
-		}
-	}()
-
 	static := http.FS(STATIC)
 	handler := http.FileServer(static)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "static" + r.URL.Path
 		handler.ServeHTTP(w, r)
+	})
+
+	http.HandleFunc("/conf", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		j, _ := json.MarshalIndent(conf, "", "  ")
+		w.Write(j)
 	})
 
 	http.HandleFunc("/defcon1", func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +213,7 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		cf := v5.Config()
+		cf := v5.Status()
 		j, err := json.MarshalIndent(cf, "", "  ")
 
 		if err != nil {
@@ -252,61 +238,113 @@ func main() {
 		w.Write(j)
 	})
 
+	go func() {
+		var t time.Time
+
+		for {
+			s := getStats(v5)
+			s.Sub(stats, time.Now().Sub(t))
+			t = time.Now()
+			stats = s
+			pool.NLRI(s.RHI)
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
 	server := http.Server{}
 
 	log.Fatal(server.Serve(s))
 }
 
+func getStats(v5 *vc5.VC5) *Stats {
+
+	cf := v5.Status()
+	ss := v5.Stats()
+
+	var stats Stats
+	stats.VIPs = map[IP4]map[L4]Service{}
+	stats.RHI = map[IP4]bool{}
+
+	stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
+
+	for vip, v := range cf.Virtuals {
+		stats.VIPs[vip] = map[L4]Service{}
+		stats.RHI[vip] = v.Healthy
+		for l4, s := range v.Services {
+			reals := map[IP4]Real{}
+			for n, up := range s.Health {
+				r := cf.Backends[n]
+				t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
+				c := ss[t]
+				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets}
+			}
+			stats.VIPs[vip][l4] = Service{Reals: reals, Up: s.Healthy, Fallback: s.Fallback}
+		}
+	}
+
+	return &stats
+}
+
+/**********************************************************************/
+
+type Stats struct {
+	Octets    uint64                 `json:"octets"`
+	Packets   uint64                 `json:"packets"`
+	OctetsPS  uint64                 `json:"octets_ps"`
+	PacketsPS uint64                 `json:"packets_ps"`
+	Latency   uint64                 `json:"latency"`
+	DEFCON    uint8                  `json:"defcon"`
+	RHI       map[IP4]bool           `json:"rhi"`
+	VIPs      map[IP4]map[L4]Service `json:"vips"`
+}
+
+type Service struct {
+	Up        bool         `json:"up"`
+	Fallback  bool         `json:"fallback"`
+	Octets    uint64       `json:"octets"`
+	Packets   uint64       `json:"packets"`
+	OctetsPS  uint64       `json:"octets_ps"`
+	PacketsPS uint64       `json:"packets_ps"`
+	Reals     map[IP4]Real `json:"rips"`
+}
+
+func (s *Service) Total() {
+	for _, v := range s.Reals {
+		s.Octets += v.Octets
+		s.Packets += v.Packets
+		s.OctetsPS += v.OctetsPS
+		s.PacketsPS += v.PacketsPS
+	}
+}
+
 type Real struct {
-	Up      bool   `json:"up"`
-	Octets  uint64 `json:"octets"`
-	Packets uint64 `json:"packets"`
+	Up        bool   `json:"up"`
+	Octets    uint64 `json:"octets"`
+	Packets   uint64 `json:"packets"`
+	OctetsPS  uint64 `json:"octets_ps"`
+	PacketsPS uint64 `json:"packets_ps"`
 }
 
 func (r Real) Sub(o Real, dur time.Duration) Real {
-
-	d := uint64(dur)
-
-	var n Real
-	n.Up = r.Up
-	n.Octets = (uint64(time.Second) * (r.Octets - o.Octets)) / d
-	n.Packets = (uint64(time.Second) * (r.Packets - o.Packets)) / d
-	return n
-}
-
-type Stats struct {
-	Octets    uint64                      `json:"octets"`
-	Packets   uint64                      `json:"packets"`
-	Latency   uint64                      `json:"latency"`
-	DEFCON    uint8                       `json:"defcon"`
-	Advertise map[IP4]bool                `json:"advertise"`
-	VIPs      map[IP4]map[L4]map[IP4]Real `json:"vips"`
+	r.OctetsPS = (uint64(time.Second) * (r.Octets - o.Octets)) / uint64(dur)
+	r.PacketsPS = (uint64(time.Second) * (r.Packets - o.Packets)) / uint64(dur)
+	return r
 }
 
 func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 
-	d := uint64(dur)
-
-	var r Stats
-
-	r.VIPs = map[IP4]map[L4]map[IP4]Real{}
-
 	if o != nil {
 
-		r.Octets = (uint64(time.Second) * (n.Octets - o.Octets)) / d
-		r.Packets = (uint64(time.Second) * (n.Packets - o.Packets)) / d
-		r.Latency = n.Latency
-		r.DEFCON = n.DEFCON
+		n.OctetsPS = (uint64(time.Second) * (n.Octets - o.Octets)) / uint64(dur)
+		n.PacketsPS = (uint64(time.Second) * (n.Packets - o.Packets)) / uint64(dur)
 
 		for v, _ := range n.VIPs {
-			r.VIPs[v] = map[L4]map[IP4]Real{}
 			if _, ok := o.VIPs[v]; ok {
 				for l, _ := range n.VIPs[v] {
 					if _, ok := o.VIPs[v][l]; ok {
-						r.VIPs[v][l] = map[IP4]Real{}
-						for k, n := range n.VIPs[v][l] {
-							if o, ok := o.VIPs[v][l][k]; ok {
-								r.VIPs[v][l][k] = n.Sub(o, dur)
+						for k, r := range n.VIPs[v][l].Reals {
+							if o, ok := o.VIPs[v][l].Reals[k]; ok {
+								n.VIPs[v][l].Reals[k] = r.Sub(o, dur)
 							}
 						}
 					}
@@ -315,27 +353,17 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 		}
 	}
 
-	return &r
-}
-
-func Latency(l uint64, latency []uint64) (uint64, []uint64) {
-
-	latency = append(latency, l)
-
-	for len(latency) > 10 {
-		latency = latency[1:]
+	for v, _ := range n.VIPs {
+		for l, s := range n.VIPs[v] {
+			s.Total()
+			n.VIPs[v][l] = s
+		}
 	}
 
-	l = 0
-
-	for _, v := range latency {
-		l += v
-	}
-
-	l /= uint64(len(latency))
-
-	return l, latency
+	return n
 }
+
+/**********************************************************************/
 
 func test1() {
 	//log.Fatal(xdp.BpfNumPossibleCpus())
@@ -391,9 +419,9 @@ func test2() {
 			nodes = append(nodes, k[:])
 		}
 
-		table := maglev.Maglev65536(nodes)
+		table := maglev.Maglev8192(nodes)
 
-		var t2 [65536]uint16
+		var t2 [8192]uint16
 
 		for k, v := range table {
 			i := nodes[v]
@@ -432,31 +460,116 @@ func test2() {
 	}
 }
 
-func getStats(v5 *vc5.VC5) *Stats {
+func test3() {
 
-	cf := v5.Config()
-	ss := v5.Stats()
+	for n := 255; n > 0; n-- {
 
-	var stats Stats
-	stats.VIPs = map[IP4]map[L4]map[IP4]Real{}
-	stats.Advertise = map[IP4]bool{}
+		m := map[[4]byte][6]byte{}
 
-	stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
+		for i := 0; i < n; i++ {
+			s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
+			m[s] = [6]byte{}
+		}
 
-	for vip, v := range cf.Virtuals {
-		stats.VIPs[vip] = map[L4]map[IP4]Real{}
-		stats.Advertise[vip] = v.Healthy
-		for l4, s := range v.Services {
-			reals := map[IP4]Real{}
-			for n, up := range s.Health {
-				r := cf.Backends[n]
-				t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
-				c := ss[t]
-				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets}
-			}
-			stats.VIPs[vip][l4] = reals
+		table, stats := maglev.IP(m)
+		fmt.Println(stats, table[0:54])
+
+		if stats.Variance > 7 {
+			panic("oops")
 		}
 	}
+}
 
-	return &stats
+func ulimit() {
+	var rLimit syscall.Rlimit
+	RLIMIT_MEMLOCK := 8
+	if err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
+		log.Fatal("Error Getting Rlimit ", err)
+	}
+	rLimit.Max = 0xffffffffffffffff
+	rLimit.Cur = 0xffffffffffffffff
+	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
+		log.Fatal("Error Setting Rlimit ", err)
+	}
+}
+
+/**********************************************************************/
+
+type BGPPool struct {
+	nlri chan map[IP4]bool
+	peer chan []string
+}
+
+func NewBGPPool(asn uint16, hold uint16, peer []string) *BGPPool {
+	b := &BGPPool{nlri: make(chan map[IP4]bool), peer: make(chan []string)}
+	go b.manage()
+	b.peer <- peer
+	return b
+}
+
+func (b *BGPPool) NLRI(n map[IP4]bool) {
+	b.nlri <- n
+}
+
+func (b *BGPPool) Peer(p []string) {
+	b.peer <- p
+}
+
+func diff(a, b map[IP4]bool) bool {
+	for k, v := range a {
+		if x, ok := b[k]; !ok || x != v {
+			return true
+		}
+	}
+	for k, v := range b {
+		if x, ok := a[k]; !ok || x != v {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *BGPPool) manage() {
+
+	nlri := map[IP4]bool{}
+	peer := map[string]bool{}
+
+	for {
+		select {
+		case n := <-b.nlri:
+
+			if !diff(n, nlri) {
+				break
+			}
+
+			for k, v := range peer {
+				fmt.Println("NLRI", k, v, nlri, "to", n)
+				//v <- nlri
+			}
+
+			nlri = n
+
+		case p := <-b.peer:
+			fmt.Println("************************************************** PEER", p)
+
+			m := map[string]bool{}
+
+			for _, s := range p {
+
+				if v, ok := peer[s]; ok {
+					m[s] = v
+					delete(peer, s)
+				} else {
+					m[s] = true
+				}
+			}
+
+			for k, v := range peer {
+				fmt.Println("close", k, v)
+				//close(v)
+			}
+
+			peer = m
+		}
+	}
 }

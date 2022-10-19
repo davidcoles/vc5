@@ -25,11 +25,24 @@ package maglev
 
 import (
 	"crypto/md5"
+	//"fmt"
 	"sort"
+	"time"
 )
+
+type Stats struct {
+	Variance float32
+	Duration time.Duration
+}
 
 func Maglev65536(nodes [][]byte) (t [65536]uint64) {
 	r := maglev(65537, nodes)
+	copy(t[:], r[:])
+
+	return
+}
+func Maglev8192(nodes [][]byte) (t [8192]uint64) {
+	r := maglev(8209, nodes)
 	copy(t[:], r[:])
 
 	return
@@ -78,10 +91,12 @@ func maglev(prime uint64, nodes [][]byte) (table []uint64) {
 	}
 }
 
-func IPs(nodes map[[4]byte][6]byte) (r [65536][4]byte) {
+func IPs(nodes map[[4]byte][6]byte) (r [65536][4]byte, s Stats) {
 	if len(nodes) == 0 {
 		return
 	}
+
+	t1 := time.Now()
 
 	var n IP4s
 
@@ -93,11 +108,78 @@ func IPs(nodes map[[4]byte][6]byte) (r [65536][4]byte) {
 
 	t := maglev4(65537, n)
 
+	m := map[[4]byte]int{}
+
 	for k, v := range t {
 		if k < 65536 {
 			r[k] = n[v]
+			m[n[v]]++
 		}
 	}
+
+	var min int = -1
+	var max int = 0
+
+	for _, v := range m {
+		if v > max {
+			max = v
+		}
+
+		if min == -1 || v < min {
+			min = v
+		}
+	}
+
+	//fmt.Println("MINMAX", min, max)
+	s.Duration = time.Now().Sub(t1)
+	s.Variance = float32((max-min)*100) / float32(min)
+
+	return
+}
+
+func IP(nodes map[[4]byte][6]byte) (r [8192][4]byte, s Stats) {
+	if len(nodes) == 0 {
+		return
+	}
+
+	t1 := time.Now()
+
+	var n IP4s
+
+	for k, _ := range nodes {
+		n = append(n, k)
+	}
+
+	sort.Sort(n)
+
+	//t := maglev4(65537, n)
+	t := maglev4(8209, n)
+
+	m := map[[4]byte]int{}
+
+	for k, v := range t {
+		if k < 8192 {
+			r[k] = n[v]
+			m[n[v]]++
+		}
+	}
+
+	var min int = -1
+	var max int = 0
+
+	for _, v := range m {
+		if v > max {
+			max = v
+		}
+
+		if min == -1 || v < min {
+			min = v
+		}
+	}
+
+	//fmt.Println("MINMAX", min, max)
+	s.Duration = time.Now().Sub(t1)
+	s.Variance = float32((max-min)*100) / float32(min)
 
 	return
 }
