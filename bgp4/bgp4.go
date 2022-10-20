@@ -52,6 +52,7 @@ const ORIGIN = 1
 const AS_PATH = 2
 const NEXT_HOP = 3
 const LOCAL_PREF = 5
+const COMMUNITIES = 8
 
 const AS_SET = 1
 const AS_SEQUENCE = 2
@@ -62,6 +63,7 @@ const CEASE = 6
 const WTCR = 64  // (Well-known, Transitive, Complete, Regular length)
 const WTCE = 80  // (Well-known, Transitive, Complete, Extended length)
 const ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)
+const OTCR = 192 // (Optional, Transitive, Complete, Regular length)
 
 // Optional/Well-known, Non-transitive/Transitive Complete/Partial Regular/Extended-length
 // 128 64 32 16 8 4 2 1
@@ -70,15 +72,16 @@ const ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)
 // O   T  P  E  0 0 0 0
 
 type Peer struct {
-	state int
-	peer  string
-	port  uint16
-	myip  [4]byte
-	rid   [4]byte
-	asn   uint16
-	hold  uint16
-	nlri  chan nlri
-	logs  logger
+	state       int
+	peer        string
+	port        uint16
+	myip        [4]byte
+	rid         [4]byte
+	asn         uint16
+	hold        uint16
+	nlri        chan nlri
+	logs        logger
+	communities []uint32
 }
 
 type open struct {
@@ -87,6 +90,11 @@ type open struct {
 	ht      uint16
 	id      IP4
 	op      []byte
+}
+
+type community struct {
+	community_asn uint16
+	community_val uint16
 }
 
 func (b open) String() string {
@@ -238,7 +246,7 @@ func (l *Logger) DEBUG(e ...interface{})   { _debug(e...) }
 //func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool) *Peer {
 //	return Session_(peer, myip, rid, asn, hold, wait, nil)
 //}
-func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool, logs logger) *Peer {
+func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, communities []uint32, wait chan bool, logs logger) *Peer {
 	if rid == [4]byte{0, 0, 0, 0} {
 		rid = myip
 	}
@@ -247,7 +255,7 @@ func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wa
 		logs = &Logger{}
 	}
 
-	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn, hold: hold, logs: logs}
+	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn, hold: hold, logs: logs, communities: communities}
 
 	go b.session(wait)
 
@@ -262,7 +270,7 @@ func (b *Peer) NLRI(ip IP4, up bool) {
 	b.nlri <- nlri{ip: ip, up: up}
 }
 
-func bgpupdate(myip IP4, asn uint16, external bool, nlri ...nlri) []byte {
+func bgpupdate(myip IP4, asn uint16, external bool, comm []uint32, nlri ...nlri) []byte {
 
 	var withdrawn []byte
 	var advertise []byte
@@ -304,11 +312,25 @@ func bgpupdate(myip IP4, asn uint16, external bool, nlri ...nlri) []byte {
 	// (Well-known, Transitive, Complete, Regular length), LOCAL_PREF(5), 4 bytes
 	local_pref := append([]byte{WTCR, LOCAL_PREF, 4}, htonl(uint32(lp))...)
 
+	comms := []byte{}
+	for k, v := range comm {
+		if k < 60 { // should implement extended length
+			c := htonl(v)
+			comms = append(comms, c[:]...)
+		}
+	}
+
+	// (Optional, Transitive, Complete, Regular length), COMMUNITIES(8), 4 bytes
+	communities := append([]byte{OTCR, COMMUNITIES, uint8(len(comms))}, comms...)
+
 	path_attributes := []byte{}
 	path_attributes = append(path_attributes, origin...)
 	path_attributes = append(path_attributes, as_path...)
 	path_attributes = append(path_attributes, next_hop...)
 	path_attributes = append(path_attributes, local_pref...)
+	if len(comm) > 0 {
+		path_attributes = append(path_attributes, communities...)
+	}
 
 	//   +-----------------------------------------------------+
 	//   |   Withdrawn Routes Length (2 octets)                |

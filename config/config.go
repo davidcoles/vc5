@@ -25,6 +25,8 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"regexp"
+	"strconv"
 
 	"github.com/davidcoles/vc5/types"
 )
@@ -95,10 +97,49 @@ func (i *Info) HWAddr() MAC {
 	return mac
 }
 
+type community uint32
+
+func (c *community) UnmarshalJSON(data []byte) error {
+	re := regexp.MustCompile(`^"(\d+):(\d+)"$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 3 {
+		return errors.New("Badly formed community")
+	}
+
+	asn, err := strconv.Atoi(m[1])
+	if err != nil {
+		return err
+	}
+
+	val, err := strconv.Atoi(m[2])
+	if err != nil {
+		return err
+	}
+
+	if asn < 0 || asn > 65535 || val < 0 || val > 65535 {
+		return errors.New("Badly formed community")
+	}
+
+	*c = community(uint32(asn)<<16 | uint32(val))
+
+	return nil
+}
+
 type RHI struct {
-	ASNumber uint16   `json:"as_number"`
-	HoldTime uint16   `json:"hold_time"`
-	Peers    []string `json:"peers"`
+	ASNumber     uint16      `json:"as_number"`
+	HoldTime     uint16      `json:"hold_time"`
+	Peers        []string    `json:"peers"`
+	Communities_ []community `json:"communities"`
+}
+
+func (r *RHI) Communities() []uint32 {
+	var c []uint32
+	for _, v := range r.Communities_ {
+		c = append(c, uint32(v))
+	}
+	return c
 }
 
 type RI struct {
