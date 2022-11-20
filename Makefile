@@ -4,7 +4,7 @@ LIBBPF_LIB := $(PWD)/bpf
 export CGO_CFLAGS = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 
-OBJ := core/bpf/bpf.o core/bpf/simple.o kernel/bpf/test.o
+OBJ := core/bpf/bpf.o core/bpf/simple.o kernel/bpf/bpf.o
 BIN := cmd/vc5 cmd/vc5ng
 
 ## If this is increased to 34000000 it seems to fail on my systems.
@@ -16,6 +16,8 @@ MAX_FLOWS    ?= 10000000
 MAX_SERVICES ?= 100
 
 all: clean cmd/vc5.json $(BIN)
+
+bin:  $(BIN)
 
 cmd/vc5.yaml:
 	cp docs/config.yaml $@
@@ -61,3 +63,6 @@ clean:
 distclean: clean
 	rm -rf libbpf
 	mkdir libbpf
+
+tests:
+	cd maglev/ && go test -v

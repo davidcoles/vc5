@@ -36,14 +36,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sort"
+	//"sort"
 	"syscall"
 	"time"
 
 	"github.com/davidcoles/vc5"
 	"github.com/davidcoles/vc5/healthchecks"
-	"github.com/davidcoles/vc5/maglev"
-	"github.com/davidcoles/vc5/rendezvous"
+	//"github.com/davidcoles/vc5/maglev"
+	//"github.com/davidcoles/vc5/rendezvous"
 )
 
 //go:embed static/*
@@ -65,7 +65,7 @@ func main() {
 	args := flag.Args()
 
 	if *test {
-		test3()
+		//test2()
 		return
 	}
 
@@ -365,6 +365,7 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 
 /**********************************************************************/
 
+/*
 func test1() {
 	//log.Fatal(xdp.BpfNumPossibleCpus())
 	x, xx := rendezvous.Test(100)
@@ -402,64 +403,95 @@ func test1() {
 	return
 }
 
+*/
+
+/*
 func test2() {
 
-	for n := 255; n > 0; n-- {
+	for m := 0; m < 256; m++ {
+		fmt.Println(m)
+		for n := 32; n > 0; n-- {
+			//		for n := 4; n > 1000; n-- {
 
-		m := map[[4]byte]uint16{}
+			m := map[[4]byte]uint16{}
 
-		for i := 0; i < n; i++ {
-			s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
-			m[s] = uint16(i)
-		}
-
-		var nodes [][]byte
-
-		for k, _ := range m {
-			nodes = append(nodes, k[:])
-		}
-
-		table := maglev.Maglev8192(nodes)
-
-		var t2 [8192]uint16
-
-		for k, v := range table {
-			i := nodes[v]
-			ip := [4]byte{i[0], i[1], i[2], i[3]}
-			n, ok := m[ip]
-			if !ok {
-				panic("oops")
+			for i := 0; i < n; i++ {
+				s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
+				m[s] = uint16(i)
 			}
 
-			t2[k] = n
-		}
-		//d := time.Now().Sub(s)
+			var ips maglev.IP4s
 
-		//fmt.Println(d)
-
-		dst := map[uint16]int{}
-		max := 0
-
-		for _, v := range table {
-			g := uint16(v)
-			dst[g] = dst[g] + 1
-			if dst[g] > max {
-				max = dst[g]
+			for k, _ := range m {
+				ips = append(ips, k)
 			}
-		}
 
-		for k, v := range dst {
-			//fmt.Println(k, v)
+			//sort.Sort(ips)
 
-			fmt.Printf("%03d ", k)
-			for n := 0; n < ((v * 80) / max); n++ {
-				fmt.Print("#")
+			//fmt.Println(ips)
+
+			var nodes [][]byte
+
+			//for _, k := range ips {
+			for k, _ := range m {
+				nodes = append(nodes, k[:])
 			}
-			fmt.Println()
+
+			// 8192/64 = 11%
+			// 8192/32 = 5%
+
+			s := time.Now()
+			bar := 5.0
+			//table := maglev.Maglev65536(nodes)
+			table := maglev.Maglev8192(nodes)
+			d := time.Now().Sub(s)
+			fmt.Println(d)
+
+			for _, v := range table {
+				i := nodes[v]
+				ip := [4]byte{i[0], i[1], i[2], i[3]}
+				_, ok := m[ip]
+				if !ok {
+					panic("oops")
+				}
+
+				//t2[k] = n
+			}
+
+			//fmt.Println(d)
+
+			dst := map[uint16]int{}
+			max := 0
+			min := -1
+
+			for _, v := range table {
+				g := uint16(v)
+				dst[g] = dst[g] + 1
+				if dst[g] > max {
+					max = dst[g]
+				}
+			}
+
+			for _, v := range dst {
+				if min < 0 || v < min {
+					min = v
+				}
+			}
+
+			foo := float64(100*(max-min)) / float64(min)
+			//fmt.Println(n, min, max, foo)
+
+			if foo > bar {
+				fmt.Println(n, min, max, foo)
+				panic("foo")
+			}
+
 		}
 	}
 }
+*/
 
+/*
 func test3() {
 
 	for n := 255; n > 0; n-- {
@@ -479,6 +511,21 @@ func test3() {
 		}
 	}
 }
+
+*/
+/*
+func test4() {
+	s0 := IP4{1, 2, 3, 4}
+	s1 := IP4{5, 6, 7, 8}
+	s2 := IP4{9, 10, 11, 12}
+
+	m := map[[4]byte]uint8{s0: 10, s1: 11, s2: 12}
+	m = map[[4]byte]uint8{}
+
+	t, b := maglev.MaglevIPU8(m)
+	fmt.Println(m, t[:64], b)
+}
+*/
 
 func ulimit() {
 	var rLimit syscall.Rlimit

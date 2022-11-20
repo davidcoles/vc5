@@ -139,7 +139,7 @@ func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []strin
 	}
 	copy(vc5bmac[:], iface.HardwareAddr[:])
 
-	maps := kernel.Open(native, eth...)
+	maps := kernel.Open(bond, native, eth...)
 
 	fmt.Println(maps)
 

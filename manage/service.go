@@ -19,13 +19,17 @@
 package manage
 
 import (
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/config"
-	"github.com/davidcoles/vc5/rendezvous"
+	//"github.com/davidcoles/vc5/rendezvous"
+	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/types"
 )
+
+type IP4s = types.IP4s
 
 type state_t struct {
 	generation uint64
@@ -184,7 +188,9 @@ func backend_mapping(s config.Service, t Thruple, state map[IP4]*state_t) ([8192
 		alive = nil
 	}
 
-	table, stats := rendezvous.RipIndex(alive)
+	//table, stats := rendezvous.RipIndex(alive)
+	//table, stats := maglev.RipIndex(alive)
+	table, stats := RipIndex(alive)
 	logs.DEBUG("Backend", t.String(), len(alive), table[0:32], stats)
 	return table, isup, uint(len(alive))
 }
@@ -247,4 +253,93 @@ func service_counters(s config.Service, t types.Thruple, state service_state, up
 		VIP: t.IP, Port: t.Port, Protocol: t.Protocol, Need: s.Need, Nalive: alive}
 	sc.Sum()
 	return sc
+}
+
+/***********************************************************************/
+
+type Stats struct {
+	Variance float32
+	Duration time.Duration
+}
+
+func Maglev8192IPU8(m map[[4]byte]uint8) (r [8192]uint8, b bool) {
+
+	if len(m) < 1 {
+		return r, false
+	}
+
+	a := IP4s(make([]IP4, len(m)))
+
+	n := 0
+	for k, _ := range m {
+		//fmt.Println(k, n)
+		a[n] = k
+		n++
+	}
+
+	sort.Sort(a)
+
+	h := make([][]byte, len(a))
+
+	for k, v := range a {
+		b := make([]byte, 4)
+		copy(b[:], v[:])
+		h[k] = b
+		//fmt.Println("xxx", k, v, h[k])
+	}
+
+	t := maglev.Maglev8192(h)
+
+	//fmt.Println(">>>", a, h, t[:64])
+
+	for k, v := range t {
+		ip := a[v]
+		x, ok := m[ip]
+		if !ok {
+			return r, false
+		}
+		r[k] = x
+	}
+
+	return r, true
+}
+
+func RipIndex(ips map[[4]byte]uint16) ([8192]uint8, Stats) {
+
+	var s Stats
+
+	m := map[[4]byte]uint8{}
+
+	now := time.Now()
+
+	for k, v := range ips {
+		m[k] = uint8(v)
+	}
+
+	t, _ := Maglev8192IPU8(m)
+
+	s.Duration = time.Now().Sub(now)
+
+	/*
+		min := 0
+		max := 0
+
+		if len(m) > 0 {
+			d := false
+			for _, v := range m {
+				if !d {
+					d = true
+					min = v
+				}
+				if v < min {
+					min = v
+				}
+				if v > max {
+					max = v
+				}
+			}
+			s.Variance = float32((max-min)*100) / float32(min)
+		}
+	*/
+	return t, s
 }

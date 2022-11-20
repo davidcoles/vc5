@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 	"unsafe"
@@ -34,16 +35,17 @@ import (
 	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/monitor"
-	"github.com/davidcoles/vc5/rendezvous"
+	//"github.com/davidcoles/vc5/rendezvous"
 	"github.com/davidcoles/vc5/types"
 	"github.com/davidcoles/vc5/xdp"
 )
 
-//go:embed bpf/test.o
-var TEST_O []byte
+//go:embed bpf/bpf.o
+var BPF_O []byte
 
 type uP = unsafe.Pointer
 type IP4 = types.IP4
+type IP4s = types.IP4s
 type MAC = types.MAC
 type L4 = types.L4
 type Protocol = types.Protocol
@@ -157,17 +159,19 @@ func (g *bpf_global) add(a bpf_global) {
 	g.defcon = a.defcon
 }
 
-func Open(native bool, eth ...string) *Maps {
+func Open(bond string, native bool, eth ...string) *Maps {
 	var m maps
 	m.m = make(map[string]int)
 
-	x, err := xdp.LoadBpfFile_(TEST_O, "xdp_main", native, eth...)
+	x, err := xdp.LoadBpfFile_(BPF_O, "xdp_main", native, bond, eth...)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// balancer
+	m.m["service_rec"] = find_map(x, "service_rec", 8, 16*256)
+	m.m["service_maglev"] = find_map(x, "service_maglev", 4, 256)
 	m.m["service_backend"] = find_map(x, "service_backend", 8, 8192+(256*16)+8)
 
 	// nat
@@ -191,12 +195,48 @@ func Open(native bool, eth ...string) *Maps {
 	return &m
 }
 
+func (m *maps) service_rec() int     { return m.m["service_rec"] }
+func (m *maps) service_maglev() int  { return m.m["service_maglev"] }
 func (m *maps) service_backend() int { return m.m["service_backend"] }
 func (m *maps) nat_to_vip_mac() int  { return m.m["nat_to_vip_mac"] }
 func (m *maps) vip_mac_to_nat() int  { return m.m["vip_mac_to_nat"] }
 func (m *maps) vrpp_counter() int    { return m.m["vrpp_counter"] }
 func (m *maps) globals() int         { return m.m["globals"] }
 func (m *maps) settings() int        { return m.m["settings"] }
+
+func (m *maps) update_service_rec(sk bpf_service, sr [256]bpf_real, flag uint64) int {
+
+	all := make([][256]bpf_real, xdp.BpfNumPossibleCpus())
+
+	for n, _ := range all {
+		all[n] = sr
+	}
+
+	return xdp.BpfMapUpdateElem(m.service_rec(), uP(&sk), uP(&(all[0])), flag)
+}
+
+func (m *maps) update_service_maglev(sn uint8, b [65536]byte) int {
+
+	type slice [256]byte
+
+	for x := 0; x < 256; x++ {
+
+		var key uint32 = (uint32(sn) << 8) | (uint32(x) & 0xff)
+		var val slice
+
+		copy(val[:], b[(x*256):])
+
+		all := make([]slice, xdp.BpfNumPossibleCpus())
+
+		for n, _ := range all {
+			all[n] = val
+		}
+
+		xdp.BpfMapUpdateElem(m.service_maglev(), uP(&key), uP(&(all[0])), xdp.BPF_ANY) // array
+	}
+
+	return 0
+}
 
 func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
 
@@ -633,6 +673,136 @@ func ping(ip IP4) chan bool {
 }
 
 func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
+
+	type service_val [256]bpf_real
+	type l4Service struct {
+		vip IP4
+		svc L4
+	}
+
+	M := map[l4Service]uint8{}
+	var I []uint8
+	for n := 0; n < 256; n++ {
+		I = append(I, uint8(n))
+	}
+
+	ch := make(chan Report)
+
+	// stats ...
+	stats := map[Target]bool{}
+	var mu sync.Mutex
+
+	get_stats := func() map[Target]Counter {
+		r := map[Target]Counter{}
+		s := map[Target]bool{}
+
+		mu.Lock()
+		for k, v := range stats {
+			s[k] = v
+		}
+		mu.Unlock()
+
+		for v, _ := range s {
+			vr := bpf_vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol}
+			co := bpf_counter{}
+			m.lookup_vrpp_counter(&vr, &co)
+			r[v] = Counter{Octets: co.octets, Packets: co.packets}
+		}
+
+		return r
+	}
+
+	go func() {
+		for config := range ch {
+
+			fmt.Println(config)
+
+			M_ := map[l4Service]uint8{}
+
+			for vip, s := range config.Virtuals {
+				for l4, serv := range s.Services {
+
+					now := time.Now()
+
+					for n, _ := range serv.Health {
+						if be, ok := config.Backends[n]; ok {
+							vr := bpf_vrpp{vip: vip, rip: be.IP, port: htons(l4.Port), protocol: l4.Protocol.Number()}
+							m.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
+							b := Target{VIP: vip, RIP: be.IP, Port: l4.Port, Protocol: l4.Protocol.Number()}
+							mu.Lock()
+							stats[b] = true
+							mu.Unlock()
+						}
+					}
+
+					l4s := l4Service{vip: vip, svc: l4}
+
+					M_[l4s] = 0
+
+					i, ok := M[l4s]
+
+					if !ok {
+						i = I[0]
+						I = I[1:]
+						M[l4s] = i
+					}
+
+					fmt.Println(i, vip, l4, serv)
+
+					var sv service_val
+					for k, v := range config.Backends {
+						sv[k] = bpf_real{rip: v.IP, mac: v.MAC, vid: [2]byte{0, 0}, pad: [4]uint8{0, 0, 0, 0}}
+					}
+					sv[0] = bpf_real{pad: [4]uint8{i, 0, 0, 0}}
+
+					s := map[[4]byte]uint8{}
+
+					for k, up := range serv.Health {
+						if be, ok := config.Backends[k]; ok && up {
+							s[be.IP] = uint8(k)
+						}
+					}
+
+					mag, _ := MaglevIPU8(s)
+
+					//fmt.Println(sv[0:10], mag[:64])
+
+					bs := bpf_service{
+						vip:      vip,
+						port:     htons(l4.Port),
+						protocol: l4.Protocol.Number(),
+					}
+
+					m.update_service_maglev(i, mag)
+					m.update_service_rec(bs, sv, xdp.BPF_ANY)
+
+					fmt.Println("****", time.Now().Sub(now))
+				}
+			}
+
+			for k, v := range M {
+				if _, ok := M_[k]; !ok {
+					s := bpf_service{
+						vip:      k.vip,
+						port:     htons(k.svc.Port),
+						protocol: k.svc.Protocol.Number(),
+					}
+					xdp.BpfMapDeleteElem(m.service_rec(), uP(&s))
+					delete(M, k)
+					I = append(I, v)
+				}
+			}
+
+			fmt.Println("======================================================================")
+		}
+	}()
+
+	ch <- c
+	return ch, get_stats
+}
+
+/*
+func (m *maps) _Balancer(c Report) (chan Report, func() map[Target]Counter) {
 	ch := make(chan Report)
 
 	stats := map[Target]bool{}
@@ -666,8 +836,9 @@ func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
 		}
 
 		type l4State struct {
-			real_info map[IP4]real_info
-			backend   *bpf_backend
+			real_info     map[IP4]real_info
+			backend       *bpf_backend
+			service_index uint8
 		}
 
 		state := map[l4Service]l4State{}
@@ -749,7 +920,7 @@ func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
 	ch <- c
 	return ch, get_stats
 }
-
+*/
 func ip4mackeys(a map[IP4]real_info, b map[IP4]real_info, v bool) bool {
 
 	for k, _ := range a {
@@ -770,6 +941,7 @@ func ip4mackeys(a map[IP4]real_info, b map[IP4]real_info, v bool) bool {
 	return true
 }
 
+/*
 func (m *maps) _update_backend(vip IP4, l4 L4, curr map[IP4]real_info, old map[IP4]real_info, b *bpf_backend, fallback bool) *bpf_backend {
 
 	var be bpf_backend
@@ -815,7 +987,8 @@ func (m *maps) _update_backend(vip IP4, l4 L4, curr map[IP4]real_info, old map[I
 
 	return &be
 }
-
+*/
+/*
 func (m *maps) update_backend(vip IP4, l4 L4, curr map[IP4]real_info, old map[IP4]real_info, b *bpf_backend, fallback bool) *bpf_backend {
 
 	var be bpf_backend
@@ -879,7 +1052,7 @@ func (m *maps) update_backend(vip IP4, l4 L4, curr map[IP4]real_info, old map[IP
 
 	return &be
 }
-
+*/
 /**********************************************************************/
 
 /*
@@ -903,3 +1076,45 @@ func (m *maps) update_backend(vip IP4, l4 L4, curr map[IP4]real_info, old map[IP
 */
 
 /**********************************************************************/
+
+func MaglevIPU8(m map[[4]byte]uint8) (r [65536]uint8, b bool) {
+
+	if len(m) < 1 {
+		return r, false
+	}
+
+	a := IP4s(make([]IP4, len(m)))
+
+	n := 0
+	for k, _ := range m {
+		//fmt.Println(k, n)
+		a[n] = k
+		n++
+	}
+
+	sort.Sort(a)
+
+	h := make([][]byte, len(a))
+
+	for k, v := range a {
+		b := make([]byte, 4)
+		copy(b[:], v[:])
+		h[k] = b
+		//fmt.Println("xxx", k, v, h[k])
+	}
+
+	t := maglev.Maglev65536(h)
+
+	//fmt.Println(">>>", a, h, t[:64])
+
+	for k, v := range t {
+		ip := a[v]
+		x, ok := m[ip]
+		if !ok {
+			return r, false
+		}
+		r[k] = x
+	}
+
+	return r, true
+}

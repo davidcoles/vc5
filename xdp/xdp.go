@@ -130,7 +130,7 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 	return &xdp, nil
 }
 
-func LoadBpfFile_(bindata []byte, program string, native bool, eth ...string) (*XDP_, error) {
+func LoadBpfFile_(bindata []byte, program string, native bool, bond string, eth ...string) (*XDP_, error) {
 	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
 	if err != nil {
 		return nil, err
@@ -151,6 +151,13 @@ func LoadBpfFile_(bindata []byte, program string, native bool, eth ...string) (*
 
 	if xdp.p == nil {
 		return nil, errors.New("Oops")
+	}
+
+	if bond != "" {
+		C.xdp_link_detach2(C.CString(bond))
+		if C.load_bpf_section(xdp.p, C.CString(bond), C.CString(program), C.int(0)) != 0 {
+			return nil, errors.New("load_bpf_section() failed for " + bond)
+		}
 	}
 
 	for _, iface := range eth {

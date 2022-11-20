@@ -182,14 +182,19 @@ struct real {
     __u8 mac[6];
     __be16 vid;
     __u8 pad[4];
+    // The 0th entry in service_val[]
+    // pad[0] - service number
+    // pad[1] - flags 0|0|0|0|0|0|fallback|sticky(l3)
+    // pad[2] - if non-zero then send traffic to this real#
+    // pad[3] - n/255 chance of the above    
 };
-    
+
 /**********************************************************************/
 
 struct service {
     __be32 vip;
     __be16 port;
-    __u8 protocol;
+    __u8 protocol; // TCP=6 UDP=17 VIP-EXISTS?=255
     __u8 pad;
 };
 
@@ -205,6 +210,28 @@ struct {
     __type(value, struct backend);
     __uint(max_entries, 128);
 } service_backend SEC(".maps");
+
+struct service_val {
+    struct real be[256]; // be[0] pad bytes contains service# and flags
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, struct service);
+    __type(value, struct real[256]);
+    __uint(max_entries, 256);
+} service_rec SEC(".maps");
+
+struct service_be {
+    __u8 be[256];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, struct service_be);
+    __uint(max_entries, 256*256);
+} service_maglev SEC(".maps");
 
 
 /**********************************************************************/
@@ -312,6 +339,7 @@ static inline void write_perf(struct global *global, __u64 start) {
 //    bpf_map_update_elem(&flow_state, flow, &new_state, BPF_ANY);
 //}
 
+#if 0
 static inline int find_real(struct iphdr *ipv4, void *l4, struct real *r) {
     struct service s;
     memset(&s, 0, sizeof(s));
@@ -351,6 +379,58 @@ static inline int find_real(struct iphdr *ipv4, void *l4, struct real *r) {
     //return r; //&(backend->real[i]);
     return 1;
 }
+
+#else
+
+static inline int find_real(struct iphdr *ipv4, void *l4, struct real *r) {
+    //__be32 rip;
+    //__u8 mac[6];
+    //__be16 vid;
+    //__u8 pad[4];
+
+    struct service s;
+    memset(&s, 0, sizeof(s));
+    s.vip = ipv4->daddr;
+    s.port = 0;
+    s.protocol = ipv4->protocol;
+
+    switch(ipv4->protocol) {
+    case IPPROTO_TCP:
+        s.port = ((struct tcphdr *) l4)->dest;
+        break;
+
+    case IPPROTO_UDP:
+        s.port = ((struct udphdr *) l4)->dest;
+        break;
+    }
+    
+    struct service_val *v = bpf_map_lookup_elem(&service_rec, &s);
+    
+    if(!v)
+	return 0;
+    
+
+    __u32 service_num = v->be[0].pad[0];
+    __u16 hash = l4_hash(ipv4, l4);
+    __u32 offset = (service_num << 8) | (hash >> 8);
+    
+    struct service_be *be = bpf_map_lookup_elem(&service_maglev, &offset);
+
+    if(!be) {	
+	return 0; // shouldn't happen if array is properly sized
+    }
+
+    __u8 idx = be->be[(__u8) (hash & 0xff)];
+
+    if(idx == 0) {
+	return 0; 
+    }
+
+    *r = v->be[idx];
+    
+    return 1;
+}
+#endif
 
 static inline void store_tcp_flow(struct iphdr *ipv4, struct tcphdr *tcp, __be32 rip, __u8 *mac)
 {
@@ -619,9 +699,10 @@ SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
     global = NULL;
     struct real real_s;
     struct real *real = &real_s;
-    
+
+   
  new_flow:
-    
+
     switch(find_real(ipv4, (void *) tcp, &real_s)) {
     case 0:
 	break;
