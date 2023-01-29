@@ -79,7 +79,7 @@ const MAX_CPU = 256
 const INTERVAL = 5
 
 type Control struct {
-	xdp      *xdp.XDP_
+	xdp      *xdp.XDP
 	era      uint64
 	interval uint8
 	defcon   uint8

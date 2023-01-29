@@ -1,8 +1,6 @@
 package vc5
 
 import (
-	//"errors"
-	//"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -28,8 +26,16 @@ import (
 type Control = core.Control
 type IP4 = types.IP4
 type L4 = types.L4
+type NET = types.NET
 type Target = kernel.Target
 type Status = monitor.Report
+
+var vc5aip [4]byte = [4]byte{10, 255, 255, 253}
+var vc5bip IP4 = IP4{10, 255, 255, 254}
+
+func Net(s string) (NET, error) {
+	return types.Net(s)
+}
 
 const FLOW_STATE = core.FLOW_STATE
 
@@ -80,11 +86,11 @@ type VC5 struct {
 }
 
 func NetnsServer(sock string) {
-	netns.Server(sock)
+	netns.Server(sock, vc5bip.String())
 }
 
 func LoadConf(file string) (*config2.Conf, error) {
-	return config2.Load(file, nil)
+	return config2.Load(file)
 }
 
 func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []string, sock, bond string, peth ...string) (*VC5, error) {
@@ -100,9 +106,6 @@ func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []strin
 			clean(vc5a, "vc5")
 		}
 	}()
-
-	eth := []string{vc5a, vc5b}
-	eth = append(eth, peth...)
 
 	var vc5amac [6]byte
 	var vc5bmac [6]byte
@@ -139,14 +142,14 @@ func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []strin
 	}
 	copy(vc5bmac[:], iface.HardwareAddr[:])
 
-	maps := kernel.Open(bond, native, eth...)
+	maps := kernel.Open(bond, native, vc5a, vc5b, peth...)
 
 	fmt.Println(maps)
 
 	cleanup = false
 
-	var vc5aip [4]byte = [4]byte{10, 255, 255, 253}
-	var vc5bip [4]byte = [4]byte{10, 255, 255, 254}
+	//var vc5aip [4]byte = [4]byte{10, 255, 255, 253}
+	//var vc5bip [4]byte = [4]byte{10, 255, 255, 254}
 
 	setup2(ns, vc5a, vc5b, vc5aip, vc5bip)
 

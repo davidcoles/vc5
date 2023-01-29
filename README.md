@@ -4,7 +4,7 @@ A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load balancer (L4LB) 
 
 This is very much a proof of concept at this stage - most everything is incomplete and poorly defined!
 
-If you think that this may be useful and have any questions/suggestions, feel free to contact me at d4v1dc0l3s@protonmail.com
+If you think that this may be useful and have any questions/suggestions, feel free to contact me at vc5lb@proton.me
 
 ## Homepage
 
@@ -42,7 +42,8 @@ A basic web console and Prometheus metrics server is included: ![Console screens
 
 A good summary of the concepts in use are discussed in [Patrick
 Shuff's "Building a Billion User Load Balancer"
-talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s).
+talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
+Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
 
 ## Quickstart
 
@@ -218,3 +219,25 @@ Latencies - 120K clents virtual LB:
 801284 pps, 313 ns avg. latency, DEFCON 4
 801062 pps, 320 ns avg. latency, DEFCON 5
 
+https://yhbt.net/lore/xdp-newbies/CANLN0e5_HtYC1XQ=Z=JRLe-+3bTqoEWdbHJEGhbF7ZT=gz=ynQ@mail.gmail.com/T/
+
+
+Issue with ixgbe driver:
+
+(This may well be a misunderstanding on my part, but I can't get it to work, so ...)
+
+In native mode, packets from veth interface are not accepted by
+enp130s0f1 (or bond0/br0) if bpf_redirect used.
+
+Way around this is to put a bridge on the device/bond and add the veth
+device to the bridge. The packets, once rewritten, can be XDP_PASSed
+
+In bridge mode:
+
+Can't redirect packes to vlanNNN, so ALL probes must be passed to bridge.
+This means than any probes to VLANs must have 802.1Q header pushed on.
+
+In non-bridge mode:
+
+All probes to be bpf_rediercted to maind interface or vlanNNN.
+802.1Q headers must NOT be added.

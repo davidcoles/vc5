@@ -35,15 +35,13 @@ type Checks = types.Checks
 type Check = types.Check
 
 type Backend struct {
-	MAC MAC
 	IP  IP4
+	MAC MAC
+	VID uint16
+	Idx uint16
 }
 
 type Metadata = healthchecks.Metadata
-type Reals map[uint16]Real
-type Real = healthchecks.Real
-type Service_ = healthchecks.Service
-type Virtual_ = healthchecks.Virtual
 type Healthchecks = healthchecks.Healthchecks
 
 type context struct {
@@ -53,31 +51,35 @@ type context struct {
 	l4   L4
 }
 
-type Status struct {
-	Metadata Metadata
-	Health   map[uint16]bool `json:"health"`
-	Healthy  bool            `json:"healthy"`
-	Fallback bool            `json:"fallback"`
+type Service struct {
+	Metadata   Metadata
+	Health     map[IP4]bool
+	Healthy    bool
+	Fallback   bool
+	Sticky     bool
+	Leastconns IP4
+	Weight     uint8
 }
 
 type Virtual struct {
-	Services map[L4]Status
+	Services map[L4]Service
 	Metadata Metadata
 	Healthy  bool
 }
 
 type Report struct {
 	Virtuals map[IP4]Virtual
-	Backends map[uint16]Backend
+	Backends map[IP4]Backend
+}
+
+func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) *Mon {
+	m := &Mon{}
+	m.fn = m.monitor(h, ip, sock, lookup)
+	return m
 }
 
 type Mon struct {
 	fn func(*healthchecks.Healthchecks, bool) Report
-}
-
-func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) *Mon {
-	fn := Monitor_(h, ip, sock, lookup)
-	return &Mon{fn: fn}
 }
 
 func (m *Mon) Update(h *Healthchecks) Report {
@@ -93,37 +95,50 @@ func (m *Mon) Close() {
 
 func natify(t [4]byte, p uint16) [4]byte { return [4]byte{t[0], t[1], byte(p >> 8), byte(p & 0xff)} }
 
-func Monitor_(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) func(*Healthchecks, bool) Report {
+func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) func(*Healthchecks, bool) Report {
 
-	x := map[IP4]func(*Virtual_, bool) Virtual{}
-	backends := map[uint16]IP4{}
+	type be2 struct {
+		IP  IP4
+		VID uint16
+	}
+
+	virts := map[IP4]*Virt{}
+	//backends := map[uint16]IP4{}
+	backends2 := map[uint16]be2{}
 
 	update := func(h *Healthchecks, fin bool) {
 
 		if h != nil {
 
-			backends = h.Backend
+			//backends = h.Backend
+
+			backends2 = map[uint16]be2{}
+			//for k, v := range h.Backend {
+			for k, v := range h.Backends() {
+				_, _, vid := h.Iface(v)
+				backends2[k] = be2{IP: v, VID: vid}
+			}
 
 			for vip, services := range h.Virtual {
-				if fn, ok := x[vip]; ok {
-					fn(&services, false) // update sub-tree
+				if v, ok := virts[vip]; ok {
+					v.Reconfigure(services)
 				} else {
-					x[vip] = virtual(&services, context{vip: vip, nat: ip, sock: sock})
+					virts[vip] = StartVirt(services, context{vip: vip, nat: ip, sock: sock})
 				}
 			}
 
-			for k, fn := range x {
+			for k, v := range virts {
 				if _, ok := h.Virtual[k]; !ok {
-					fn(nil, true)
-					delete(x, k)
+					v.Close()
+					delete(virts, k)
 				}
 			}
 		}
 
 		if fin {
-			for k, fn := range x {
-				fn(nil, true)
-				delete(x, k)
+			for k, v := range virts {
+				v.Close()
+				delete(virts, k)
 			}
 		}
 	}
@@ -136,24 +151,26 @@ func Monitor_(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bo
 		var r Report
 
 		r.Virtuals = map[IP4]Virtual{}
-		for k, fn := range x {
-			v := fn(nil, false)
+		for k, fn := range virts {
+			v := fn.Status()
 			r.Virtuals[k] = v
 		}
 
 		all := []IP4{}
 
-		for _, v := range backends {
-			all = append(all, v)
+		for _, v := range backends2 {
+			all = append(all, v.IP)
 		}
 
-		r.Backends = map[uint16]Backend{}
-		for k, v := range backends {
+		r.Backends = map[IP4]Backend{}
+		for k, v := range backends2 {
 			var mac MAC
 			if lookup != nil {
-				mac, _ = lookup(v)
+				mac, _ = lookup(v.IP)
 			}
-			r.Backends[k] = Backend{IP: v, MAC: mac}
+
+			backend := Backend{IP: v.IP, MAC: mac, VID: v.VID, Idx: k}
+			r.Backends[v.IP] = backend
 		}
 
 		update(nil, fin)
@@ -162,56 +179,78 @@ func Monitor_(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bo
 	}
 }
 
-func virtual(services *Virtual_, c context) func(*Virtual_, bool) Virtual {
+type Virt struct {
+	f func(*healthchecks.Virtual, bool) Virtual
+}
 
-	x := map[L4]func(*Service_, bool) Status{}
+func StartVirt(services healthchecks.Virtual, c context) *Virt {
+	v := &Virt{}
+	v.f = virtual(&services, c)
+	return v
+}
+
+func (v *Virt) Reconfigure(services healthchecks.Virtual) {
+	v.f(&services, false)
+}
+
+func (v *Virt) Close() {
+	v.f(nil, true)
+}
+
+func (v *Virt) Status() Virtual {
+	return v.f(nil, false)
+}
+
+func virtual(services *healthchecks.Virtual, c context) func(*healthchecks.Virtual, bool) Virtual {
+
+	svcs := map[L4]*Service_{}
 
 	var m Metadata
 
-	update := func(services *Virtual_, fin bool) {
+	update := func(services *healthchecks.Virtual, fin bool) {
 		if services != nil {
 			m = services.Metadata
 
-			for s, v := range services.Services {
-				if _, ok := x[s]; ok {
-					x[s](&v, false)
+			for k, v := range services.Services {
+				if svc, ok := svcs[k]; ok {
+					svc.Reconfigure(v)
 				} else {
 					con := c
 					con.vip = c.vip
-					con.l4 = s
-					x[s] = service(&v, con)
+					con.l4 = k
+					svcs[k] = StartService(v, con)
 				}
 			}
 
-			for s, fn := range x {
-				if _, ok := services.Services[s]; !ok {
-					fn(nil, true)
-					delete(x, s)
+			for k, v := range svcs {
+				if _, ok := services.Services[k]; !ok {
+					v.Close()
+					delete(svcs, k)
 				}
 			}
 		}
 
 		if fin {
-			for k, fn := range x {
-				fn(nil, true)
-				delete(x, k)
+			for k, v := range svcs {
+				v.Close()
+				delete(svcs, k)
 			}
 		}
 	}
 
 	update(services, false)
 
-	return func(services *Virtual_, fin bool) Virtual {
+	return func(services *healthchecks.Virtual, fin bool) Virtual {
 
 		update(services, false)
 
-		y := map[L4]Status{}
-		for k, fn := range x {
-			y[k] = fn(nil, false)
+		status := map[L4]Service{}
+		for k, v := range svcs {
+			status[k] = v.Status()
 		}
 
 		var healthy bool = true
-		for _, s := range y {
+		for _, s := range status {
 			if !s.Healthy {
 				healthy = false
 			}
@@ -219,61 +258,102 @@ func virtual(services *Virtual_, c context) func(*Virtual_, bool) Virtual {
 
 		update(nil, fin)
 
-		return Virtual{Services: y, Healthy: healthy, Metadata: m}
+		return Virtual{Services: status, Healthy: healthy, Metadata: m}
 	}
 }
 
-func service(service *Service_, c context) func(*Service_, bool) Status {
+type Service_ struct {
+	f func(*healthchecks.Service, bool) Service
+}
 
-	x := map[uint16]func(*Real, bool) bool{}
-	l := rip(service.Local, c)
-	var m Metadata
+func StartService(s healthchecks.Service, c context) *Service_ {
+	svc := &Service_{}
+	svc.f = svc.init(&s, c)
+	return svc
+}
+
+func (s *Service_) Status() Service {
+	return s.f(nil, false)
+}
+
+func (s *Service_) Reconfigure(service healthchecks.Service) {
+	s.f(&service, false)
+}
+
+func (s *Service_) Close() {
+	s.f(nil, true)
+}
+
+func (s *Service_) init(service *healthchecks.Service, c context) func(*healthchecks.Service, bool) Service {
+
+	reals := map[IP4]*Real{}
+	var fallback *Real
+	var metadata Metadata
 	var minimum uint16
+	var sticky bool
 
-	update := func(service *Service_, fin bool) {
+	update := func(service *healthchecks.Service, fin bool) {
 		if service != nil {
 
+			sticky = service.Sticky
 			minimum = service.Minimum
-
-			m = service.Metadata
+			metadata = service.Metadata
 
 			for real, r := range service.Reals {
-				if _, ok := x[real]; ok {
-					x[real](&r, false)
+				if _, ok := reals[real]; ok {
+					reals[real].Reconfigure(r)
 				} else {
-					x[real] = rip(r, c)
+					reals[real] = StartReal(r, c, false)
 				}
 			}
 
-			l(&(service.Local), false)
+			if service.Fallback {
+				r := healthchecks.Real{Checks: service.Local, RIP: c.vip}
+				if fallback == nil {
+					fallback = StartReal(r, c, true)
+				} else {
+					fallback.Reconfigure(r)
+				}
+			} else {
+				if fallback != nil {
+					fallback.Close()
+					fallback = nil
+				}
+			}
 
-			for real, fn := range x {
+			for real, fn := range reals {
 				if _, ok := service.Reals[real]; !ok {
-					fn(nil, true)
-					delete(x, real)
+					fn.Close()
+					delete(reals, real)
 				}
 			}
 		}
 
 		if fin {
-			l(nil, fin)
-			for k, fn := range x {
-				fn(nil, fin)
-				delete(x, k)
+			if fallback != nil {
+				fallback.Close()
+			}
+			for k, fn := range reals {
+				fn.Close()
+				delete(reals, k)
 			}
 		}
 	}
 
 	update(service, false)
 
-	return func(service *Service_, fin bool) Status {
+	return func(service *healthchecks.Service, fin bool) Service {
 		update(service, false)
 
-		status := Status{Health: map[uint16]bool{}, Metadata: m}
+		status := Service{
+			Health:   map[IP4]bool{},
+			Metadata: metadata,
+			Sticky:   sticky,
+		}
 		var healthy uint16
 
-		for k, v := range x {
-			b := v(nil, false)
+		for k, v := range reals {
+			b := v.Status()
 
 			if b {
 				healthy++
@@ -284,10 +364,15 @@ func service(service *Service_, c context) func(*Service_, bool) Status {
 
 		if healthy >= minimum {
 			status.Healthy = true
-		} else if l(nil, false) {
-			status.Healthy = true
-			status.Fallback = true
+		} else if fallback != nil {
+			if fallback.Status() {
+				status.Healthy = true
+				status.Fallback = true
+			}
 		}
+
+		//status.Leastconns = 3
+		//status.Weight = 128
 
 		update(nil, fin)
 
@@ -295,12 +380,44 @@ func service(service *Service_, c context) func(*Service_, bool) Status {
 	}
 }
 
-func rip(real Real, c context) func(*Real, bool) bool {
+type Real struct {
+	f func(*healthchecks.Real, bool) bool
+	n uint16
+}
+
+func StartReal(real healthchecks.Real, c context, local bool) *Real {
+	r := &Real{n: real.Index}
+	r.f = rip(real, c, local)
+	return r
+}
+
+func (r *Real) Close() {
+	r.f(nil, true)
+}
+
+func (r *Real) Reconfigure(real healthchecks.Real) {
+	r.f(&real, false)
+}
+
+func (r *Real) Status() bool {
+	return r.f(nil, false)
+}
+
+func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real, bool) bool {
 	//fmt.Println("RIP:", real, c)
 	var up bool
-	ch := checks(&up, natify(c.nat, real.NAT), real.RIP, c.vip, c.l4.Port, c.sock, real.Checks)
 
-	return func(ip *Real, fin bool) bool {
+	nat := c.vip
+
+	if !local {
+		nat = natify(c.nat, real.NAT)
+	}
+
+	ch := checks(&up, nat, real.RIP, c.vip, c.l4.Port, c.sock, real.Checks)
+
+	fmt.Println(">>>>>>>>>", real.RIP)
+
+	return func(ip *healthchecks.Real, fin bool) bool {
 
 		if ip != nil {
 			ch <- ip.Checks
@@ -371,6 +488,8 @@ func checks(up *bool, nat IP4, rip, vip IP4, port uint16, sock string, checks Ch
 }
 
 func probes(nat IP4, path string, checks Checks) bool {
+
+	//fmt.Println("CHECKING", nat)
 
 	for _, c := range checks.Http {
 		if !netns.Probe(path, nat, "http", c) {

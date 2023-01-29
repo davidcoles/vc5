@@ -9,6 +9,13 @@ import (
 	"time"
 )
 
+func htons(p uint16) [2]byte {
+	var hl [2]byte
+	hl[0] = byte(p >> 8)
+	hl[1] = byte(p & 0xff)
+	return hl
+}
+
 type Check struct {
 	Path   string `json:"path"`
 	Port   uint16 `json:"port"'`
@@ -39,6 +46,9 @@ type L4 struct {
 	Port     uint16
 	Protocol Protocol
 }
+
+func (l *L4) NP() [2]byte { return htons(l.Port) }
+func (l *L4) PN() byte    { return l.Protocol.Number() }
 
 type IP4s []IP4
 
@@ -192,6 +202,10 @@ func (c *Scounters) Sum() {
 	}
 }
 
+func (i *IP4) IP() net.IP {
+	return net.IPv4(i[0], i[1], i[2], i[3])
+}
+
 func (i *IP4) UnmarshalJSON(d []byte) error {
 	l := len(d)
 	if l < 2 || d[0] != '"' || d[l-1] != '"' {
@@ -324,4 +338,100 @@ func (l L4) MarshalJSON() ([]byte, error) {
 
 func (m MAC) String() string {
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
+}
+
+type NET struct {
+	IP   IP4
+	Mask IP4
+}
+
+func (i *NET) mask() (ip IP4) {
+	ip[0] = i.IP[0] & i.Mask[0]
+	ip[1] = i.IP[1] & i.Mask[1]
+	ip[2] = i.IP[2] & i.Mask[2]
+	ip[3] = i.IP[3] & i.Mask[3]
+	return
+}
+
+func (i *NET) Net() (ip IP4) {
+	ip[0] = i.IP[0] & i.Mask[0]
+	ip[1] = i.IP[1] & i.Mask[1]
+	ip[2] = i.IP[2] & i.Mask[2]
+	ip[3] = i.IP[3] & i.Mask[3]
+	return
+}
+
+func (i *NET) IPNet() (ip net.IP, ipnet net.IPNet) {
+	ip = net.IPv4(i.IP[0], i.IP[1], i.IP[2], i.IP[3])
+	n := i.mask()
+	ipnet.IP = net.IPv4(n[0], n[1], n[2], n[3])
+	ipnet.Mask = net.IPv4Mask(i.Mask[0], i.Mask[1], i.Mask[2], i.Mask[3])
+	return
+
+}
+
+func (n NET) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + n.IP.String() + "/" + n.Mask.String() + `"`), nil
+}
+
+func (c *NET) UnmarshalJSON(data []byte) error {
+
+	re := regexp.MustCompile(`^"([^"]+)"$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 2 {
+		return errors.New("Badly formed CIDR")
+	}
+
+	ip, ipn, err := net.ParseCIDR(m[1])
+
+	if err != nil {
+		return err
+	}
+
+	ip4 := ip.To4()
+
+	if len(ip4) != 4 || (ip4[0] == 0 && ip4[1] == 0 && ip4[2] == 0 && ip4[3] == 0) {
+		return errors.New("Invalid IP")
+	}
+
+	mask := ipn.Mask
+
+	if len(mask) != 4 || (mask[0] == 0 && mask[1] == 0 && mask[2] == 0 && mask[3] == 0) {
+		return errors.New("Invalid mask")
+	}
+
+	copy(c.IP[:], ip4[:])
+	copy(c.Mask[:], mask[:])
+
+	return nil
+}
+
+func Net(s string) (NET, error) {
+
+	var n NET
+
+	ip, ipn, err := net.ParseCIDR(s)
+
+	if err != nil {
+		return n, err
+	}
+
+	ip4 := ip.To4()
+
+	if len(ip4) != 4 || (ip4[0] == 0 && ip4[1] == 0 && ip4[2] == 0 && ip4[3] == 0) {
+		return n, errors.New("Invalid IP")
+	}
+
+	mask := ipn.Mask
+
+	if len(mask) != 4 || (mask[0] == 0 && mask[1] == 0 && mask[2] == 0 && mask[3] == 0) {
+		return n, errors.New("Invalid mask")
+	}
+
+	copy(n.IP[:], ip4[:])
+	copy(n.Mask[:], mask[:])
+
+	return n, nil
 }

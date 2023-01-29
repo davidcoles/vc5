@@ -15,9 +15,12 @@ BIN := cmd/vc5 cmd/vc5ng
 MAX_FLOWS    ?= 10000000
 MAX_SERVICES ?= 100
 
-all: clean cmd/vc5.json $(BIN)
+all: clean cmd/vc5.json $(BIN) $(OBJ)
 
 bin:  $(BIN)
+
+xdptest/xdptest: xdptest/xdptest.go xdptest/bpf/bpf.o
+	go build -o xdptest/xdptest xdptest/xdptest.go
 
 cmd/vc5.yaml:
 	cp docs/config.yaml $@

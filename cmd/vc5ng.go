@@ -19,8 +19,6 @@
 // TODO
 // concurrent connections count
 // manage existing connection (SYN/RST/etc)
-// BGP
-// VLANs
 // sticky sessions
 
 package main
@@ -35,15 +33,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
-	//"sort"
 	"syscall"
 	"time"
 
 	"github.com/davidcoles/vc5"
+	"github.com/davidcoles/vc5/bgp4"
 	"github.com/davidcoles/vc5/healthchecks"
-	//"github.com/davidcoles/vc5/maglev"
-	//"github.com/davidcoles/vc5/rendezvous"
 )
 
 //go:embed static/*
@@ -53,21 +50,16 @@ type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
 
+var dfcn = flag.Uint("d", 5, "defcon readiness level")
 var sock = flag.String("s", "", "used when spawning healthcheck server")
-var bond = flag.String("b", "", "name of bonded ethernet device if using multiple interfaces")
+var bond = flag.String("i", "", "name of interface to use (eg. bond0, br0)")
 var port = flag.String("w", ":9999", "webserver address:port to listen on")
 var native = flag.Bool("n", false, "load xdp program in native mode")
-var test = flag.Bool("t", false, "run hashing tests")
 
 func main() {
 
 	flag.Parse()
 	args := flag.Args()
-
-	if *test {
-		//test2()
-		return
-	}
 
 	ulimit()
 
@@ -95,11 +87,13 @@ func main() {
 	myip := args[1]
 	peth := args[2:]
 
-	ip, ok := vc5.ParseIP(myip)
+	mynet, err := vc5.Net(myip)
 
-	if !ok {
-		log.Fatal(myip)
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	ip := mynet.IP
 
 	conf, err := vc5.LoadConf(file)
 
@@ -107,10 +101,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	hc, err := healthchecks.Load(conf)
+	hc, err := healthchecks.Load(mynet, conf)
 
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	j, _ := json.MarshalIndent(hc, "", "  ")
+	fmt.Println(string(j))
+
+	for _, v := range peth {
+		fmt.Println("ethtool", v)
+		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
+		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
 	}
 
 	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), *bond, peth...)
@@ -119,16 +122,26 @@ func main() {
 		log.Fatal(err)
 	}
 
-	pool := NewBGPPool(conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Peers)
-	pool.Peer(conf.RHI.Peers)
+	v5.DEFCON(uint8(*dfcn))
+
+	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
+
+	// temporary auto kill switch
+	go func() {
+		for {
+			time.Sleep(5 * time.Minute)
+			v5.DEFCON(0)
+		}
+	}()
 
 	go func() {
 		for {
 			switch <-sig {
 			default:
+				v5.DEFCON(0)
 				v5.Close()
 				time.Sleep(1 * time.Second)
 				os.Remove(temp.Name())
@@ -143,7 +156,7 @@ func main() {
 					log.Fatal(err)
 				}
 
-				hc, err = hc.Reload(conf)
+				hc, err = hc.Reload(mynet, conf)
 
 				if err != nil {
 					log.Fatal(err)
@@ -158,6 +171,22 @@ func main() {
 
 	var stats *Stats
 
+	go func() {
+		var t time.Time
+		start := time.Now()
+
+		for {
+			s := getStats(v5)
+			s.Sub(stats, time.Now().Sub(t))
+			t = time.Now()
+			stats = s
+			if time.Now().Sub(start) > (time.Duration(conf.Learn) * time.Second) {
+				pool.NLRI(s.RHI)
+			}
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
 	static := http.FS(STATIC)
 	handler := http.FileServer(static)
 
@@ -171,6 +200,10 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		j, _ := json.MarshalIndent(conf, "", "  ")
 		w.Write(j)
+	})
+
+	http.HandleFunc("/alive", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	})
 
 	http.HandleFunc("/defcon1", func(w http.ResponseWriter, r *http.Request) {
@@ -238,19 +271,6 @@ func main() {
 		w.Write(j)
 	})
 
-	go func() {
-		var t time.Time
-
-		for {
-			s := getStats(v5)
-			s.Sub(stats, time.Now().Sub(t))
-			t = time.Now()
-			stats = s
-			pool.NLRI(s.RHI)
-			time.Sleep(1 * time.Second)
-		}
-	}()
-
 	server := http.Server{}
 
 	log.Fatal(server.Serve(s))
@@ -276,7 +296,7 @@ func getStats(v5 *vc5.VC5) *Stats {
 				r := cf.Backends[n]
 				t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
 				c := ss[t]
-				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets}
+				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets, Concurrent: c.Concurrent}
 			}
 			stats.VIPs[vip][l4] = Service{Reals: reals, Up: s.Healthy, Fallback: s.Fallback}
 		}
@@ -299,13 +319,14 @@ type Stats struct {
 }
 
 type Service struct {
-	Up        bool         `json:"up"`
-	Fallback  bool         `json:"fallback"`
-	Octets    uint64       `json:"octets"`
-	Packets   uint64       `json:"packets"`
-	OctetsPS  uint64       `json:"octets_ps"`
-	PacketsPS uint64       `json:"packets_ps"`
-	Reals     map[IP4]Real `json:"rips"`
+	Up         bool         `json:"up"`
+	Fallback   bool         `json:"fallback"`
+	Octets     uint64       `json:"octets"`
+	Packets    uint64       `json:"packets"`
+	OctetsPS   uint64       `json:"octets_ps"`
+	PacketsPS  uint64       `json:"packets_ps"`
+	Concurrent uint64       `json:"concurrent"`
+	Reals      map[IP4]Real `json:"rips"`
 }
 
 func (s *Service) Total() {
@@ -314,15 +335,17 @@ func (s *Service) Total() {
 		s.Packets += v.Packets
 		s.OctetsPS += v.OctetsPS
 		s.PacketsPS += v.PacketsPS
+		s.Concurrent += v.Concurrent
 	}
 }
 
 type Real struct {
-	Up        bool   `json:"up"`
-	Octets    uint64 `json:"octets"`
-	Packets   uint64 `json:"packets"`
-	OctetsPS  uint64 `json:"octets_ps"`
-	PacketsPS uint64 `json:"packets_ps"`
+	Up         bool   `json:"up"`
+	Octets     uint64 `json:"octets"`
+	Packets    uint64 `json:"packets"`
+	OctetsPS   uint64 `json:"octets_ps"`
+	PacketsPS  uint64 `json:"packets_ps"`
+	Concurrent uint64 `json:"concurrent"`
 }
 
 func (r Real) Sub(o Real, dur time.Duration) Real {
@@ -365,168 +388,6 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 
 /**********************************************************************/
 
-/*
-func test1() {
-	//log.Fatal(xdp.BpfNumPossibleCpus())
-	x, xx := rendezvous.Test(100)
-
-	d := map[byte]int{}
-
-	for _, v := range x {
-		d[v] = d[v] + 1
-	}
-
-	h := []int{}
-
-	max := 0
-
-	for _, v := range d {
-		if v > max {
-			max = v
-		}
-		h = append(h, v)
-	}
-
-	fmt.Println(max)
-	sort.Ints(h)
-
-	for _, v := range h {
-		fmt.Printf("%03d ", v)
-		for n := 0; n < ((v * 80) / max); n++ {
-			fmt.Print("#")
-		}
-		fmt.Println()
-	}
-
-	fmt.Println(xx)
-
-	return
-}
-
-*/
-
-/*
-func test2() {
-
-	for m := 0; m < 256; m++ {
-		fmt.Println(m)
-		for n := 32; n > 0; n-- {
-			//		for n := 4; n > 1000; n-- {
-
-			m := map[[4]byte]uint16{}
-
-			for i := 0; i < n; i++ {
-				s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
-				m[s] = uint16(i)
-			}
-
-			var ips maglev.IP4s
-
-			for k, _ := range m {
-				ips = append(ips, k)
-			}
-
-			//sort.Sort(ips)
-
-			//fmt.Println(ips)
-
-			var nodes [][]byte
-
-			//for _, k := range ips {
-			for k, _ := range m {
-				nodes = append(nodes, k[:])
-			}
-
-			// 8192/64 = 11%
-			// 8192/32 = 5%
-
-			s := time.Now()
-			bar := 5.0
-			//table := maglev.Maglev65536(nodes)
-			table := maglev.Maglev8192(nodes)
-			d := time.Now().Sub(s)
-			fmt.Println(d)
-
-			for _, v := range table {
-				i := nodes[v]
-				ip := [4]byte{i[0], i[1], i[2], i[3]}
-				_, ok := m[ip]
-				if !ok {
-					panic("oops")
-				}
-
-				//t2[k] = n
-			}
-
-			//fmt.Println(d)
-
-			dst := map[uint16]int{}
-			max := 0
-			min := -1
-
-			for _, v := range table {
-				g := uint16(v)
-				dst[g] = dst[g] + 1
-				if dst[g] > max {
-					max = dst[g]
-				}
-			}
-
-			for _, v := range dst {
-				if min < 0 || v < min {
-					min = v
-				}
-			}
-
-			foo := float64(100*(max-min)) / float64(min)
-			//fmt.Println(n, min, max, foo)
-
-			if foo > bar {
-				fmt.Println(n, min, max, foo)
-				panic("foo")
-			}
-
-		}
-	}
-}
-*/
-
-/*
-func test3() {
-
-	for n := 255; n > 0; n-- {
-
-		m := map[[4]byte][6]byte{}
-
-		for i := 0; i < n; i++ {
-			s := [4]byte{192, 168, byte(i >> 8), byte(i & 0xff)}
-			m[s] = [6]byte{}
-		}
-
-		table, stats := maglev.IP(m)
-		fmt.Println(stats, table[0:54])
-
-		if stats.Variance > 7 {
-			panic("oops")
-		}
-	}
-}
-
-*/
-/*
-func test4() {
-	s0 := IP4{1, 2, 3, 4}
-	s1 := IP4{5, 6, 7, 8}
-	s2 := IP4{9, 10, 11, 12}
-
-	m := map[[4]byte]uint8{s0: 10, s1: 11, s2: 12}
-	m = map[[4]byte]uint8{}
-
-	t, b := maglev.MaglevIPU8(m)
-	fmt.Println(m, t[:64], b)
-}
-*/
-
 func ulimit() {
 	var rLimit syscall.Rlimit
 	RLIMIT_MEMLOCK := 8
@@ -545,12 +406,14 @@ func ulimit() {
 type BGPPool struct {
 	nlri chan map[IP4]bool
 	peer chan []string
+	wait chan bool
 }
 
-func NewBGPPool(asn uint16, hold uint16, peer []string) *BGPPool {
-	b := &BGPPool{nlri: make(chan map[IP4]bool), peer: make(chan []string)}
-	go b.manage()
+func NewBGPPool(rid [4]byte, asn uint16, hold uint16, communities []uint32, peer []string) *BGPPool {
+	b := &BGPPool{nlri: make(chan map[IP4]bool), peer: make(chan []string), wait: make(chan bool)}
+	go b.manage(rid, asn, hold, communities)
 	b.peer <- peer
+	close(b.wait)
 	return b
 }
 
@@ -576,10 +439,10 @@ func diff(a, b map[IP4]bool) bool {
 	return false
 }
 
-func (b *BGPPool) manage() {
+func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32) {
 
 	nlri := map[IP4]bool{}
-	peer := map[string]bool{}
+	peer := map[string]*bgp4.Peer{}
 
 	for {
 		select {
@@ -589,9 +452,13 @@ func (b *BGPPool) manage() {
 				break
 			}
 
+			fmt.Println("*******", n, peer)
+
 			for k, v := range peer {
-				fmt.Println("NLRI", k, v, nlri, "to", n)
-				//v <- nlri
+				for ip, up := range n {
+					fmt.Println("NLRI", ip, up, "to", k)
+					v.NLRI(bgp4.IP4(ip), up)
+				}
 			}
 
 			nlri = n
@@ -599,7 +466,7 @@ func (b *BGPPool) manage() {
 		case p := <-b.peer:
 			fmt.Println("************************************************** PEER", p)
 
-			m := map[string]bool{}
+			m := map[string]*bgp4.Peer{}
 
 			for _, s := range p {
 
@@ -607,13 +474,20 @@ func (b *BGPPool) manage() {
 					m[s] = v
 					delete(peer, s)
 				} else {
-					m[s] = true
+					v = bgp4.Session(s, rid, rid, asn, hold, communities, b.wait, nil)
+					m[s] = v
+					for k, v := range peer {
+						for ip, up := range nlri {
+							fmt.Println("NLRI", ip, up, "to", k)
+							v.NLRI(bgp4.IP4(ip), up)
+						}
+					}
 				}
 			}
 
 			for k, v := range peer {
 				fmt.Println("close", k, v)
-				//close(v)
+				v.Close()
 			}
 
 			peer = m

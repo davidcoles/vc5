@@ -21,15 +21,18 @@ package config2
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	//"fmt"
 	"io/ioutil"
 	"net"
 	"os"
+	"regexp"
+	"strconv"
 
 	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4
+type NET = types.NET
 type L4 = types.L4
 type Check = types.Check
 type Checks = types.Checks
@@ -42,6 +45,31 @@ type RIP struct {
 	Dns   []Check `json:"dns,omitempty"`
 }
 
+type Serv struct {
+	Name        string
+	Description string
+	Need        uint16
+	Leastconns  bool
+	Sticky      bool
+	RIPs        map[IP4]RIP
+	Local       Checks
+	Fallback    bool
+}
+
+type RHI struct {
+	AS_Number    uint16
+	Hold_Time    uint16
+	Peers        []string
+	Communities_ []community `json:"communities,omitempty"`
+}
+
+type Conf struct {
+	VIPs  map[IP4]map[L4]Serv
+	VLANs map[uint16]NET
+	RHI   RHI
+	Learn uint16
+}
+
 func (r *RIP) Checks() Checks {
 	var c Checks
 	c.Http = r.Http
@@ -52,30 +80,103 @@ func (r *RIP) Checks() Checks {
 	return c
 }
 
-type Serv struct {
-	Name        string
-	Description string
-	Need        uint16
-	Leastconns  bool
-	Sticky      bool
-	RIPs        map[IP4]RIP
-	Local       Checks
+type community uint32
+
+func (c *community) UnmarshalJSON(data []byte) error {
+	re := regexp.MustCompile(`^"(\d+):(\d+)"$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 3 {
+		return errors.New("Badly formed community")
+	}
+
+	asn, err := strconv.Atoi(m[1])
+	if err != nil {
+		return err
+	}
+
+	val, err := strconv.Atoi(m[2])
+	if err != nil {
+		return err
+	}
+
+	if asn < 0 || asn > 65535 || val < 0 || val > 65535 {
+		return errors.New("Badly formed community")
+	}
+
+	*c = community(uint32(asn)<<16 | uint32(val))
+
+	return nil
 }
 
-type RHI struct {
-	AS_Number uint16
-	Hold_Time uint16
-	Peers     []string
+func (r *RHI) Communities() []uint32 {
+	var c []uint32
+	for _, v := range r.Communities_ {
+		c = append(c, uint32(v))
+	}
+	return c
 }
 
-type Conf struct {
-	VIPs  map[IP4]map[L4]Serv
-	VLANs map[uint16]string
-	rip   map[uint16]IP4
-	nat   map[uint16][2]IP4
-	vid   map[uint16]uint16
-	vlan  map[IP4]uint16
-	RHI   RHI
+//type ipnet net.IPNet
+
+type ipnet struct {
+	IP   IP4
+	Mask IP4
+}
+
+func (i *ipnet) mask() (ip IP4) {
+	ip[0] = i.IP[0] & i.Mask[0]
+	ip[1] = i.IP[1] & i.Mask[1]
+	ip[2] = i.IP[2] & i.Mask[2]
+	ip[3] = i.IP[3] & i.Mask[3]
+	return
+}
+
+func (i *ipnet) IPNet() (ip net.IP, ipnet net.IPNet) {
+	ip = net.IPv4(i.IP[0], i.IP[1], i.IP[2], i.IP[3])
+	n := i.mask()
+	ipnet.IP = net.IPv4(n[0], n[1], n[2], n[3])
+	ipnet.Mask = net.IPv4Mask(i.Mask[0], i.Mask[1], i.Mask[2], i.Mask[3])
+	return
+
+}
+
+func (c *ipnet) UnmarshalJSON(data []byte) error {
+
+	re := regexp.MustCompile(`^"([^"]+)"$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 2 {
+		return errors.New("Badly formed CIDR")
+	}
+
+	ip, ipn, err := net.ParseCIDR(m[1])
+
+	if err != nil {
+		return err
+	}
+
+	ip4 := ip.To4()
+
+	if len(ip4) != 4 || (ip4[0] == 0 && ip4[1] == 0 && ip4[2] == 0 && ip4[3] == 0) {
+		return errors.New("Invalid VLAN")
+	}
+
+	mask := ipn.Mask
+
+	if len(mask) != 4 || (mask[0] == 0 && mask[1] == 0 && mask[2] == 0 && mask[3] == 0) {
+		return errors.New("Invalid VLAN")
+	}
+
+	copy(c.IP[:], ip4[:])
+	copy(c.Mask[:], mask[:])
+
+	//x, y := c.IPNet()
+	//fmt.Println("XXXX", ipn, ip, len(ip4), len(mask), *c, c.mask(), x, y)
+
+	return nil
 }
 
 func load(file string) (*Conf, error) {
@@ -100,15 +201,10 @@ func load(file string) (*Conf, error) {
 	return &config, nil
 }
 
-func Load(file string, old *Conf) (*Conf, error) {
-
-	if old == nil {
-		old = &Conf{rip: map[uint16]IP4{}, nat: map[uint16][2]IP4{}}
-	}
+func Load(file string) (*Conf, error) {
 
 	c, err := load(file)
 
-	c.vlan, err = c.vlans()
 	if err != nil {
 		return nil, err
 	}
@@ -116,111 +212,37 @@ func Load(file string, old *Conf) (*Conf, error) {
 	return c, nil
 }
 
-func (c *Conf) vlans() (map[IP4]uint16, error) {
+func (c *Conf) Vlans() map[IP4]uint16 {
+	reals := c.Reals()
+	vlans := map[IP4]uint16{}
 
-	foo := map[IP4]uint16{}
+	for _, r := range reals {
+		var vlan uint16
 
-	if len(c.VLANs) == 0 {
-		return foo, nil
-	}
-
-	vlan := map[uint16]*net.IPNet{}
-
-	for k, v := range c.VLANs {
-		_, ipnet, err := net.ParseCIDR(v)
-		if err != nil {
-			return nil, err
+		if len(c.VLANs) == 0 {
+			vlans[r] = 0
+			continue
 		}
-		vlan[k] = ipnet
-	}
 
-	vid := map[uint16]uint16{}
+		for vid, net := range c.VLANs {
+			_, ipnet := net.IPNet()
+			ip := r.IP()
 
-rips:
-	for n, i := range c.rip {
-		for k, v := range vlan {
-			if v.Contains(net.IPv4(i[0], i[1], i[2], i[3])) {
-				vid[n] = k
-				continue rips
+			if ipnet.Contains(ip) {
+				vlan = vid
 			}
 		}
-		return foo, errors.New("No VLAN for " + i.String())
-	}
 
-rips2:
-	for _, i := range c.Reals() {
-		for k, v := range vlan {
-			if v.Contains(net.IPv4(i[0], i[1], i[2], i[3])) {
-				foo[i] = k
-				continue rips2
-			}
+		if vlan == 0 {
+			panic("VLANs")
 		}
-		return foo, errors.New("No VLAN for " + i.String())
+
+		vlans[r] = vlan
+
 	}
 
-	c.vid = vid
-
-	fmt.Println(vid)
-
-	return foo, nil
+	return vlans
 }
-
-func (c *Conf) Vlans() map[IP4]uint16   { return c.vlan }
-func (c *Conf) VIDs() map[uint16]uint16 { return c.vid }
-
-/*
-func (c *Conf) NATs() map[uint16][2]IP4 { return c.nat }
-func (c *Conf) RIPs() map[uint16]IP4    { return c.rip }
-
-func _nats(old map[uint16][2]IP4, new map[[2]IP4]bool) map[uint16][2]IP4 {
-	o := map[[2]IP4]uint16{}
-	r := map[uint16][2]IP4{}
-	var n uint16
-	for k, v := range old {
-		o[v] = k
-	}
-
-	for k, _ := range new {
-		if x, ok := o[k]; ok {
-			r[x] = k
-		} else {
-		find:
-			n++
-			if n > 65000 {
-				panic("nats")
-			}
-
-			if _, ok := old[n]; ok {
-				goto find
-			}
-
-			r[n] = k
-		}
-	}
-
-	return r
-}
-*/
-/*
-func (c *Conf) _Reals() []IP4 {
-	var l []IP4
-
-	for _, ip := range c.RIPs() {
-		l = append(l, ip)
-	}
-
-	return l
-}
-func (c *Conf) _Nats() [][2]IP4 {
-	var l [][2]IP4
-
-	for _, p := range c.NATs() {
-		l = append(l, p)
-	}
-
-	return l
-}
-*/
 
 func (c *Conf) Reals() []IP4 {
 
@@ -247,7 +269,6 @@ func (c *Conf) Nats() [][2]IP4 {
 	nat := map[[2]IP4]bool{}
 
 	for v, l := range c.VIPs {
-		nat[[2]IP4{v, IP4{127, 0, 0, 1}}] = false
 		for _, s := range l {
 			for r, _ := range s.RIPs {
 				nat[[2]IP4{v, r}] = false
@@ -262,53 +283,3 @@ func (c *Conf) Nats() [][2]IP4 {
 
 	return n
 }
-
-/*
-func _rips(old map[uint16]IP4, new map[IP4]bool) map[uint16]IP4 {
-	o := map[IP4]uint16{}
-	r := map[uint16]IP4{}
-	var n uint16
-	for k, v := range old {
-		o[v] = k
-	}
-
-	for k, _ := range new {
-		if x, ok := o[k]; ok {
-			r[x] = k
-		} else {
-		find:
-			n++
-			if n > 255 {
-				panic("rips")
-			}
-
-			if _, ok := old[n]; ok {
-				goto find
-			}
-
-			r[n] = k
-		}
-	}
-
-	return r
-}
-
-func (c *Conf) _RIP(r IP4) uint16 {
-	for k, v := range c.rip {
-		if v == r {
-			return k
-		}
-	}
-
-	return 0
-}
-func (c *Conf) _NAT(vip, rip IP4) uint16 {
-	for k, v := range c.nat {
-		if v[0] == vip && v[1] == rip {
-			return k
-		}
-	}
-
-	return 0
-}
-*/

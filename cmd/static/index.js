@@ -81,7 +81,7 @@ function updateStats(url) {
 		    }
 		    
 		    n.innerHTML = vip + ":" + l4 + " " + up + " " +
-			tsf(service.octets_ps*8) + "bps " + tsf(service.packets_ps) + "pps "
+			tsf(service.octets_ps*8) + "bps " + tsf(service.packets_ps) + "pps " + service.concurrent + " active conns "
 		    
 		    services.appendChild(n)
 		    
@@ -91,7 +91,7 @@ function updateStats(url) {
 			var r = rips[rip]
 			n.innerHTML = "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
 			    rip + " " + (r.up ? "UP" : "DOWN") + " " +
-			     tsf(r.octets_ps*8) + "bps " + tsf(r.packets_ps) + "pps " 
+			     tsf(r.octets_ps*8) + "bps " + tsf(r.packets_ps) + "pps " + r.concurrent + " active conns "
 			    
 			services.appendChild(n)
 		    }

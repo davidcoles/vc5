@@ -171,7 +171,9 @@ int xdp_link_detach2(char *interface) {
     __u32 xdp_flags = XDP_MODE; //XDP_FLAGS_SKB_MODE;
     int err;
     
-    err = xdp_link_detach(ifindex, xdp_flags);
+    xdp_link_detach(ifindex, XDP_FLAGS_DRV_MODE);
+
+    err = xdp_link_detach(ifindex, xdp_flags);    
     if(err != EXIT_OK) {
         return -1;
     }

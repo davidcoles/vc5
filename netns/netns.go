@@ -37,6 +37,12 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
+type probe struct {
+	IP     types.IP4
+	Scheme string
+	Check  types.Check
+}
+
 func Spawn(netns string, args ...string) {
 	for {
 		fmt.Println(args[0], args[1], args[2])
@@ -72,7 +78,7 @@ func Spawn(netns string, args ...string) {
 	}
 }
 
-func Server(path string) {
+func Server(path string, ip string) {
 	log.Println("RUNNING", path)
 
 	go func() {
@@ -88,47 +94,38 @@ func Server(path string) {
 
 	os.Remove(path)
 
+	syn := Syn(ip)
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		//defer r.Body.Close()
 
 		body, err := ioutil.ReadAll(r.Body)
 
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(fmt.Sprint(err)))
 			return
 		}
 
-		var foo Foo
+		var p probe
 
-		err = json.Unmarshal(body, &foo)
+		err = json.Unmarshal(body, &p)
 
 		if err != nil {
 			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(fmt.Sprint(err)))
 			return
 		}
 
-		fmt.Println(foo)
-
-		var ok bool
-		var st string
-
-		switch foo.Scheme {
-		case "http":
-			ok, st = httpget(foo)
-		case "https":
-			ok, st = httpget(foo)
-		default:
-		}
-
-		fmt.Println(">>>>", ok, st)
+		ok, resp := p.probe(syn)
 
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(resp))
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write(body)
+		w.Write([]byte(resp))
 	})
 
 	s, err := net.Listen("unix", path)
@@ -143,12 +140,6 @@ func Server(path string) {
 }
 
 var client *http.Client
-
-type Foo struct {
-	IP     types.IP4
-	Scheme string
-	Check  types.Check
-}
 
 func Probe(path string, ip types.IP4, scheme string, check types.Check) bool {
 	b, _ := Req(path, ip, scheme, check)
@@ -168,10 +159,10 @@ func Req(path string, ip types.IP4, scheme string, check types.Check) (bool, str
 
 	defer client.CloseIdleConnections()
 
-	foo := Foo{IP: ip, Scheme: scheme, Check: check}
+	p := probe{IP: ip, Scheme: scheme, Check: check}
 
 	buff := new(bytes.Buffer)
-	err := json.NewEncoder(buff).Encode(&foo)
+	err := json.NewEncoder(buff).Encode(&p)
 
 	if err != nil {
 		return false, "AF_UNIX: " + err.Error()
@@ -185,19 +176,18 @@ func Req(path string, ip types.IP4, scheme string, check types.Check) (bool, str
 
 	defer response.Body.Close()
 
+	//body, _ := ioutil.ReadAll(response.Body)
+	ioutil.ReadAll(response.Body)
+
 	if response.StatusCode != 200 {
 		return false, fmt.Sprintf("AF_UNIX: %d", response.StatusCode)
 	}
 
-	_, err = ioutil.ReadAll(response.Body)
-
 	return true, ""
 }
 
-func httpget(foo Foo) (bool, string) {
-	scheme := foo.Scheme
-	address := foo.IP
-	check := foo.Check
+func (p *probe) httpget() (bool, string) {
+	check := p.Check
 
 	if client == nil {
 
@@ -230,20 +220,21 @@ func httpget(foo Foo) (bool, string) {
 		port = 80
 	}
 
-	url := fmt.Sprintf("%s://%s:%d/%s", scheme, address, port, path)
+	url := fmt.Sprintf("%s://%s:%d/%s", p.Scheme, p.IP, port, path)
 	req, err := http.NewRequest("GET", url, nil)
 	if check.Host != "" {
 		req.Host = check.Host
 	}
+
 	resp, err := client.Do(req)
 
 	if err != nil {
-		return false, fmt.Sprintf("GET: %s:%d %s %v", address, port, url, resp)
+		return false, fmt.Sprintf("GET: %s:%d %s %v", p.IP, port, url, resp)
 	}
 
 	defer resp.Body.Close()
 
-	//_, err = ioutil.ReadAll(resp.Body)
+	ioutil.ReadAll(resp.Body)
 
 	exp := int(check.Expect)
 
@@ -252,8 +243,97 @@ func httpget(foo Foo) (bool, string) {
 	}
 
 	if resp.StatusCode != exp {
-		return false, fmt.Sprintf("%d: %s:%s %s %v", resp.StatusCode, address, port, url, resp)
+		return false, fmt.Sprintf("%d: %s:%s %s %v", resp.StatusCode, p.IP, port, url, resp)
 	}
 
 	return true, ""
+}
+
+func (p *probe) synprobe(syn *SynChecks) (bool, string) {
+	addr := p.IP.String()
+	port := p.Check.Port
+
+	if port == 0 {
+		port = 80
+	}
+
+	return syn.Probe(addr, port), ""
+}
+
+func (p *probe) dnsprobe() (bool, string) {
+	addr := p.IP.String()
+	port := p.Check.Port
+
+	if port == 0 {
+		port = 53
+	}
+
+	return dnsquery(addr, fmt.Sprint(port)), ""
+}
+
+//func tcpdial(foo probe) (bool, string) {
+func (p *probe) tcpdial() (bool, string) {
+	addr := p.IP.String()
+	port := p.Check.Port
+
+	if port == 0 {
+		port = 23
+	}
+
+	d := net.Dialer{Timeout: 2 * time.Second}
+	c, err := d.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+	if err != nil {
+		return false, fmt.Sprint(err)
+	}
+
+	one := make([]byte, 1)
+	c.SetReadDeadline(time.Now().Add(1 * time.Second))
+	//c.SetReadDeadline(time.Now())
+	n, err := c.Read(one)
+	c.Close()
+
+	//log.Println(n, err)
+
+	if err == nil && n != 0 {
+		return true, ""
+	}
+
+	if err == io.EOF {
+		return false, fmt.Sprint(err)
+	}
+
+	switch err := err.(type) {
+	case net.Error:
+		if err.Timeout() {
+			// Port likely open and waiting for us to send input
+			//log.Println("This was a net.Error with a Timeout")
+			return true, ""
+		}
+	}
+
+	return false, fmt.Sprint(err)
+}
+
+func (p *probe) probe(syn *SynChecks) (bool, string) {
+	fmt.Println(p)
+
+	var ok bool
+	var st string
+
+	switch p.Scheme {
+	case "http":
+		ok, st = p.httpget()
+	case "https":
+		ok, st = p.httpget()
+	case "syn":
+		ok, st = p.synprobe(syn)
+	case "tcp":
+		ok, st = p.tcpdial()
+	case "dns":
+		ok, st = p.dnsprobe()
+	default:
+		st = "Unknown probe type"
+	}
+
+	return ok, st
 }

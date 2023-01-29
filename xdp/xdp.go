@@ -28,8 +28,8 @@ import "C"
 
 import (
 	"errors"
-	//"fmt"
 	"io/ioutil"
+	//"time"
 	//"net"
 	"os"
 	"unsafe"
@@ -38,17 +38,14 @@ import (
 const (
 	BPF_ANY     = C.BPF_ANY
 	BPF_NOEXIST = C.BPF_NOEXIST
+	BPF_EXIST   = C.BPF_EXIST
 )
 
-type XDP_ struct {
+type XDP struct {
 	p unsafe.Pointer
 }
 
-func XDP() string {
-	return "XDP"
-}
-
-func Simple(iface string, bindata []byte, program string) (*XDP_, error) {
+func Simple(iface string, bindata []byte, program string) (*XDP, error) {
 	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
 
 	if err != nil {
@@ -65,7 +62,7 @@ func Simple(iface string, bindata []byte, program string) (*XDP_, error) {
 		return nil, err
 	}
 
-	var xdp XDP_
+	var xdp XDP
 
 	o := C.load_bpf_file2(C.CString(tmpfile.Name()))
 	C.xdp_link_detach2(C.CString(iface))
@@ -87,7 +84,7 @@ func boolint(b bool) int {
 	return 0
 }
 
-func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth ...string) (*XDP_, error) {
+func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth ...string) (*XDP, error) {
 	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
 	if err != nil {
 		return nil, err
@@ -102,7 +99,7 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 		return nil, err
 	}
 
-	var xdp XDP_
+	var xdp XDP
 
 	//xdp.p = C.load_bpf_file(C.CString(iface), C.CString(tmpfile.Name()), C.CString(program))
 	o := C.load_bpf_file2(C.CString(tmpfile.Name()))
@@ -130,7 +127,7 @@ func LoadBpfFile(veth string, bindata []byte, program string, native bool, peth 
 	return &xdp, nil
 }
 
-func LoadBpfFile_(bindata []byte, program string, native bool, bond string, eth ...string) (*XDP_, error) {
+func LoadBpfFile_(bindata []byte, p1, p2 string, native bool, bond, vetha, vethb string, eth ...string) (*XDP, error) {
 	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
 	if err != nil {
 		return nil, err
@@ -145,7 +142,7 @@ func LoadBpfFile_(bindata []byte, program string, native bool, bond string, eth 
 		return nil, err
 	}
 
-	var xdp XDP_
+	var xdp XDP
 
 	xdp.p = C.load_bpf_file2(C.CString(tmpfile.Name()))
 
@@ -153,16 +150,32 @@ func LoadBpfFile_(bindata []byte, program string, native bool, bond string, eth 
 		return nil, errors.New("Oops")
 	}
 
-	if bond != "" {
-		C.xdp_link_detach2(C.CString(bond))
-		if C.load_bpf_section(xdp.p, C.CString(bond), C.CString(program), C.int(0)) != 0 {
-			return nil, errors.New("load_bpf_section() failed for " + bond)
+	//if bond != "" {
+	//	C.xdp_link_detach2(C.CString(bond))
+	//	if C.load_bpf_section(xdp.p, C.CString(bond), C.CString("xdp_main2"), C.int(0)) != 0 {
+	//		return nil, errors.New("load_bpf_section() failed for " + bond)
+	//	}
+	//}
+
+	if vetha != "" {
+		C.xdp_link_detach2(C.CString(vetha))
+		if C.load_bpf_section(xdp.p, C.CString(vetha), C.CString(p2), C.int(0)) != 0 {
+			return nil, errors.New("load_bpf_section() failed for " + vetha)
+		}
+	}
+
+	/* weirdly, this seems to need to be set up in naive mode or probes don't succeed */
+	if vethb != "" {
+		C.xdp_link_detach2(C.CString(vethb))
+		if C.load_bpf_section(xdp.p, C.CString(vethb), C.CString(p2), C.int(1)) != 0 {
+			return nil, errors.New("load_bpf_section() failed for " + vethb)
 		}
 	}
 
 	for _, iface := range eth {
+		n := boolint(native)
 		C.xdp_link_detach2(C.CString(iface))
-		if C.load_bpf_section(xdp.p, C.CString(iface), C.CString(program), C.int(boolint(native))) != 0 {
+		if C.load_bpf_section(xdp.p, C.CString(iface), C.CString(p1), C.int(n)) != 0 {
 			return nil, errors.New("load_bpf_section() failed for " + iface)
 		}
 	}
@@ -170,7 +183,7 @@ func LoadBpfFile_(bindata []byte, program string, native bool, bond string, eth 
 	return &xdp, nil
 }
 
-func (x *XDP_) CheckMap(i int, ks, vs int) bool {
+func (x *XDP) CheckMap(i int, ks, vs int) bool {
 
 	r := C.check_map_fd_info(C.int(i), C.int(ks), C.int(vs))
 
@@ -181,7 +194,7 @@ func (x *XDP_) CheckMap(i int, ks, vs int) bool {
 	return true
 }
 
-func (x *XDP_) FindMap(m string, l ...int) int {
+func (x *XDP) FindMap(m string, l ...int) int {
 	r := C.bpf_object__find_map_by_name((*C.struct_bpf_object)(x.p), C.CString(m))
 	if r == nil {
 		return -1
@@ -207,4 +220,40 @@ func BpfMapLookupElem(i int, k, v unsafe.Pointer) int {
 
 func BpfNumPossibleCpus() int {
 	return int(C.libbpf_num_possible_cpus())
+}
+
+func XDPTest(bindata []byte, program string, native bool, nic string, p2, n2 string) (*XDP, error) {
+	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write(bindata); err != nil {
+		return nil, err
+	}
+
+	if err := tmpfile.Close(); err != nil {
+		return nil, err
+	}
+
+	var xdp XDP
+
+	xdp.p = C.load_bpf_file2(C.CString(tmpfile.Name()))
+
+	if xdp.p == nil {
+		return nil, errors.New("Oops")
+	}
+
+	C.xdp_link_detach2(C.CString(nic))
+	if C.load_bpf_section(xdp.p, C.CString(nic), C.CString(program), C.int(boolint(native))) != 0 {
+		return nil, errors.New("load_bpf_section() failed for " + nic)
+	}
+
+	C.xdp_link_detach2(C.CString(n2))
+	if C.load_bpf_section(xdp.p, C.CString(n2), C.CString(p2), C.int(boolint(native))) != 0 {
+		return nil, errors.New("load_bpf_section() failed for " + n2)
+	}
+
+	return &xdp, nil
 }
