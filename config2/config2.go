@@ -234,7 +234,7 @@ func (c *Conf) Vlans() map[IP4]uint16 {
 		}
 
 		if vlan == 0 {
-			panic("VLANs")
+			//panic("VLANs")
 		}
 
 		vlans[r] = vlan

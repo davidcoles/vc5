@@ -151,6 +151,16 @@ Sample netplan and VC5 configurations are in the
 [examples/](examples/) directory.
 
 
+## vc5ng
+
+A new execuatble `vc5ng` has been added. The code for this is largely
+separate. It seems like the problem with not being able to use an Intel
+NIC in native mode with bpf_redirect has been overcome, so there is no
+need to set up a bridge and there is less code to deal with the two
+different modes of operation. BGP and stats reporting is more cleanly
+split out, so this should make for a more maintainable codebase.
+
+
 ## Performance
 
 This has mostly been tested using Icecast backend servers with clients

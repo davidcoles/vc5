@@ -33,14 +33,14 @@ function tsf(num) {
     }
 
     if(num >= 100) {
-	return Math.round(num).toString() + suffix[0];
+	return Math.round(num).toString() + suffix[0]
     }
 
     if(num > 10) {
-        return num.toFixed(1) + suffix[0];
+        return num.toFixed(1) + suffix[0]
     }
     
-    return num.toFixed(2) + suffix[0];;
+    return num.toFixed(2) + suffix[0]
 }
 
 function updateStats(url) {
@@ -53,7 +53,7 @@ function updateStats(url) {
 	    
 	    var summary = document.createElement("div");
 	    summary.innerHTML = "DEFCON" + data.defcon + " " + data.latency +"ns " +
-		tsf(data.octets_ps*8) + "bps " + tsf(data.packets_ps) + "pps "
+		tsf(data.octets_ps*8) + "bps " + tsf(data.packets_ps) + "pps "+ tsf(data.flows_ps) + " flows/s "
 
 	    document.getElementById("summary").replaceWith(summary);
 	    summary.id = "summary";
@@ -81,7 +81,8 @@ function updateStats(url) {
 		    }
 		    
 		    n.innerHTML = vip + ":" + l4 + " " + up + " " +
-			tsf(service.octets_ps*8) + "bps " + tsf(service.packets_ps) + "pps " + service.concurrent + " active conns "
+			tsf(service.octets_ps*8) + "bps " + tsf(service.packets_ps) + "pps " + service.concurrent + " active conns " +
+			" - " + service.name + " - " + service.description
 		    
 		    services.appendChild(n)
 		    

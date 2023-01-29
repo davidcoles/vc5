@@ -96,7 +96,7 @@ type bpf_global struct {
 	timens         uint64
 	perf_timer     uint64
 	settings_timer uint64
-	defcon         uint64
+	new_flows      uint64
 	dropped        uint64
 }
 
@@ -155,7 +155,8 @@ func (g *bpf_global) add(a bpf_global) {
 	g.rx_octets += a.rx_octets
 	g.packets += a.packets
 	g.timens += a.timens
-	g.defcon = a.defcon
+	//g.defcon = a.defcon
+	g.new_flows += a.new_flows
 }
 
 func Open(bond string, native bool, vetha, vethb string, eth ...string) *Maps {
@@ -274,7 +275,7 @@ func (m *maps) lookup_vrpp_concurrent(v *bpf_vrpp, c *int64) int {
 	return ret
 }
 
-func (m *maps) GlobalStats() (uint64, uint64, uint64, uint8) {
+func (m *maps) GlobalStats() (uint64, uint64, uint64, uint64, uint8) {
 	var g bpf_global
 	m.lookup_globals(&g)
 
@@ -283,7 +284,8 @@ func (m *maps) GlobalStats() (uint64, uint64, uint64, uint8) {
 		latency = g.timens / g.packets
 	}
 
-	return g.rx_packets, g.rx_octets, latency, uint8(g.defcon)
+	//return g.rx_packets, g.rx_octets, latency, uint8(g.defcon)
+	return g.rx_packets, g.rx_octets, g.new_flows, latency, m.defcon
 }
 
 func (m *maps) DEFCON(d uint8) uint8 {

@@ -167,7 +167,7 @@ func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []strin
 	return vc5, nil
 }
 
-func (v *VC5) GlobalStats() (uint64, uint64, uint64, uint8) {
+func (v *VC5) GlobalStats() (uint64, uint64, uint64, uint64, uint8) {
 	return v.maps.GlobalStats()
 }
 

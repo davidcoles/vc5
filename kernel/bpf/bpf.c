@@ -44,23 +44,8 @@
 
 #define SECOND_NS 1000000000
 
-struct tuple {
-    __be32 src;
-    __be32 dst;
-    __be16 sport;
-    __be16 dport;
-    __u8 protocol;
-    __u8 pad[3];
-};
-
 static __always_inline void maccpy(unsigned char *dst, unsigned char *src) {
     __builtin_memcpy(dst, src, 6);
-    //dst[0] = src[0];
-    //dst[1] = src[1];
-    //dst[2] = src[2];
-    //dst[3] = src[3];
-    //dst[4] = src[4];
-    //dst[5] = src[5];
 }
 
 static __always_inline int nulmac(unsigned char *mac) {
@@ -205,7 +190,7 @@ struct global {
     __u64 perf_timens;
     __u64 perf_timer;
     __u64 settings_timer;
-    __u64 defcon;
+    __u64 new_flows; //__u64 defcon;
     __u64 dropped;
 };
 
@@ -287,11 +272,12 @@ static __always_inline int find_real(struct iphdr *ipv4, __be16 src, __be16 dst,
     return XDP_TX;
 }
 
-static __always_inline void store_tcp_flow(struct iphdr *ipv4, __be16 src, __be16 dst, __be32 rip, __u8 *m, __u16 vid)
+static __always_inline void store_tcp_flow(struct iphdr *ipv4, __be16 src, __be16 dst, __be32 rip, __u8 *m, __u16 vid, struct global *global)
 {
     struct flow flow = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = src, .dport = dst }; 
     struct state state = { .rip = rip, .vid = vid, .time = bpf_ktime_get_ns(), .mac = { m[0], m[1], m[2], m[3], m[4], m[5] }, .era = !ERA };
     bpf_map_update_elem(&flow_state, &flow, &state, BPF_ANY);
+    if(global) global->new_flows++;
 }
 
 static __always_inline void be_tcp_counter(__be32 vip, __be16 port, __be32 rip, int n)
@@ -455,10 +441,13 @@ static __always_inline int tcp_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	    }
 
 	    if(tag != NULL) {
-		if(state->vid == 0) {
+		if(state->vid == 0)
 		    goto invalid_state; // VLAN ID of 0 not allowed if in VLAN mode
-		}
+
 		tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
+	    } else {
+		if(state->vid != 0)
+		    goto invalid_state; // VLAN ID not allowed if in non-VLAN mode
 	    }
 	    
 	    /**********************************************************************/
@@ -512,14 +501,17 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	    goto invalid_real; // unlikely we would want to echo packet back to source on an l2lb
 	
 	if(tag != NULL) {
-	    if(real->vid == 0) {
+	    if(real->vid == 0)
 		goto invalid_real; // VLAN ID of 0 not allowed if in VLAN mode
-	    }
+	    
 	    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (real->vid & bpf_htons(0x0fff));
+	} else {
+	    if(real->vid != 0)
+		goto invalid_real; // VLAN ID not allowed if in non-VLAN mode
 	}
 
 	if(ipv4->protocol == IPPROTO_TCP) {
-	    if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid);
+	    if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
 	    if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, dst, real->rip, octets);
 	}
 
@@ -596,7 +588,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	
 	global->rx_packets++;
 	global->rx_octets += (data_end - data);
-	global->defcon = DEFCON;
+	//global->defcon = DEFCON;
 	
 	// ~90ns to here
 	//write_perf(global, start); global = NULL;

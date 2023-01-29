@@ -35,6 +35,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -116,18 +118,19 @@ func main() {
 		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
 	}
 
+	re := regexp.MustCompile("^screen")
+
+	term, ok := os.LookupEnv("TERM")
+
+	if !ok || !re.MatchString(term) {
+		log.Fatal("Must run under screen for now for safety")
+	}
+
 	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), *bond, peth...)
 
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	v5.DEFCON(uint8(*dfcn))
-
-	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
-
-	sig := make(chan os.Signal)
-	signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
 
 	// temporary auto kill switch
 	go func() {
@@ -137,15 +140,26 @@ func main() {
 		}
 	}()
 
+	v5.DEFCON(uint8(*dfcn))
+
+	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
+
+	sig := make(chan os.Signal)
+	//signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
+	signal.Notify(sig)
+
 	go func() {
 		for {
-			switch <-sig {
+			s := <-sig
+			switch s {
+			case syscall.SIGURG:
+			case syscall.SIGCHLD:
 			default:
 				v5.DEFCON(0)
 				v5.Close()
 				time.Sleep(1 * time.Second)
 				os.Remove(temp.Name())
-				log.Fatal("EXITING")
+				log.Fatal("EXITING ", s)
 			case syscall.SIGQUIT:
 				log.Println("RELOAD")
 				time.Sleep(1 * time.Second)
@@ -271,6 +285,12 @@ func main() {
 		w.Write(j)
 	})
 
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		w.Write(prometheus(stats))
+	})
+
 	server := http.Server{}
 
 	log.Fatal(server.Serve(s))
@@ -285,7 +305,7 @@ func getStats(v5 *vc5.VC5) *Stats {
 	stats.VIPs = map[IP4]map[L4]Service{}
 	stats.RHI = map[IP4]bool{}
 
-	stats.Packets, stats.Octets, stats.Latency, stats.DEFCON = v5.GlobalStats()
+	stats.Packets, stats.Octets, stats.Flows, stats.Latency, stats.DEFCON = v5.GlobalStats()
 
 	for vip, v := range cf.Virtuals {
 		stats.VIPs[vip] = map[L4]Service{}
@@ -298,7 +318,7 @@ func getStats(v5 *vc5.VC5) *Stats {
 				c := ss[t]
 				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets, Concurrent: c.Concurrent}
 			}
-			stats.VIPs[vip][l4] = Service{Reals: reals, Up: s.Healthy, Fallback: s.Fallback}
+			stats.VIPs[vip][l4] = Service{Reals: reals, Up: s.Healthy, Fallback: s.Fallback, Name: s.Metadata.Name, Description: s.Metadata.Description}
 		}
 	}
 
@@ -312,6 +332,8 @@ type Stats struct {
 	Packets   uint64                 `json:"packets"`
 	OctetsPS  uint64                 `json:"octets_ps"`
 	PacketsPS uint64                 `json:"packets_ps"`
+	Flows     uint64                 `json:"flows"`
+	FlowsPS   uint64                 `json:"flows_ps"`
 	Latency   uint64                 `json:"latency"`
 	DEFCON    uint8                  `json:"defcon"`
 	RHI       map[IP4]bool           `json:"rhi"`
@@ -319,14 +341,16 @@ type Stats struct {
 }
 
 type Service struct {
-	Up         bool         `json:"up"`
-	Fallback   bool         `json:"fallback"`
-	Octets     uint64       `json:"octets"`
-	Packets    uint64       `json:"packets"`
-	OctetsPS   uint64       `json:"octets_ps"`
-	PacketsPS  uint64       `json:"packets_ps"`
-	Concurrent uint64       `json:"concurrent"`
-	Reals      map[IP4]Real `json:"rips"`
+	Name        string       `json:"name"`
+	Description string       `json:"description"`
+	Up          bool         `json:"up"`
+	Fallback    bool         `json:"fallback"`
+	Octets      uint64       `json:"octets"`
+	Packets     uint64       `json:"packets"`
+	OctetsPS    uint64       `json:"octets_ps"`
+	PacketsPS   uint64       `json:"packets_ps"`
+	Concurrent  uint64       `json:"concurrent"`
+	Reals       map[IP4]Real `json:"rips"`
 }
 
 func (s *Service) Total() {
@@ -360,6 +384,7 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 
 		n.OctetsPS = (uint64(time.Second) * (n.Octets - o.Octets)) / uint64(dur)
 		n.PacketsPS = (uint64(time.Second) * (n.Packets - o.Packets)) / uint64(dur)
+		n.FlowsPS = (uint64(time.Second) * (n.Flows - o.Flows)) / uint64(dur)
 
 		for v, _ := range n.VIPs {
 			if _, ok := o.VIPs[v]; ok {
@@ -399,6 +424,81 @@ func ulimit() {
 	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
 		log.Fatal("Error Setting Rlimit ", err)
 	}
+}
+
+/**********************************************************************/
+func prometheus(g *Stats) []byte {
+
+	m := []string{
+		"# TYPE vc5_average_latency_ns gauge",
+		"# TYPE vc5_packets_per_second gauge",
+		"# TYPE vc5_current_connections gauge",
+		"# TYPE vc5_total_connections counter",
+		"# TYPE vc5_rx_packets counter",
+		"# TYPE vc5_rx_octets counter",
+		"# TYPE vc5_userland_queue_failed counter",
+		"# TYPE vc5_defcon gauge",
+
+		"# TYPE vc5_rhi gauge",
+
+		"# TYPE vc5_service_current_connections gauge",
+		"# TYPE vc5_service_total_connections counter",
+		"# TYPE vc5_service_rx_packets counter",
+		"# TYPE vc5_service_rx_octets counter",
+		"# TYPE vc5_service_healthcheck gauge",
+
+		"# TYPE vc5_backend_current_connections gauge",
+		"# TYPE vc5_backend_total_connections counter",
+		"# TYPE vc5_backend_rx_packets counter",
+		"# TYPE vc5_backend_rx_octets counter",
+		"# TYPE vc5_backend_healthcheck gauge",
+	}
+
+	b2u8 := func(v bool) uint8 {
+		if v {
+			return 1
+		}
+		return 0
+	}
+
+	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
+	//m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.Pps))
+	//m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
+	//m = append(m, fmt.Sprintf("vc5_total_connections %d", g.New_flows))
+	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Packets))
+	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Octets))
+	//m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
+	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
+
+	for i, v := range g.RHI {
+		m = append(m, fmt.Sprintf(`vc5_rhi{address="%s"} %d`, i, b2u8(v)))
+	}
+
+	for vip, services := range g.VIPs {
+		for l4, v := range services {
+			//d := v.Description
+			s := vip.String() + ":" + l4.String()
+			n := v.Name
+			m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s",sname="%s"} %d`, s, n, v.Concurrent))
+			//m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s",sname="%s"} %d`, s, n, v.New_flows))
+			m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s",sname="%s"} %d`, s, n, v.Packets))
+			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Octets))
+
+			m = append(m, fmt.Sprintf(`vc5_service_healthcheck{service="%s",sname="%s"} %d`, s, n, b2u8(v.Up)))
+
+			for b, v := range v.Reals {
+				m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
+				//m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.New_flows))
+				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Packets))
+				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Octets))
+
+				m = append(m, fmt.Sprintf(`vc5_backend_healthcheck{service="%s",backend="%s"} %d`, s, b, b2u8(v.Up)))
+			}
+		}
+	}
+
+	all := strings.Join(m, "\n")
+	return []byte(all)
 }
 
 /**********************************************************************/
