@@ -21,13 +21,16 @@ package kernel
 import (
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"time"
 
+	"github.com/davidcoles/vc5/types"
 	"github.com/davidcoles/vc5/xdp"
 )
 
-func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) (chan *Healthchecks, func(ip IP4) (MAC, bool)) {
+func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) (chan *Healthchecks, func(ip IP4) (MAC, bool)) {
+	F := "nat"
 
 	var mu sync.Mutex
 
@@ -74,6 +77,8 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
+		icmp := ICMP()
+
 		for {
 
 			select {
@@ -96,7 +101,9 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 
 				for k, _ := range rips {
 					if _, ok := pings[k]; !ok {
-						pings[k] = ping(k)
+						//pings[k] = ping(k)
+						l.NOTICE(F, "Starting ping for", k)
+						pings[k] = ping(icmp, k)
 					}
 				}
 
@@ -136,7 +143,8 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 					continue
 				}
 
-				fmt.Println("INDEX", rip, nat, egress, mac, vid)
+				//fmt.Println("INDEX", rip, nat, egress, mac, vid)
+				l.INFO("nat", rip, nat, egress, mac, vid)
 
 				out := bpf_nat{vip: vip, mac: mac, srcmac: mymac, srcip: srcip, ifindex: uint32(egress), vid: vid}
 				in := bpf_nat{vip: vc5bip, mac: vc5bmac, srcip: nat, ifindex: uint32(veth)}
@@ -152,7 +160,8 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 						update = false
 					} else {
 						if v.vm != rec.vm {
-							fmt.Println("UPDATING", v.vm)
+							//fmt.Println("UPDATING", v.vm)
+							l.NOTICE("nat", "updating", v.vm, "to", rec.vm)
 							xdp.BpfMapDeleteElem(m.vip_mac_to_nat(), uP(&(v.vm)))
 						}
 					}
@@ -161,7 +170,8 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 				recs[n] = rec
 
 				if update {
-					fmt.Println("WRITING", nat, rip, vm)
+					//fmt.Println("WRITING", nat, rip, vm)
+					l.NOTICE("nat", "writing", nat, rip, vm)
 					xdp.BpfMapUpdateElem(m.nat_to_vip_mac(), uP(&nat), uP(&out), xdp.BPF_ANY)
 					xdp.BpfMapUpdateElem(m.vip_mac_to_nat(), uP(&vm), uP(&in), xdp.BPF_ANY)
 				}
@@ -171,7 +181,8 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 				if _, ok := mapping[n]; !ok {
 					delete(recs, n)
 					nat := Nat(n, vc5bip)
-					fmt.Println("REMOVING", nat, v.vm)
+					//fmt.Println("REMOVING", nat, v.vm)
+					l.NOTICE("nat", "writing", nat, v.vm)
 					xdp.BpfMapDeleteElem(m.nat_to_vip_mac(), uP(&nat))
 					xdp.BpfMapDeleteElem(m.vip_mac_to_nat(), uP(&(v.vm)))
 				}
@@ -181,4 +192,86 @@ func (m *maps) NAT(myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip I
 
 	ch <- h
 	return ch, get_mac_for_ip
+}
+
+func ping(icmp *ICMPs, ip IP4) chan bool {
+	// no need to receive a reply - this is only to populate the ARP cache
+	done := make(chan bool)
+	go func() {
+		for {
+			icmp.Ping(ip.String())
+			select {
+			case <-time.After(10 * time.Second):
+			case <-done:
+				return
+			}
+		}
+	}()
+	return done
+}
+
+/**********************************************************************/
+
+func EchoRequest() []byte {
+
+	var csum uint32
+	wb := make([]byte, 8)
+
+	wb[0] = 8
+	wb[1] = 0
+
+	for n := 0; n < 8; n += 2 {
+		csum += uint32(uint16(wb[n])<<8 | uint16(wb[n+1]))
+	}
+
+	var cs uint16
+
+	cs = uint16(csum>>16) + uint16(csum&0xffff)
+	cs = ^cs
+
+	wb[2] = byte(cs >> 8)
+	wb[3] = byte(cs & 0xff)
+
+	return wb
+}
+
+type ICMPs struct {
+	submit chan string
+}
+
+//func ICMP(source string) *ICMPs {
+func ICMP() *ICMPs {
+
+	var icmp ICMPs
+
+	c, err := net.ListenPacket("ip4:icmp", "")
+	if err != nil {
+		log.Fatalf("listen err, %s", err)
+	}
+
+	icmp.submit = make(chan string, 1000)
+	go icmp.probe(c)
+
+	return &icmp
+}
+
+func (s *ICMPs) probe(socket net.PacketConn) {
+
+	defer socket.Close()
+
+	for target := range s.submit {
+
+		socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
+
+		if _, err := socket.WriteTo(EchoRequest(), &net.IPAddr{IP: net.ParseIP(target)}); err != nil {
+			log.Fatalf("WriteTo err, %s", err)
+		}
+	}
+}
+
+func (s *ICMPs) Ping(target string) {
+	select {
+	case s.submit <- target:
+	default:
+	}
 }

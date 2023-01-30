@@ -45,7 +45,7 @@ type probe struct {
 
 func Spawn(netns string, args ...string) {
 	for {
-		fmt.Println(args[0], args[1], args[2])
+		//fmt.Println(args[0], args[1], args[2])
 
 		cmd := exec.Command("ip", append([]string{"netns", "exec", netns}, args...)...)
 		_, _ = cmd.StdinPipe()
@@ -315,7 +315,7 @@ func (p *probe) tcpdial() (bool, string) {
 }
 
 func (p *probe) probe(syn *SynChecks) (bool, string) {
-	fmt.Println(p)
+	//fmt.Println(p)
 
 	var ok bool
 	var st string

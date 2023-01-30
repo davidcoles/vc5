@@ -27,6 +27,7 @@ import (
 
 	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/monitor"
+	"github.com/davidcoles/vc5/types"
 	"github.com/davidcoles/vc5/xdp"
 )
 
@@ -47,7 +48,8 @@ func boolint(b bool) byte {
 	return 0
 }
 
-func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
+func (m *maps) Balancer(c Report, l types.Logger) (chan Report, func() map[Target]Counter) {
+	F := "balancer"
 
 	var mu sync.Mutex
 	type l4Service struct {
@@ -87,7 +89,8 @@ func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
 				var n int64
 				vrrp := bpf_vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol, pad: boolint(!era)}
 				r := m.lookup_vrpp_concurrent(&vrrp, &n)
-				fmt.Println("XXXXXXXXXXXXXXXXX", boolint(era), r, v, n)
+				//fmt.Println("XXXXXXXXXXXXXXXXX", boolint(era), r, v, n)
+				l.DEBUG("balancer", boolint(era), r, v, n)
 				m.update_vrpp_concurrent(&vrrp, nil, xdp.BPF_EXIST)
 
 				if n > 0 {
@@ -146,7 +149,7 @@ func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
 
 				for l4, s := range virtual.Services {
 
-					fmt.Println(vip, l4, s)
+					//fmt.Println(vip, l4, s)
 
 					l4service := l4Service{vip: vip, svc: l4}
 
@@ -171,7 +174,7 @@ func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
 					val := &be_state{fallback: s.Fallback, sticky: s.Sticky, leastconns: s.Leastconns, weight: s.Weight,
 						health: s.Health, backend: config.Backends}
 
-					if val.update(state[l4service]) {
+					if val.update(state[l4service], l) {
 						m.update_service_backend(key, &(val.bpf_backend), xdp.BPF_ANY)
 						state[l4service] = val
 					}
@@ -194,7 +197,7 @@ func (m *maps) Balancer(c Report) (chan Report, func() map[Target]Counter) {
 				delete(vips, vip)
 			}
 
-			fmt.Println("======================================================================")
+			l.INFO(F, "======================================================================")
 		}
 	}()
 
@@ -240,7 +243,7 @@ func maglev8192(m map[[4]byte]uint8) (r [8192]uint8, b bool) {
 	return r, true
 }
 
-func (curr *be_state) update(prev *be_state) bool {
+func (curr *be_state) update(prev *be_state, l types.Logger) bool {
 
 	if prev != nil {
 
@@ -327,7 +330,8 @@ build:
 
 	curr.bpf_backend.real[0] = bpf_real{rip: rip, mac: mac, vid: htons(vid), flag: flag}
 
-	fmt.Println("******** UPDATED", curr.bpf_backend.hash[:32], time.Now().Sub(now))
+	//fmt.Println("******** UPDATED", curr.bpf_backend.hash[:32], time.Now().Sub(now))
+	l.NOTICE("balancer", "UPDATED", curr.bpf_backend.hash[:32], time.Now().Sub(now))
 
 	return true
 }

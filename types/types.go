@@ -435,3 +435,26 @@ func Net(s string) (NET, error) {
 
 	return n, nil
 }
+
+type Logger interface {
+	EMERG(string, ...interface{})
+	ALERT(string, ...interface{})
+	CRIT(string, ...interface{})
+	ERR(string, ...interface{})
+	WARNING(string, ...interface{})
+	NOTICE(string, ...interface{})
+	INFO(string, ...interface{})
+	DEBUG(string, ...interface{})
+}
+
+type NilLogger struct {
+}
+
+func (l *NilLogger) EMERG(f string, e ...interface{})   {}
+func (l *NilLogger) ALERT(f string, e ...interface{})   {}
+func (l *NilLogger) CRIT(f string, e ...interface{})    {}
+func (l *NilLogger) ERR(f string, e ...interface{})     {}
+func (l *NilLogger) WARNING(f string, e ...interface{}) {}
+func (l *NilLogger) NOTICE(f string, e ...interface{})  {}
+func (l *NilLogger) INFO(f string, e ...interface{})    {}
+func (l *NilLogger) DEBUG(f string, e ...interface{})   {}

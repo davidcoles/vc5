@@ -45,6 +45,8 @@ import (
 	"github.com/davidcoles/vc5/healthchecks"
 )
 
+var logger *Logger
+
 //go:embed static/*
 var STATIC embed.FS
 
@@ -95,8 +97,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ip := mynet.IP
-
 	conf, err := vc5.LoadConf(file)
 
 	if err != nil {
@@ -126,7 +126,9 @@ func main() {
 		log.Fatal("Must run under screen for now for safety")
 	}
 
-	v5, err := vc5.Controller(*native, ip, hc, cmd, temp.Name(), *bond, peth...)
+	logs := &Logger{}
+	logger = logs
+	v5, err := vc5.Controller(logs, *native, mynet.IP, hc, cmd, temp.Name(), *bond, peth...)
 
 	if err != nil {
 		log.Fatal(err)
@@ -142,7 +144,7 @@ func main() {
 
 	v5.DEFCON(uint8(*dfcn))
 
-	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
+	pool := NewBGPPool(mynet.IP, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
 
 	sig := make(chan os.Signal)
 	//signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
@@ -154,6 +156,7 @@ func main() {
 			switch s {
 			case syscall.SIGURG:
 			case syscall.SIGCHLD:
+			case syscall.SIGWINCH:
 			default:
 				v5.DEFCON(0)
 				v5.Close()
@@ -552,11 +555,12 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 				break
 			}
 
-			fmt.Println("*******", n, peer)
+			//fmt.Println("*******", n, peer)
 
 			for k, v := range peer {
 				for ip, up := range n {
-					fmt.Println("NLRI", ip, up, "to", k)
+					//fmt.Println("NLRI", ip, up, "to", k)
+					logger.NOTICE("peers", "NLRI", ip, up, "to", k)
 					v.NLRI(bgp4.IP4(ip), up)
 				}
 			}
@@ -564,7 +568,7 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 			nlri = n
 
 		case p := <-b.peer:
-			fmt.Println("************************************************** PEER", p)
+			//fmt.Println("************************************************** PEER", p)
 
 			m := map[string]*bgp4.Peer{}
 
@@ -594,3 +598,33 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 		}
 	}
 }
+
+/**********************************************************************/
+type Logger struct {
+}
+
+func (l *Logger) Log(level uint8, facility string, entry ...interface{}) {
+	if level <= LOG_NOTICE {
+		log.Println(level, facility, entry)
+	}
+}
+
+func (l *Logger) EMERG(f string, e ...interface{})   { l.Log(LOG_EMERG, f, e) }
+func (l *Logger) ALERT(f string, e ...interface{})   { l.Log(LOG_ALERT, f, e) }
+func (l *Logger) CRIT(f string, e ...interface{})    { l.Log(LOG_CRIT, f, e) }
+func (l *Logger) ERR(f string, e ...interface{})     { l.Log(LOG_ERR, f, e) }
+func (l *Logger) WARNING(f string, e ...interface{}) { l.Log(LOG_WARNING, f, e) }
+func (l *Logger) NOTICE(f string, e ...interface{})  { l.Log(LOG_NOTICE, f, e) }
+func (l *Logger) INFO(f string, e ...interface{})    { l.Log(LOG_INFO, f, e) }
+func (l *Logger) DEBUG(f string, e ...interface{})   { l.Log(LOG_DEBUG, f, e) }
+
+const (
+	LOG_EMERG   = 0 /* system is unusable */
+	LOG_ALERT   = 1 /* action must be taken immediately */
+	LOG_CRIT    = 2 /* critical conditions */
+	LOG_ERR     = 3 /* error conditions */
+	LOG_WARNING = 4 /* warning conditions */
+	LOG_NOTICE  = 5 /* normal but significant condition */
+	LOG_INFO    = 6 /* informational */
+	LOG_DEBUG   = 7 /* debug-level messages */
+)

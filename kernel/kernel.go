@@ -21,13 +21,13 @@ package kernel
 import (
 	"bufio"
 	_ "embed"
-	"fmt"
+	//"fmt"
 	"log"
 	"net"
 	"os"
-	"os/exec"
+	//"os/exec"
 	"regexp"
-	"time"
+	//"time"
 	"unsafe"
 
 	"github.com/davidcoles/vc5/healthchecks"
@@ -509,7 +509,8 @@ func local_macs() map[IP4]MAC {
 	return locals
 }
 
-func ping(ip IP4) chan bool {
+/*
+func _ping(ip IP4) chan bool {
 	done := make(chan bool)
 	go func() {
 		fmt.Println("STARTING PING", ip)
@@ -524,3 +525,4 @@ func ping(ip IP4) chan bool {
 	}()
 	return done
 }
+*/

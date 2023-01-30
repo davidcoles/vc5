@@ -4,4 +4,4 @@ cmd/vc5
 cmd/vc5ng
 **/*.o
 **/*.ll
-bpf
+./bpf

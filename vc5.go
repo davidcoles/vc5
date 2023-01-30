@@ -93,7 +93,13 @@ func LoadConf(file string) (*config2.Conf, error) {
 	return config2.Load(file)
 }
 
-func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []string, sock, bond string, peth ...string) (*VC5, error) {
+func Controller(l types.Logger, native bool, ip IP4, hc *healthchecks.Healthchecks, args []string, sock, bond string, peth ...string) (*VC5, error) {
+
+	if l == nil {
+		l = &types.NilLogger{}
+	}
+
+	l.EMERG("vc5", "foo", "bar", *hc)
 
 	var cleanup bool = true
 
@@ -155,10 +161,10 @@ func Controller(native bool, ip IP4, hc *healthchecks.Healthchecks, args []strin
 
 	go netns.Spawn(ns, args...)
 
-	nat, lookup := maps.NAT(ip, hc, bondidx, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac)
-	mon := monitor.Monitor(hc, vc5bip, sock, lookup)
+	nat, lookup := maps.NAT(l, ip, hc, bondidx, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac)
+	mon := monitor.Monitor(hc, vc5bip, sock, lookup, l)
 	report := mon.Report()
-	balancer, stats := maps.Balancer(report)
+	balancer, stats := maps.Balancer(report, l)
 
 	vc5 := &VC5{hc: make(chan *healthchecks.Healthchecks), monitor: mon, nat: nat, balancer: balancer, stats: stats, maps: maps, report: report}
 

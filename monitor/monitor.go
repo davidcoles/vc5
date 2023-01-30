@@ -19,7 +19,7 @@
 package monitor
 
 import (
-	"fmt"
+	//	"fmt"
 	"time"
 
 	"github.com/davidcoles/vc5/healthchecks"
@@ -49,6 +49,7 @@ type context struct {
 	nat  IP4
 	vip  IP4
 	l4   L4
+	log  types.Logger
 }
 
 type Service struct {
@@ -72,9 +73,9 @@ type Report struct {
 	Backends map[IP4]Backend
 }
 
-func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) *Mon {
+func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool), l types.Logger) *Mon {
 	m := &Mon{}
-	m.fn = m.monitor(h, ip, sock, lookup)
+	m.fn = m.monitor(h, ip, sock, lookup, l)
 	return m
 }
 
@@ -95,7 +96,7 @@ func (m *Mon) Close() {
 
 func natify(t [4]byte, p uint16) [4]byte { return [4]byte{t[0], t[1], byte(p >> 8), byte(p & 0xff)} }
 
-func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool)) func(*Healthchecks, bool) Report {
+func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool), l types.Logger) func(*Healthchecks, bool) Report {
 
 	type be2 struct {
 		IP  IP4
@@ -123,7 +124,7 @@ func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) 
 				if v, ok := virts[vip]; ok {
 					v.Reconfigure(services)
 				} else {
-					virts[vip] = StartVirt(services, context{vip: vip, nat: ip, sock: sock})
+					virts[vip] = StartVirt(services, context{vip: vip, nat: ip, sock: sock, log: l})
 				}
 			}
 
@@ -413,9 +414,9 @@ func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real,
 		nat = natify(c.nat, real.NAT)
 	}
 
-	ch := checks(&up, nat, real.RIP, c.vip, c.l4.Port, c.sock, real.Checks)
+	ch := checks(&up, nat, real.RIP, c.vip, c.l4.Port, c.sock, real.Checks, c.log)
 
-	fmt.Println(">>>>>>>>>", real.RIP)
+	//fmt.Println(">>>>>>>>>", real.RIP)
 
 	return func(ip *healthchecks.Real, fin bool) bool {
 
@@ -453,7 +454,7 @@ func healthy(b [5]bool) bool {
 	return true
 }
 
-func checks(up *bool, nat IP4, rip, vip IP4, port uint16, sock string, checks Checks) chan Checks {
+func checks(up *bool, nat IP4, rip, vip IP4, port uint16, sock string, checks Checks, l types.Logger) chan Checks {
 
 	ch := make(chan Checks)
 
@@ -471,7 +472,8 @@ func checks(up *bool, nat IP4, rip, vip IP4, port uint16, sock string, checks Ch
 				*up = healthy(history)
 
 				if *up != last {
-					fmt.Println(nat, rip, vip, port, "went", *up)
+					//fmt.Println(nat, rip, vip, port, "went", *up)
+					l.NOTICE("monitor", nat, rip, vip, port, "went", *up)
 				}
 
 				last = *up
