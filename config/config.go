@@ -132,6 +132,7 @@ type RHI struct {
 	HoldTime     uint16      `json:"hold_time"`
 	Peers        []string    `json:"peers"`
 	Communities_ []community `json:"communities"`
+	Listen       bool        `json:"listen"`
 }
 
 func (r *RHI) Communities() []uint32 {

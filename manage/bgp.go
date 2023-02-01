@@ -19,6 +19,7 @@
 package manage
 
 import (
+	"net"
 	"time"
 
 	"github.com/davidcoles/vc5/bgp4"
@@ -54,6 +55,15 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 	timer := time.NewTimer(time.Duration(t) * time.Second)
 	state := make(map[string]state_t)
 	start := make(chan bool)
+
+	if conf.Listen {
+		go func() {
+			for {
+				bgpListen()
+				time.Sleep(60 * time.Second)
+			}
+		}()
+	}
 
 	go func() {
 
@@ -128,4 +138,31 @@ func do_bgp(addr IP4, learn uint16, conf config.RHI) chan config.RHI {
 
 func advertise(ip IP4, up bool) {
 	nlri_c <- nlri_t{ip: ip, up: up}
+}
+
+func bgpListen() {
+	l, err := net.Listen("tcp", ":179")
+	if err != nil {
+		logs.NOTICE("BGP4 listen failed", err)
+		return
+	}
+
+	logs.WARNING("Listening:", l)
+
+	defer l.Close()
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			logs.INFO("BGP4 connection failed", err)
+		} else {
+			go func(c net.Conn) {
+				logs.WARNING("Accepted conn:", c)
+				defer c.Close()
+				time.Sleep(time.Minute)
+				logs.WARNING("Quitting", c)
+			}(conn)
+		}
+	}
 }

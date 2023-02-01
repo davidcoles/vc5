@@ -60,6 +60,9 @@ const AS_SEQUENCE = 2
 const HOLD_TIMER_EXPIRED = 4
 const CEASE = 6
 
+const ADMINISTRATIVE_SHUTDOWN = 2
+const ADMINISTRATIVE_RESET = 4
+
 const WTCR = 64  // (Well-known, Transitive, Complete, Regular length)
 const WTCE = 80  // (Well-known, Transitive, Complete, Extended length)
 const ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)

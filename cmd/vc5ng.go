@@ -109,11 +109,10 @@ func main() {
 		log.Fatal(err)
 	}
 
-	j, _ := json.MarshalIndent(hc, "", "  ")
-	fmt.Println(string(j))
+	//j, _ := json.MarshalIndent(hc, "", "  ")
+	//fmt.Println(string(j))
 
 	for _, v := range peth {
-		fmt.Println("ethtool", v)
 		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
 		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
 	}
@@ -582,7 +581,7 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 					m[s] = v
 					for k, v := range peer {
 						for ip, up := range nlri {
-							fmt.Println("NLRI", ip, up, "to", k)
+							logger.NOTICE("peers", "NLRI", ip, up, "to", k)
 							v.NLRI(bgp4.IP4(ip), up)
 						}
 					}
@@ -590,7 +589,7 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 			}
 
 			for k, v := range peer {
-				fmt.Println("close", k, v)
+				logger.NOTICE("peers", "close", k, v)
 				v.Close()
 			}
 
@@ -604,19 +603,24 @@ type Logger struct {
 }
 
 func (l *Logger) Log(level uint8, facility string, entry ...interface{}) {
-	if level <= LOG_NOTICE {
-		log.Println(level, facility, entry)
+	//if level <= LOG_NOTICE {
+	if level <= LOG_DEBUG {
+		var a []interface{}
+		a = append(a, level)
+		a = append(a, facility)
+		a = append(a, entry...)
+		log.Println(a...)
 	}
 }
 
-func (l *Logger) EMERG(f string, e ...interface{})   { l.Log(LOG_EMERG, f, e) }
-func (l *Logger) ALERT(f string, e ...interface{})   { l.Log(LOG_ALERT, f, e) }
-func (l *Logger) CRIT(f string, e ...interface{})    { l.Log(LOG_CRIT, f, e) }
-func (l *Logger) ERR(f string, e ...interface{})     { l.Log(LOG_ERR, f, e) }
-func (l *Logger) WARNING(f string, e ...interface{}) { l.Log(LOG_WARNING, f, e) }
-func (l *Logger) NOTICE(f string, e ...interface{})  { l.Log(LOG_NOTICE, f, e) }
-func (l *Logger) INFO(f string, e ...interface{})    { l.Log(LOG_INFO, f, e) }
-func (l *Logger) DEBUG(f string, e ...interface{})   { l.Log(LOG_DEBUG, f, e) }
+func (l *Logger) EMERG(f string, e ...interface{})   { l.Log(LOG_EMERG, f, e...) }
+func (l *Logger) ALERT(f string, e ...interface{})   { l.Log(LOG_ALERT, f, e...) }
+func (l *Logger) CRIT(f string, e ...interface{})    { l.Log(LOG_CRIT, f, e...) }
+func (l *Logger) ERR(f string, e ...interface{})     { l.Log(LOG_ERR, f, e...) }
+func (l *Logger) WARNING(f string, e ...interface{}) { l.Log(LOG_WARNING, f, e...) }
+func (l *Logger) NOTICE(f string, e ...interface{})  { l.Log(LOG_NOTICE, f, e...) }
+func (l *Logger) INFO(f string, e ...interface{})    { l.Log(LOG_INFO, f, e...) }
+func (l *Logger) DEBUG(f string, e ...interface{})   { l.Log(LOG_DEBUG, f, e...) }
 
 const (
 	LOG_EMERG   = 0 /* system is unusable */

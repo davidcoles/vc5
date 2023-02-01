@@ -89,7 +89,6 @@ func (m *maps) Balancer(c Report, l types.Logger) (chan Report, func() map[Targe
 				var n int64
 				vrrp := bpf_vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol, pad: boolint(!era)}
 				r := m.lookup_vrpp_concurrent(&vrrp, &n)
-				//fmt.Println("XXXXXXXXXXXXXXXXX", boolint(era), r, v, n)
 				l.DEBUG("balancer", boolint(era), r, v, n)
 				m.update_vrpp_concurrent(&vrrp, nil, xdp.BPF_EXIST)
 
@@ -148,8 +147,6 @@ func (m *maps) Balancer(c Report, l types.Logger) (chan Report, func() map[Targe
 				vips[vip] = true
 
 				for l4, s := range virtual.Services {
-
-					//fmt.Println(vip, l4, s)
 
 					l4service := l4Service{vip: vip, svc: l4}
 
@@ -330,7 +327,6 @@ build:
 
 	curr.bpf_backend.real[0] = bpf_real{rip: rip, mac: mac, vid: htons(vid), flag: flag}
 
-	//fmt.Println("******** UPDATED", curr.bpf_backend.hash[:32], time.Now().Sub(now))
 	l.NOTICE("balancer", "UPDATED", curr.bpf_backend.hash[:32], time.Now().Sub(now))
 
 	return true
