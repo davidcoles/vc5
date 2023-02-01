@@ -22,6 +22,7 @@ if(1) {
 
 
     $conf->{'learn'}+=0 if defined $conf->{'learn'};
+    $conf->{'rhi'}->{'listen'} = $conf->{'rhi'}->{'listen'} =~ /^(yes|true|on|y)$/i ? JSON::true : JSON::false;
     $conf->{'rhi'}->{'as_number'}+= 0 if defined $conf->{'rhi'}->{'as_number'};
     $conf->{'rhi'}->{'hold_time'}+= 0 if defined $conf->{'rhi'}->{'hold_time'};    
 
