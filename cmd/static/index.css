@@ -1,0 +1,34 @@
+#console {
+    height: 150px;
+    background: #e0e0e0;
+    overflow-x: hidden;
+    overflow-x: auto;
+}
+table, th, td {
+    border: 1px solid black;
+    border-collapse: collapse;
+    text-align: center;
+}
+th, td {
+    padding-top: 5px;
+    padding-bottom: 5px;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+td.d1 { background: white; }
+td.d2 { background: #ff7373; }
+td.d3 { background: #fdff73; }
+td.d4 { background: #00d199; }
+td.d5 { background: #008dff; }
+td.ip { background: #b00040; color: white; font-weight: bold; }
+td.up { background: #a0f0a0; color: black; font-weight: bold; }
+td.dn { background: #f0a0a0; color: black; font-weight: bold; }
+
+tr.hd { background: #a0a0f0; }
+tr.up { background: #a0f0a0; }
+tr.dn { background: #f0a0a0; }
+tr.fb { background: #a0f0f0; }
+
+th.ac, td.ac { text-align: center; }
+th.ar, td.ar { text-align: right; }      

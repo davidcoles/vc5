@@ -1,27 +1,19 @@
-package vc5
+package lb
 
 import (
 	//"fmt"
-	//"log"
-	//"net"
-	//"os/exec"
-	//"sync"
-	//"time"
-
-	"github.com/davidcoles/vc5/config"
-	"github.com/davidcoles/vc5/core"
-	"github.com/davidcoles/vc5/logger"
-	"github.com/davidcoles/vc5/manage"
-	"github.com/davidcoles/vc5/probes"
-	"github.com/davidcoles/vc5/stats"
-	"github.com/davidcoles/vc5/types"
+	"log"
+	"net"
+	"os/exec"
+	"sync"
+	"time"
 
 	"github.com/davidcoles/vc5/config2"
 	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/kernel"
-	"github.com/davidcoles/vc5/lb"
-	//"github.com/davidcoles/vc5/monitor"
+	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/netns"
+	"github.com/davidcoles/vc5/types"
 )
 
 const NAMESPACE = "vc5"
@@ -31,51 +23,11 @@ const VC5B = "vc5b"
 var vc5aip [4]byte = [4]byte{10, 255, 255, 253}
 var vc5bip IP4 = IP4{10, 255, 255, 254}
 
-type Control = core.Control
 type IP4 = types.IP4
 type L4 = types.L4
 type NET = types.NET
 type Target = kernel.Target
-
-//type Status = monitor.Report
-
-func Net(s string) (NET, error) {
-	return types.Net(s)
-}
-
-const FLOW_STATE = core.FLOW_STATE
-
-func ParseIP(s string) (IP4, bool) {
-	return types.ParseIP(s)
-}
-
-func Console(addr string, logs *logger.Logger, passwd string) *stats.SServer {
-	return stats.Server(addr, logs, passwd)
-}
-
-func LoadConfiguration(file string, ifname string, src types.IP4) (*config.Config, error) {
-	return config.LoadConfiguration(file, ifname, src)
-}
-
-func Bootstrap(conf *config.Config, ctl *core.Control, l *logger.Logger, ws *stats.SServer) chan *config.Config {
-	return manage.Bootstrap(conf, ctl, l, ws)
-}
-
-func New(veth string, vip IP4, hwaddr [6]byte, native, bridge bool, peth ...string) *core.Control {
-	return core.New(core.BPF_O, veth, vip, hwaddr, native, bridge, peth[:]...)
-}
-
-func Daemon(path, ipaddr string) {
-	probes.Daemon(path, ipaddr)
-}
-
-func Serve(netns string, logs *logger.Logger) {
-	probes.Serve(netns, logs)
-}
-
-func NewLogger() *logger.Logger {
-	return logger.NewLogger()
-}
+type Status = monitor.Report
 
 func LoadConf(file string) (*config2.Conf, error) {
 	return config2.Load(file)
@@ -85,14 +37,8 @@ func NetnsServer(sock string) {
 	netns.Server(sock, vc5bip.String())
 }
 
-func Load(conf *config2.Conf, mynet NET) (*healthchecks.Healthchecks, error) {
-	return healthchecks.Load(mynet, conf)
-}
-
-type LoadBalancer = lb.LoadBalancer
-
-/*
 type LoadBalancer struct {
+	ReadinessLevel  uint8
 	KillSwitch      uint
 	Native          bool
 	Socket          string
@@ -208,6 +154,10 @@ func (lb *LoadBalancer) Start(ip IP4, hc *healthchecks.Healthchecks) error {
 
 	lb.maps.MODE(mode)
 
+	if lb.ReadinessLevel != 0 {
+		lb.DEFCON(lb.ReadinessLevel)
+	}
+
 	cleanup = false
 
 	setup2(NAMESPACE, VC5A, VC5B, vc5aip, vc5bip)
@@ -262,7 +212,7 @@ func (lb *LoadBalancer) background() {
 }
 
 /**********************************************************************/
-/*
+
 func clean(if1, ns string) {
 	script1 := `
     ip link del ` + if1 + ` >/dev/null 2>&1 || true
@@ -305,5 +255,25 @@ ip r replace ` + cbs + `/16 via ` + ip2 + `
 	}
 }
 
+/**********************************************************************/
+/*
+func (lb *LoadBalancer) LoadConf(file string, mynet NET) (*healthchecks.Healthchecks, error) {
+	conf, err := config2.Load(file)
 
+	if err != nil {
+		return nil, err
+	}
+
+	//j, _ := json.MarshalIndent(conf, "", "  ")
+	//if false {
+	//	fmt.Println(string(j))
+	//	return
+	//}
+
+	return healthchecks.Load(mynet, conf)
+}
 */
+
+func (lb *LoadBalancer) Load(conf *config2.Conf, mynet NET) (*healthchecks.Healthchecks, error) {
+	return healthchecks.Load(mynet, conf)
+}

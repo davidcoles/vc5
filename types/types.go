@@ -202,6 +202,14 @@ func (c *Scounters) Sum() {
 	}
 }
 
+func (i IP4) IsNil() bool {
+	var n IP4
+	if i == n {
+		return true
+	}
+	return false
+}
+
 func (i *IP4) IP() net.IP {
 	return net.IPv4(i[0], i[1], i[2], i[3])
 }

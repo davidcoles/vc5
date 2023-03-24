@@ -17,9 +17,18 @@
  */
 
 // TODO
-// concurrent connections count
 // manage existing connection (SYN/RST/etc)
 // sticky sessions
+// multi-nic mode
+// BGP stats/state
+// time since last state change for reals/services/vips
+
+// When:
+// * adding a new vip, all checks should start in down state to prevent traffic being sent to the LB
+// * adding a new service to an existing vip, service should start in "up" state to prevent vip being withdrawn (chaos)
+// * adding a new real to an existing service, host checks should start in "down" state to prevent hash being changed
+
+// config file change -> nat (+mac address changes) -> monitor (+backend changes) -> balancer (+stats) -> console
 
 package main
 
@@ -36,13 +45,14 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/davidcoles/vc5"
 	"github.com/davidcoles/vc5/bgp4"
-	"github.com/davidcoles/vc5/healthchecks"
 )
 
 var logger *Logger
@@ -54,10 +64,13 @@ type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
 
+var kill = flag.Uint("k", 0, "killswitch engage")
+var level = flag.Uint("l", LOG_ERR, "debug level level")
 var dfcn = flag.Uint("d", 5, "defcon readiness level")
 var sock = flag.String("s", "", "used when spawning healthcheck server")
-var bond = flag.String("i", "", "name of interface to use (eg. bond0, br0)")
+var bond = flag.String("i", "", "name of egress interface to use (eg. bond0, br0)")
 var port = flag.String("w", ":9999", "webserver address:port to listen on")
+var root = flag.String("r", "", "webserver root directory")
 var native = flag.Bool("n", false, "load xdp program in native mode")
 
 func main() {
@@ -85,7 +98,7 @@ func main() {
 	}
 	defer os.Remove(temp.Name())
 
-	cmd := []string{os.Args[0], "-s", temp.Name()} // command to run in netns
+	sock := temp.Name()
 
 	file := args[0]
 	myip := args[1]
@@ -97,51 +110,53 @@ func main() {
 		log.Fatal(err)
 	}
 
+	for _, v := range peth {
+		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
+		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
+	}
+
 	conf, err := vc5.LoadConf(file)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	hc, err := healthchecks.Load(mynet, conf)
+	if false {
+		j, _ := json.MarshalIndent(conf, "", "  ")
+		fmt.Println(string(j))
+		return
+	}
+
+	hc, err := vc5.Load(conf, mynet)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//j, _ := json.MarshalIndent(hc, "", "  ")
-	//fmt.Println(string(j))
-
-	for _, v := range peth {
-		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
-		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
+	if false {
+		j, _ := json.MarshalIndent(hc, "", "  ")
+		fmt.Println(string(j))
+		return
 	}
 
-	re := regexp.MustCompile("^screen")
+	logger = &Logger{Level: uint8(*level)}
 
-	term, ok := os.LookupEnv("TERM")
-
-	if !ok || !re.MatchString(term) {
-		log.Fatal("Must run under screen for now for safety")
+	lb := &vc5.LoadBalancer{
+		ReadinessLevel:  uint8(*dfcn),
+		KillSwitch:      *kill,
+		Native:          *native,
+		Socket:          sock,
+		NetnsCommand:    []string{os.Args[0], "-s", sock},
+		Interfaces:      peth,
+		EgressInterface: *bond,
+		Logger:          logger,
 	}
 
-	logs := &Logger{}
-	logger = logs
-	v5, err := vc5.Controller(logs, *native, mynet.IP, hc, cmd, temp.Name(), *bond, peth...)
+	err = lb.Start(mynet.IP, hc)
 
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	// temporary auto kill switch
-	go func() {
-		for {
-			time.Sleep(5 * time.Minute)
-			v5.DEFCON(0)
-		}
-	}()
-
-	v5.DEFCON(uint8(*dfcn))
 
 	pool := NewBGPPool(mynet.IP, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
 
@@ -157,30 +172,33 @@ func main() {
 			case syscall.SIGCHLD:
 			case syscall.SIGWINCH:
 			default:
-				v5.DEFCON(0)
-				v5.Close()
+				lb.DEFCON(0)
+				lb.Close()
 				time.Sleep(1 * time.Second)
-				os.Remove(temp.Name())
+				os.Remove(sock)
 				log.Fatal("EXITING ", s)
 			case syscall.SIGQUIT:
 				log.Println("RELOAD")
 				time.Sleep(1 * time.Second)
 
-				conf, err = vc5.LoadConf(file)
+				conf, err := vc5.LoadConf(file)
 
 				if err != nil {
-					log.Fatal(err)
+					log.Println(err)
+				} else {
+
+					h, err := hc.Reload(mynet, conf)
+
+					if err != nil {
+						log.Println(err)
+					} else {
+
+						pool.Peer(conf.RHI.Peers)
+
+						hc = h
+						lb.Update(hc)
+					}
 				}
-
-				hc, err = hc.Reload(mynet, conf)
-
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				pool.Peer(conf.RHI.Peers)
-
-				v5.Update(hc)
 			}
 		}
 	}()
@@ -192,7 +210,7 @@ func main() {
 		start := time.Now()
 
 		for {
-			s := getStats(v5)
+			s := getStats(lb)
 			s.Sub(stats, time.Now().Sub(t))
 			t = time.Now()
 			stats = s
@@ -205,46 +223,62 @@ func main() {
 
 	static := http.FS(STATIC)
 	handler := http.FileServer(static)
+	var fs http.FileSystem
+
+	if *root != "" {
+		fs = http.FileSystem(http.Dir(*root))
+	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = "static" + r.URL.Path
+		if fs != nil {
+			file := r.URL.Path
+			if file == "" || file == "/" {
+				file = "/index.html"
+			}
+
+			if f, err := fs.Open("/" + file); err == nil {
+				f.Close()
+				http.FileServer(fs).ServeHTTP(w, r)
+				return
+			}
+		}
+
+		r.URL.Path = "static/" + r.URL.Path // there must be a way to avoid this, surely ...
 		handler.ServeHTTP(w, r)
 	})
 
-	http.HandleFunc("/conf", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		j, _ := json.MarshalIndent(conf, "", "  ")
-		w.Write(j)
-	})
-
-	http.HandleFunc("/alive", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
 	http.HandleFunc("/defcon1", func(w http.ResponseWriter, r *http.Request) {
-		v5.DEFCON(1)
+		lb.DEFCON(1)
 		w.WriteHeader(http.StatusOK)
 	})
 
 	http.HandleFunc("/defcon2", func(w http.ResponseWriter, r *http.Request) {
-		v5.DEFCON(2)
+		lb.DEFCON(2)
 		w.WriteHeader(http.StatusOK)
 	})
 
 	http.HandleFunc("/defcon3", func(w http.ResponseWriter, r *http.Request) {
-		v5.DEFCON(3)
+		lb.DEFCON(3)
 		w.WriteHeader(http.StatusOK)
 	})
 
 	http.HandleFunc("/defcon4", func(w http.ResponseWriter, r *http.Request) {
-		v5.DEFCON(4)
+		lb.DEFCON(4)
 		w.WriteHeader(http.StatusOK)
 	})
 
 	http.HandleFunc("/defcon5", func(w http.ResponseWriter, r *http.Request) {
-		v5.DEFCON(5)
+		lb.DEFCON(5)
 		w.WriteHeader(http.StatusOK)
+	})
+
+	http.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+
+		for _, l := range logger.Dump() {
+			w.Write([]byte(fmt.Sprintln(l)))
+		}
 	})
 
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
@@ -262,7 +296,7 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		cf := v5.Status()
+		cf := lb.Status()
 		j, err := json.MarshalIndent(cf, "", "  ")
 
 		if err != nil {
@@ -288,9 +322,38 @@ func main() {
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		if stats == nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
 		w.Write(prometheus(stats))
+	})
+
+	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.WriteHeader(http.StatusOK)
+
+		history := logger.Dump()
+
+		re := regexp.MustCompile("^/log/([0-9]+)$")
+		match := re.FindStringSubmatch(r.RequestURI)
+
+		if match != nil && len(match) == 2 {
+			n, _ := strconv.ParseInt(match[1], 10, 64)
+			history = logger.Since(int64(n))
+		}
+
+		if j, err := json.MarshalIndent(history, "", "  "); err != nil {
+			log.Println(err)
+			w.Write([]byte(`[]`))
+		} else {
+			w.Write(j)
+		}
+		w.Write([]byte("\n"))
 	})
 
 	server := http.Server{}
@@ -298,29 +361,62 @@ func main() {
 	log.Fatal(server.Serve(s))
 }
 
-func getStats(v5 *vc5.VC5) *Stats {
+func getStats(lb *vc5.LoadBalancer) *Stats {
 
-	cf := v5.Status()
-	ss := v5.Stats()
+	cf := lb.Status()
+	gl, ss := lb.Stats()
 
-	var stats Stats
-	stats.VIPs = map[IP4]map[L4]Service{}
-	stats.RHI = map[IP4]bool{}
+	//j, _ := json.MarshalIndent(cf, "", "  ")
+	//fmt.Println(string(j))
 
-	stats.Packets, stats.Octets, stats.Flows, stats.Latency, stats.DEFCON = v5.GlobalStats()
+	stats := Stats{
+		Octets:  gl.Octets,
+		Packets: gl.Packets,
+		Flows:   gl.Flows,
+		Latency: gl.Latency,
+		DEFCON:  gl.DEFCON,
+		VIPs:    map[IP4]map[L4]Service{},
+		RHI:     map[IP4]bool{},
+	}
 
-	for vip, v := range cf.Virtuals {
+	for vip, v := range cf.Virtual {
 		stats.VIPs[vip] = map[L4]Service{}
 		stats.RHI[vip] = v.Healthy
 		for l4, s := range v.Services {
 			reals := map[IP4]Real{}
-			for n, up := range s.Health {
+			//for n, probe := range s.Probe {
+			for n, real_ := range s.Reals {
+				probe := real_.Probe
 				r := cf.Backends[n]
 				t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
 				c := ss[t]
-				reals[r.IP] = Real{Up: up, Octets: c.Octets, Packets: c.Packets, Concurrent: c.Concurrent}
+
+				stats.Concurrent += c.Concurrent
+
+				mac := cf.Backends[r.IP].MAC.String()
+
+				when := int64(time.Now().Sub(probe.Time) / time.Millisecond)
+
+				reals[r.IP] = Real{
+					Up:         probe.Passed,
+					When:       when,
+					Duration:   int64(probe.Duration / time.Millisecond),
+					Octets:     c.Octets,
+					Packets:    c.Packets,
+					Flows:      c.Flows,
+					Concurrent: c.Concurrent,
+					MAC:        mac,
+				}
 			}
-			stats.VIPs[vip][l4] = Service{Reals: reals, Up: s.Healthy, Fallback: s.Fallback, Name: s.Metadata.Name, Description: s.Metadata.Description}
+			stats.VIPs[vip][l4] = Service{
+				Reals:       reals,
+				Up:          s.Healthy,
+				Fallback:    s.Fallback,
+				FallbackOn:  s.FallbackOn,
+				FallbackUp:  s.FallbackProbe.Passed,
+				Name:        s.Metadata.Name,
+				Description: s.Metadata.Description,
+			}
 		}
 	}
 
@@ -330,16 +426,17 @@ func getStats(v5 *vc5.VC5) *Stats {
 /**********************************************************************/
 
 type Stats struct {
-	Octets    uint64                 `json:"octets"`
-	Packets   uint64                 `json:"packets"`
-	OctetsPS  uint64                 `json:"octets_ps"`
-	PacketsPS uint64                 `json:"packets_ps"`
-	Flows     uint64                 `json:"flows"`
-	FlowsPS   uint64                 `json:"flows_ps"`
-	Latency   uint64                 `json:"latency"`
-	DEFCON    uint8                  `json:"defcon"`
-	RHI       map[IP4]bool           `json:"rhi"`
-	VIPs      map[IP4]map[L4]Service `json:"vips"`
+	Octets     uint64                 `json:"octets"`
+	OctetsPS   uint64                 `json:"octets_ps"`
+	Packets    uint64                 `json:"packets"`
+	PacketsPS  uint64                 `json:"packets_ps"`
+	Flows      uint64                 `json:"flows"`
+	FlowsPS    uint64                 `json:"flows_ps"`
+	Concurrent uint64                 `json:"concurrent"`
+	Latency    uint64                 `json:"latency"`
+	DEFCON     uint8                  `json:"defcon"`
+	RHI        map[IP4]bool           `json:"rhi"`
+	VIPs       map[IP4]map[L4]Service `json:"vips"`
 }
 
 type Service struct {
@@ -347,36 +444,48 @@ type Service struct {
 	Description string       `json:"description"`
 	Up          bool         `json:"up"`
 	Fallback    bool         `json:"fallback"`
+	FallbackOn  bool         `json:"fallback_on"`
+	FallbackUp  bool         `json:"fallback_up"`
 	Octets      uint64       `json:"octets"`
-	Packets     uint64       `json:"packets"`
 	OctetsPS    uint64       `json:"octets_ps"`
+	Packets     uint64       `json:"packets"`
 	PacketsPS   uint64       `json:"packets_ps"`
+	Flows       uint64       `json:"flows"`
+	FlowsPS     uint64       `json:"flows_ps"`
 	Concurrent  uint64       `json:"concurrent"`
 	Reals       map[IP4]Real `json:"rips"`
+}
+
+type Real struct {
+	Up         bool   `json:"up"`
+	When       int64  `json:"when_ms"`
+	Duration   int64  `json:"duration_ms"`
+	Octets     uint64 `json:"octets"`
+	OctetsPS   uint64 `json:"octets_ps"`
+	Packets    uint64 `json:"packets"`
+	PacketsPS  uint64 `json:"packets_ps"`
+	Flows      uint64 `json:"flows"`
+	FlowsPS    uint64 `json:"flows_ps"`
+	Concurrent uint64 `json:"concurrent"`
+	MAC        string `json:"mac"`
 }
 
 func (s *Service) Total() {
 	for _, v := range s.Reals {
 		s.Octets += v.Octets
-		s.Packets += v.Packets
 		s.OctetsPS += v.OctetsPS
+		s.Packets += v.Packets
 		s.PacketsPS += v.PacketsPS
+		s.Flows += v.Flows
+		s.FlowsPS += v.FlowsPS
 		s.Concurrent += v.Concurrent
 	}
-}
-
-type Real struct {
-	Up         bool   `json:"up"`
-	Octets     uint64 `json:"octets"`
-	Packets    uint64 `json:"packets"`
-	OctetsPS   uint64 `json:"octets_ps"`
-	PacketsPS  uint64 `json:"packets_ps"`
-	Concurrent uint64 `json:"concurrent"`
 }
 
 func (r Real) Sub(o Real, dur time.Duration) Real {
 	r.OctetsPS = (uint64(time.Second) * (r.Octets - o.Octets)) / uint64(dur)
 	r.PacketsPS = (uint64(time.Second) * (r.Packets - o.Packets)) / uint64(dur)
+	r.FlowsPS = (uint64(time.Second) * (r.Flows - o.Flows)) / uint64(dur)
 	return r
 }
 
@@ -438,7 +547,7 @@ func prometheus(g *Stats) []byte {
 		"# TYPE vc5_total_connections counter",
 		"# TYPE vc5_rx_packets counter",
 		"# TYPE vc5_rx_octets counter",
-		"# TYPE vc5_userland_queue_failed counter",
+		//"# TYPE vc5_userland_queue_failed counter",
 		"# TYPE vc5_defcon gauge",
 
 		"# TYPE vc5_rhi gauge",
@@ -464,9 +573,9 @@ func prometheus(g *Stats) []byte {
 	}
 
 	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
-	//m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.Pps))
-	//m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
-	//m = append(m, fmt.Sprintf("vc5_total_connections %d", g.New_flows))
+	m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.PacketsPS))
+	m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
+	m = append(m, fmt.Sprintf("vc5_total_connections %d", g.Flows))
 	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Packets))
 	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Octets))
 	//m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
@@ -482,7 +591,7 @@ func prometheus(g *Stats) []byte {
 			s := vip.String() + ":" + l4.String()
 			n := v.Name
 			m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s",sname="%s"} %d`, s, n, v.Concurrent))
-			//m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s",sname="%s"} %d`, s, n, v.New_flows))
+			m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s",sname="%s"} %d`, s, n, v.Flows))
 			m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s",sname="%s"} %d`, s, n, v.Packets))
 			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Octets))
 
@@ -490,7 +599,7 @@ func prometheus(g *Stats) []byte {
 
 			for b, v := range v.Reals {
 				m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
-				//m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.New_flows))
+				m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.Flows))
 				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Packets))
 				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Octets))
 
@@ -579,12 +688,13 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 				} else {
 					v = bgp4.Session(s, rid, rid, asn, hold, communities, b.wait, nil)
 					m[s] = v
-					for k, v := range peer {
-						for ip, up := range nlri {
-							logger.NOTICE("peers", "NLRI", ip, up, "to", k)
-							v.NLRI(bgp4.IP4(ip), up)
-						}
+					//for k, v := range peer {
+					for ip, up := range nlri {
+						//fmt.Println("peers", "NLRI", ip, up, "to", s)
+						logger.NOTICE("peers", "NLRI", ip, up, "to", s)
+						v.NLRI(bgp4.IP4(ip), up)
 					}
+					//}
 				}
 			}
 
@@ -599,18 +709,67 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 }
 
 /**********************************************************************/
+
+type line struct {
+	Time     time.Time
+	Ms       int64
+	Level    uint8
+	Facility string
+	Entry    []interface{}
+	Text     string
+}
+
 type Logger struct {
+	mu      sync.Mutex
+	history []line
+	Level   uint8
 }
 
 func (l *Logger) Log(level uint8, facility string, entry ...interface{}) {
-	//if level <= LOG_NOTICE {
-	if level <= LOG_DEBUG {
-		var a []interface{}
-		a = append(a, level)
-		a = append(a, facility)
-		a = append(a, entry...)
+	var a []interface{}
+	a = append(a, level)
+	a = append(a, facility)
+	a = append(a, entry...)
+
+	if level <= l.Level {
 		log.Println(a...)
 	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	ms := int64(time.Now().UnixNano() / int64(time.Millisecond))
+	text := fmt.Sprintln(a...)
+
+	if level < LOG_DEBUG {
+		l.history = append(l.history, line{Ms: ms, Time: time.Now(), Level: level, Facility: facility, Entry: entry, Text: text})
+	}
+
+	for len(l.history) > 10000 {
+		l.history = l.history[1:]
+	}
+}
+
+func (l *Logger) Dump() []line {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	hl := len(l.history)
+	h := make([]line, hl)
+
+	for n, v := range l.history {
+		h[(hl-1)-n] = v
+	}
+
+	return h
+}
+
+func (l *Logger) Since(t int64) []line {
+	for i, v := range l.Dump() {
+		if v.Ms > t {
+			return l.history[i:]
+		}
+	}
+	return []line{}
 }
 
 func (l *Logger) EMERG(f string, e ...interface{})   { l.Log(LOG_EMERG, f, e...) }
@@ -632,3 +791,13 @@ const (
 	LOG_INFO    = 6 /* informational */
 	LOG_DEBUG   = 7 /* debug-level messages */
 )
+
+/*
+	re := regexp.MustCompile("^screen")
+
+	term, ok := os.LookupEnv("TERM")
+
+	if !ok || !re.MatchString(term) {
+		log.Fatal("Must run under screen for now for safety")
+	}
+*/

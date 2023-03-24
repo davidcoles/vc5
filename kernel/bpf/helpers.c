@@ -37,6 +37,30 @@ static __always_inline __u16 l4_checksum(struct iphdr *iph, void *l4, void *data
     return generic_checksum((unsigned short *) l4, data_end, csum, MAX_TCP_SIZE);
 }
 
+//static __always_inline __u16 csum_fold_helper(__u32 csum)
+//{
+//    __u32 sum;
+//    sum = (csum >> 16) + (csum & 0xffff);
+//    sum += (sum >> 16);
+//    return ~sum;
+//}
+
+//static __always_inline void ip_set_ttl(struct iphdr *iph, __u8 ttl)
+//{
+//    __wsum csum = iph->check;
+//    __be32 old = *((__be32 *) &(iph->ttl));
+//    iph->ttl = ttl;
+//    csum = bpf_csum_diff(&old, sizeof(old), (__be32 *) &(iph->ttl), sizeof(old), ~csum);
+//    iph->check = csum_fold_helper(csum);
+//}
+
+static __always_inline int ip_decrease_ttl(struct iphdr *iph)
+{
+    __u32 check = iph->check;
+    check += bpf_htons(0x0100);
+    iph->check = (__u16)(check + (check >= 0xFFFF));
+    return --(iph->ttl);
+}
 
 static __always_inline __u16 sdbm(unsigned char *ptr, __u8 len) {
     unsigned long hash = 0;

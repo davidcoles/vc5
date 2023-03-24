@@ -81,7 +81,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct flow);
     __type(value, struct state);
-    __uint(max_entries, 30000000);
+    __uint(max_entries, 3000000);
 } flow_state SEC(".maps");
 
 /**********************************************************************/
@@ -166,22 +166,45 @@ struct vrpp {
 struct counter {
     __u64 packets;
     __u64 octets;
+    __u64 flows;
+    __u64 pad;
 };
 
+struct active { //64bit values are *probably* overkill - but as a PERCPU_HASH, needs to be 8byte aligned (seemingly)
+    __u64 _total;
+    __s64 current;
+};
+
+
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
     __type(key, struct vrpp);
     __type(value, struct counter);
     __uint(max_entries, 1024);
 } vrpp_counter SEC(".maps");
 
 struct {
-    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
     __type(key, struct vrpp);
-    __type(value, __s64);
-    __uint(max_entries, 1024);
+    __type(value, struct active);
+    __uint(max_entries, 2048);
 } vrpp_concurrent SEC(".maps");
 
+/*
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, struct vrpp);
+    __type(value, struct active);
+    __uint(max_entries, 1024);
+} vrpp_concurrent_a SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+    __type(key, struct vrpp);
+    __type(value, struct active);
+    __uint(max_entries, 1024);
+} vrpp_concurrent_b SEC(".maps");
+*/
 
 struct global {
     __u64 rx_packets;
@@ -203,8 +226,10 @@ struct {
 
 
 struct setting {
+    __u64 heartbeat;
     __u8 defcon;
     __u8 era;
+    __u8 mode;
 };
 
 struct {
@@ -215,16 +240,32 @@ struct {
 } settings SEC(".maps");
 
 
+// unused so far
+struct {
+    __uint(type, BPF_MAP_TYPE_DEVMAP);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(max_entries, 32);
+} redirect_map SEC(".maps");
+
 #define DEFCON0 0 // LB disabled - XDP_PASS all traffic
 #define DEFCON1 1 // only global stats (and periodic check for settings) and stateless forwarding done
 #define DEFCON2 2 // per backend stats recorded
 #define DEFCON3 3 // flow state table consulted
 #define DEFCON4 4 // flow state table written to
-#define DEFCON5 5 // flow conncurrency?
+#define DEFCON5 5 // flow concurrency?
+
+#define MODE_DISABLED 0
+#define MODE_SIMPLE   1
+#define MODE_VLAN     2
+#define MODE_MULTINIC 3
+
+#define CONTINUE XDP_ABORTED
 
 const int ZERO = 0;
-__u8 DEFCON = 5;
-__u8 ERA = 0;
+__u8 DEFCON = DEFCON5;
+//__u8 ERA = 0;
+__u8 MODE = MODE_DISABLED;
 
 
 static __always_inline void write_perf(struct global *global, __u64 start) {
@@ -244,7 +285,7 @@ static __always_inline int find_real(struct iphdr *ipv4, __be16 src, __be16 dst,
     struct backend *backend = bpf_map_lookup_elem(&service_backend, &s);
 
     if(!backend)
-	return XDP_REDIRECT; // 0; // no entry found
+	return CONTINUE; // 0; // no entry found
     
     __u8 flags = backend->real[0].flag[0];
     __u8 leastconns = backend->real[0].flag[1];
@@ -275,36 +316,27 @@ static __always_inline int find_real(struct iphdr *ipv4, __be16 src, __be16 dst,
 static __always_inline void store_tcp_flow(struct iphdr *ipv4, __be16 src, __be16 dst, __be32 rip, __u8 *m, __u16 vid, struct global *global)
 {
     struct flow flow = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = src, .dport = dst }; 
-    struct state state = { .rip = rip, .vid = vid, .time = bpf_ktime_get_ns(), .mac = { m[0], m[1], m[2], m[3], m[4], m[5] }, .era = !ERA };
+    struct state state = { .rip = rip, .vid = vid, .time = bpf_ktime_get_ns(), .mac = { m[0], m[1], m[2], m[3], m[4], m[5] }, .era = 0 };
     bpf_map_update_elem(&flow_state, &flow, &state, BPF_ANY);
     if(global) global->new_flows++;
 }
 
-static __always_inline void be_tcp_counter(__be32 vip, __be16 port, __be32 rip, int n)
+static __always_inline void be_tcp_counter(__be32 vip, __be16 port, __be32 rip, int octets, int new_flow)
 {
-    struct vrpp vr;
-    vr.vip = vip;
-    vr.rip = rip;
-    vr.port = port;
-    vr.protocol = IPPROTO_TCP;
-    vr.pad = 0;
+    struct vrpp vr = { .vip = vip, .rip = rip, .port = port, .protocol = IPPROTO_TCP };
     struct counter *co = bpf_map_lookup_elem(&vrpp_counter, &vr);
     if(co) {
-	co->octets += n;
+	co->octets += octets;
 	co->packets++;
+	if(new_flow) co->flows++;
     }
 }
 
 
-static __always_inline __s64 * _be_tcp_concurrent(__be32 vip, __be16 port, __be32 rip, __u8 era)
+static __always_inline struct active * _be_tcp_concurrent(__be32 vip, __be16 port, __be32 rip, __u8 era)
 {   
-    struct vrpp vr;
-    vr.vip = vip;
-    vr.rip = rip;
-    vr.port = port;
-    vr.protocol = IPPROTO_TCP;
-    vr.pad = era % 2;
-    return (__s64 *) bpf_map_lookup_elem(&vrpp_concurrent, &vr);
+    struct vrpp vr = { .vip = vip, .rip = rip, .port = port, .protocol = IPPROTO_TCP, .pad = era%2 };
+    return (struct active *) bpf_map_lookup_elem(&vrpp_concurrent, &vr);
 }
 
 
@@ -313,10 +345,9 @@ static __always_inline void be_tcp_concurrent(struct state *state, struct iphdr 
     if(!tcp)
 	return;
     
-    __s64 *concurrent = NULL;      
-    
+    struct active *concurrent = NULL;      
+
     if (tcp->syn == 1) {
-	state->era = !era;
 	state->finrst = 0;
     }
     
@@ -328,7 +359,7 @@ static __always_inline void be_tcp_concurrent(struct state *state, struct iphdr 
 	}
     }
 
-    if (state->era != era) {
+    if (state->era != era || tcp->syn == 1) {
 	state->era = era;
 	
 	switch(state->finrst) {
@@ -336,14 +367,16 @@ static __always_inline void be_tcp_concurrent(struct state *state, struct iphdr 
 	    break;
 	case 0:
 	    concurrent = _be_tcp_concurrent(ipv4->daddr, tcp->dest, state->rip, era);
-	    if(concurrent) (*concurrent)++;
+	    if(concurrent) concurrent->current++;
+	    //if(concurrent) concurrent->total++;
+
 	    break;
 	}
     } else {
 	switch(state->finrst) {
 	case 10:
 	    concurrent = _be_tcp_concurrent(ipv4->daddr, tcp->dest, state->rip, era);	    
-	    if(concurrent) (*concurrent)--;
+	    if(concurrent) concurrent->current--;
 	    break;
 	case 0:
 	    break;
@@ -393,31 +426,35 @@ static __always_inline int handle_icmp(struct ethhdr *eth, struct iphdr *ipv4, s
 }
 
 
-//static __always_inline void bounce_packet(struct ethhdr *eth, char *dst)
-//{
-//    maccpy(eth->h_source, eth->h_dest);
-//    maccpy(eth->h_dest, dst);
-//}
-
-static __always_inline int bounce_packet_(struct ethhdr *eth, char *dst, struct global *global, __u64 start)
+static __always_inline int redirect_packet(struct ethhdr *eth, char *dst, __u32 map_entry, struct global *global, __u64 start)
 {
+    maccpy(eth->h_source, eth->h_dest);
+    maccpy(eth->h_dest, dst);
+    write_perf(global, start);
+    return bpf_redirect_map(&redirect_map, map_entry, XDP_DROP);
+}
+
+static __always_inline int bounce_packet(struct ethhdr *eth, char *dst, struct global *global, __u64 start)
+{ 
     maccpy(eth->h_source, eth->h_dest);
     maccpy(eth->h_dest, dst);
     write_perf(global, start);
     return XDP_TX;
 }
 
-
-static __always_inline int tcp_flow(struct ethhdr *eth, struct vlan_hdr *tag, struct iphdr *ipv4, struct tcphdr *tcp, struct global *global, __u64 start, __u64 octets)
+static __always_inline int existing_tcp_flow(struct ethhdr *eth, struct vlan_hdr *tag, struct iphdr *ipv4, struct tcphdr *tcp, struct global *global, __u64 start, __u64 octets, __u8 era)
 {
     if(DEFCON >= DEFCON3) {
 	struct flow flow = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = tcp->source, .dport = tcp->dest };
 	struct state *state = bpf_map_lookup_elem(&flow_state, &flow); 	// failed lookup takes ~70ns
 	if(state != NULL) {
 	    
+	    if(tcp->syn)
+		 return CONTINUE;
+
 	    if((state->time + (60l * SECOND_NS)) < start) {
 		// maybe delete?
-		return XDP_REDIRECT; // drop through;
+		return CONTINUE; // drop through;
 	    }
 	    
 	    if((state->time + (20l * SECOND_NS)) < start) {
@@ -441,36 +478,47 @@ static __always_inline int tcp_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	    }
 
 	    if(tag != NULL) {
+
+		if(MODE != MODE_VLAN)
+		    goto invalid_state; // We shouldn't be receiving tagged traffic in non-vlan mode
+		
 		if(state->vid == 0)
 		    goto invalid_state; // VLAN ID of 0 not allowed if in VLAN mode
-
+		
 		tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
 	    } else {
+		if(MODE == MODE_VLAN)
+                    goto invalid_state; // We must be receiving tagged traffic in vlan mode
+		
 		if(state->vid != 0)
 		    goto invalid_state; // VLAN ID not allowed if in non-VLAN mode
 	    }
-	    
+
+	    if(ip_decrease_ttl(ipv4) == 0) {
+		goto drop_packet;
+	    }
+
 	    /**********************************************************************/
-	    be_tcp_concurrent(state, ipv4, tcp, ERA);
+	    be_tcp_concurrent(state, ipv4, tcp, era);
 	    /**********************************************************************/
 	    
-	    be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, octets);
+	    be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, octets, 0);
 	    
-	    //maccpy(eth->h_source, eth->h_dest);
-	    //maccpy(eth->h_dest, state->mac);
-	    //write_perf(global, start);
-	    //return XDP_TX;
-	    return bounce_packet_(eth, state->mac, global, start);
+	    if(MODE == MODE_MULTINIC)
+		return redirect_packet(eth, state->mac, state->vid, global, start);
+
+	    return bounce_packet(eth, state->mac, global, start);
 	    
 	invalid_state:
 	    bpf_map_delete_elem(&flow_state, &flow);
+	drop_packet:
 	    if(global) global->dropped++;
 	    write_perf(global, start);
 	    return XDP_DROP;
 	}
     }
 
-    return XDP_REDIRECT;
+    return CONTINUE;
 }
 
 static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, struct iphdr *ipv4, __be16 src, __be16 dst, struct global *global, __u64 start, __u64 octets)
@@ -479,14 +527,18 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
     struct real *real = &real_s;
 
     switch(find_real(ipv4, src, dst, &real_s)) {
-    case XDP_REDIRECT: //0: // no match - continue
-	return XDP_REDIRECT;
+    case CONTINUE: //0: // no match - continue
+	return CONTINUE;
 	
     case XDP_PASS: //2: // fallback enabled - pass to local tcp stack
 	write_perf(global, start);
 	return XDP_PASS;
 	
     case XDP_TX: //1: // matched and backend available
+
+	if(ip_decrease_ttl(ipv4) == 0) {
+	    goto drop_packet;
+	}
 	
 	if(real->rip == 0)
 	    goto invalid_real;
@@ -501,26 +553,35 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	    goto invalid_real; // unlikely we would want to echo packet back to source on an l2lb
 	
 	if(tag != NULL) {
+	    if(MODE != MODE_VLAN)
+		goto invalid_real; // We shouldn't be receiving tagged traffic in non-vlan mode
+	    
 	    if(real->vid == 0)
 		goto invalid_real; // VLAN ID of 0 not allowed if in VLAN mode
 	    
 	    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (real->vid & bpf_htons(0x0fff));
 	} else {
+
+	    if(MODE == MODE_VLAN)
+		goto invalid_real; // We must be receiving tagged traffic in vlan mode
+	    
 	    if(real->vid != 0)
 		goto invalid_real; // VLAN ID not allowed if in non-VLAN mode
 	}
 
-	if(ipv4->protocol == IPPROTO_TCP) {
+	if(ipv4->protocol == IPPROTO_TCP) { // maybe don't store initial SYN?
 	    if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
-	    if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, dst, real->rip, octets);
+	    if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, dst, real->rip, octets, DEFCON >= DEFCON4);
 	}
 
-	//bounce_packet(eth, real->mac);
-	//write_perf(global, start);
-	//return XDP_TX;
-	return bounce_packet_(eth, real->mac, global, start);
+
+	if(MODE == MODE_MULTINIC)
+	    return redirect_packet(eth, real->mac, real->vid, global, start);
+	
+	return bounce_packet(eth, real->mac, global, start);
 
     invalid_real: // fall-through
+    drop_packet:
 	
     case XDP_DROP: //3: // matched, but no backends available - return XDP_DROP;
 
@@ -531,7 +592,7 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	
     }
 
-    return XDP_REDIRECT;
+    return CONTINUE;
 }
 
 
@@ -549,6 +610,8 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     struct global *global = bpf_map_lookup_elem(&globals, &ZERO);
     
     if(global) {
+	global->rx_packets++;
+	global->rx_octets += (data_end - data);
 	
 	// if 10s since last reset ...
 	if((global->perf_timer + (10l * SECOND_NS)) < start) {
@@ -561,18 +624,17 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 		global->perf_packets = 1;
 	    }
 	}
+    }
+
+    __u8 era = 0;
+    
+    struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO);
+    if(setting) {
+	//ERA = setting->era;
+	era = setting->era;	
+	DEFCON = setting->defcon;
+	MODE = setting->mode;
 	
-	// once per second load settings
-	if((global->settings_timer - start) > ((__u64) 1 * SECOND_NS)) {
-	    global->settings_timer = start;
-
-	    struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO);
-	    if(setting) {
-		ERA = setting->era % 2;
-		DEFCON = setting->defcon;
-	    }
-	}
-
 	switch(DEFCON) {
 	case DEFCON0:
 	case DEFCON1:	    
@@ -585,17 +647,28 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	    DEFCON = DEFCON5;
 	    break;
 	}
+
+	switch(MODE) {
+	case MODE_DISABLED:
+	case MODE_SIMPLE:
+	case MODE_VLAN:
+	case MODE_MULTINIC:
+	    break;
+	default:
+	    MODE = MODE_DISABLED;
+	}
 	
-	global->rx_packets++;
-	global->rx_octets += (data_end - data);
-	//global->defcon = DEFCON;
-	
-	// ~90ns to here
-	//write_perf(global, start); global = NULL;
+	// check for heartbeat from userland - disable LB functionality
+	__u64 hb = setting->heartbeat;	
+	if(hb == 0) {
+	    setting->heartbeat = start + (60l * SECOND_NS); // 5m
+	} else if(hb < start) {
+	    return XDP_PASS;
+	}
     }
 
-    //write_perf(global, start); global = NULL;
-
+    //write_perf(global, start); global = NULL; // ~75ns to here
+    
     /* If LB is disabled then pass all traffic unmolested */
     if (DEFCON == DEFCON0)
 	return XDP_PASS; 
@@ -677,7 +750,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	    goto OUTGOING_PROBE;
 	
 	switch((action = new_flow(eth, tag, ipv4, udp->source, udp->dest, global, start, octets))) {
-	case XDP_REDIRECT:
+	case CONTINUE:
 	    break;
 	default:
 	    return action;
@@ -700,8 +773,8 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	if (natting == 2)
 	    goto OUTGOING_PROBE;
 	
-	switch((action = tcp_flow(eth, tag, ipv4, tcp, global, start, octets))) {
-	case XDP_REDIRECT: // Did not match an existing flow
+	switch((action = existing_tcp_flow(eth, tag, ipv4, tcp, global, start, octets, era))) {
+	case CONTINUE: // Did not match an existing flow
 	    break;
 	default:
 	    return action;
@@ -709,7 +782,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	
 	// Try to match a configured service
 	switch((action = new_flow(eth, tag, ipv4, tcp->source, tcp->dest, global, start, octets))) {
-	case XDP_REDIRECT: // Did not match a service
+	case CONTINUE: // Did not match a service
 	    break;
 	default:
 	    return action;
@@ -736,9 +809,16 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     maccpy(vm.mac, eth->h_source);
     
     if ((vme = bpf_map_lookup_elem(&vip_mac_to_nat, &vm))) {
+
+	if(ipv4->ttl == 1) {
+	    return XDP_DROP;
+	}
+	
 	ipv4->saddr = vme->srcip; // (nat addr)
 	ipv4->daddr = vme->dstip; // (vc5vb addr)
 	maccpy(eth->h_dest, vme->dstmac);
+
+	ipv4->ttl = 1; // just in case ...
 
 	if(tcp != NULL) {
 	    ipv4->check = 0;
@@ -770,14 +850,21 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     return XDP_PASS;
 
 
-
  OUTGOING_PROBE:
+
+    //if(ipv4->ttl == 1) {
+    //	return XDP_DROP;
+    //}
+    
     vme = bpf_map_lookup_elem(&nat_to_vip_mac, &(ipv4->daddr));
     if (vme) {
+
 	ipv4->saddr = vme->srcip;
 	ipv4->daddr = vme->dstip;
 	maccpy(eth->h_source, vme->srcmac);
 	maccpy(eth->h_dest, vme->dstmac);
+
+	ipv4->ttl = 1; // prevent packets from running amok
 	
 	if(tcp != NULL) {
 	    ipv4->check = 0;
@@ -796,9 +883,14 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	    return XDP_DROP;
 	}
 	
-	if(vme->vid != 0 && vlan_tag_push(ctx, eth, vme->vid) < 0)
-	    return XDP_DROP;
-		
+	if(MODE == MODE_VLAN) {
+	    if(vme->vid != 0 && vlan_tag_push(ctx, eth, vme->vid) < 0)
+		return XDP_DROP;
+	}
+	
+	if(MODE == MODE_MULTINIC)
+	    return bpf_redirect_map(&redirect_map, vme->vid, XDP_DROP);
+	
 	if(vme->ifindex == 0)
 	    return XDP_DROP;
 	
@@ -806,9 +898,9 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     }
 
 
-    // this also gets executed on vcb5 for returning packets, seemingly.
-    ipv4->ttl = 0; // prevent other packets from escaping into the wild
-
+    // this also gets executed on vc5b for returning packets, seemingly.
+    ipv4->ttl = 1;
+    
     if(tcp) {
 	ipv4->check = 0;
 	ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
@@ -826,7 +918,6 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	ipv4->check = 0;
         ipv4->check = ipv4_checksum((void *) ipv4, (void *)( tcp+ sizeof(struct iphdr)));
     }
-    
     
     return XDP_PASS;
 }

@@ -212,38 +212,6 @@ func Load(file string) (*Conf, error) {
 	return c, nil
 }
 
-func (c *Conf) Vlans() map[IP4]uint16 {
-	reals := c.Reals()
-	vlans := map[IP4]uint16{}
-
-	for _, r := range reals {
-		var vlan uint16
-
-		if len(c.VLANs) == 0 {
-			vlans[r] = 0
-			continue
-		}
-
-		for vid, net := range c.VLANs {
-			_, ipnet := net.IPNet()
-			ip := r.IP()
-
-			if ipnet.Contains(ip) {
-				vlan = vid
-			}
-		}
-
-		if vlan == 0 {
-			//panic("VLANs")
-		}
-
-		vlans[r] = vlan
-
-	}
-
-	return vlans
-}
-
 func (c *Conf) Reals() []IP4 {
 
 	real := map[IP4]bool{}

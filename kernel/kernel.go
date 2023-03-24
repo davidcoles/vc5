@@ -21,20 +21,24 @@ package kernel
 import (
 	"bufio"
 	_ "embed"
-	//"fmt"
-	"log"
+	"errors"
 	"net"
 	"os"
-	//"os/exec"
 	"regexp"
-	//"time"
+	"sort"
 	"unsafe"
 
 	"github.com/davidcoles/vc5/healthchecks"
+	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/types"
 	"github.com/davidcoles/vc5/xdp"
 )
+
+const MODE_DISABLED = 0
+const MODE_SIMPLE = 1
+const MODE_VLAN = 2
+const MODE_MULTINIC = 3
 
 //go:embed bpf/bpf.o
 var BPF_O []byte
@@ -46,22 +50,14 @@ type MAC = types.MAC
 type L4 = types.L4
 type Protocol = types.Protocol
 
-type Metadata = healthchecks.Metadata
-type Reals map[uint16]Real
-type Real = healthchecks.Real
-type Service_ = healthchecks.Service
-type Virtual_ = healthchecks.Virtual
 type Healthchecks = healthchecks.Healthchecks
-type NAT = healthchecks.NAT
-
-type Status = monitor.Service
-type Virtual = monitor.Virtual
 type Report = monitor.Report
 
 type maps = Maps
 type Maps struct {
 	m      map[string]int
 	defcon uint8
+	mode   uint8
 }
 
 type bpf_real struct {
@@ -80,20 +76,27 @@ type bpf_vrpp struct {
 }
 
 type bpf_counter struct {
-	packets uint64 //__u64 packets;
-	octets  uint64 //__u64 octets;
+	packets uint64
+	octets  uint64
+	flows   uint64
+	_pad    uint64
 }
 
 type bpf_setting struct {
-	defcon uint8
-	era    uint8
+	heartbeat uint64
+	defcon    uint8 // 3 bit
+	era       uint8 // 1 bit
+	mode      uint8 // 2 bit
+	// [0:0][0:0][0][0:0:0]
 }
+
+var SETTINGS bpf_setting = bpf_setting{defcon: 5}
 
 type bpf_global struct {
 	rx_packets     uint64
 	rx_octets      uint64
-	packets        uint64
-	timens         uint64
+	perf_packets   uint64
+	perf_timens    uint64
 	perf_timer     uint64
 	settings_timer uint64
 	new_flows      uint64
@@ -104,7 +107,7 @@ type bpf_service struct {
 	vip      [4]byte
 	port     [2]byte
 	protocol uint8
-	pad      uint8
+	_pad     uint8
 }
 
 type bpf_backend struct {
@@ -124,7 +127,12 @@ type bpf_nat struct {
 	srcip   [4]byte
 	ifindex uint32 //long bpf_redirect(u32 ifindex, u64 flags)
 	vid     uint16
-	pad     [2]byte
+	_pad    [2]byte
+}
+
+type bpf_active struct {
+	_total  uint64
+	current int64 // actually __s64 in bpf, drop any negative readings
 }
 
 type real_info struct {
@@ -139,70 +147,97 @@ type Target struct {
 	Protocol uint8
 }
 
-type Counter struct {
-	Octets     uint64
-	Packets    uint64
-	Concurrent uint64
-}
-
 func (c *bpf_counter) add(a bpf_counter) {
 	c.octets += a.octets
 	c.packets += a.packets
+	c.flows += a.flows
 }
 
 func (g *bpf_global) add(a bpf_global) {
 	g.rx_packets += a.rx_packets
 	g.rx_octets += a.rx_octets
-	g.packets += a.packets
-	g.timens += a.timens
+	g.perf_packets += a.perf_packets
+	g.perf_timens += a.perf_timens
 	//g.defcon = a.defcon
 	g.new_flows += a.new_flows
 }
 
-func Open(bond string, native bool, vetha, vethb string, eth ...string) *Maps {
+func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	var m maps
 	m.m = make(map[string]int)
 	m.defcon = 5
 
-	//x, err := xdp.LoadBpfFile_(BPF_O, "xdp_main", native, bond, vetha, vethb, eth...)
-	x, err := xdp.LoadBpfFile_(BPF_O, "incoming", "outgoing", native, bond, vetha, vethb, eth...)
+	x, err := xdp.LoadBpfFile_(BPF_O, "incoming", "outgoing", native, vetha, vethb, eth...)
 
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 
 	// balancer
-	m.m["service_backend"] = find_map(x, "service_backend", 8, (256*16)+8192)
+	if m.m["service_backend"], err = find_map(x, "service_backend", 8, (256*16)+8192); err != nil {
+		return nil, err
+	}
 
 	// nat
-	m.m["nat_to_vip_mac"] = find_map(x, "nat_to_vip_mac", 4, 28)
-	m.m["vip_mac_to_nat"] = find_map(x, "vip_mac_to_nat", 10, 28)
+	if m.m["nat_to_vip_mac"], err = find_map(x, "nat_to_vip_mac", 4, 28); err != nil {
+		return nil, err
+	}
+
+	if m.m["vip_mac_to_nat"], err = find_map(x, "vip_mac_to_nat", 10, 28); err != nil {
+		return nil, err
+	}
 
 	// stats
-	m.m["globals"] = find_map(x, "globals", 4, 64)
-	m.m["vrpp_counter"] = find_map(x, "vrpp_counter", 12, 16)
-	m.m["vrpp_concurrent"] = find_map(x, "vrpp_concurrent", 12, 8)
+	if m.m["globals"], err = find_map(x, "globals", 4, 64); err != nil {
+		return nil, err
+	}
+
+	if m.m["vrpp_counter"], err = find_map(x, "vrpp_counter", 12, 32); err != nil {
+		return nil, err
+	}
+
+	if m.m["vrpp_concurrent"], err = find_map(x, "vrpp_concurrent", 12, 16); err != nil {
+		return nil, err
+	}
+
+	//if m.m["vrpp_concurrent_a"], err = find_map(x, "vrpp_concurrent_a", 12, 16); err != nil {
+	//	return nil, err
+	//}
+
+	//if m.m["vrpp_concurrent_b"], err = find_map(x, "vrpp_concurrent_b", 12, 16); err != nil {
+	//	return nil, err
+	//}
 
 	// control
-	m.m["settings"] = find_map(x, "settings", 4, 2)
+	if m.m["settings"], err = find_map(x, "settings", 4, 16); err != nil {
+		return nil, err
+	}
+
+	if m.m["redirect_map"], err = find_map(x, "redirect_map", 4, 4); err != nil {
+		return nil, err
+	}
 
 	var zero uint32
 	s := bpf_setting{defcon: m.defcon, era: 0}
 
 	if xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&s), xdp.BPF_ANY) != 0 {
-		panic("oops")
+		return nil, errors.New("Failed to load settings")
 	}
 
-	return &m
+	return &m, nil
 }
 
 func (m *maps) service_backend() int { return m.m["service_backend"] }
 func (m *maps) nat_to_vip_mac() int  { return m.m["nat_to_vip_mac"] }
 func (m *maps) vip_mac_to_nat() int  { return m.m["vip_mac_to_nat"] }
 func (m *maps) vrpp_counter() int    { return m.m["vrpp_counter"] }
+
 func (m *maps) vrpp_concurrent() int { return m.m["vrpp_concurrent"] }
-func (m *maps) globals() int         { return m.m["globals"] }
-func (m *maps) settings() int        { return m.m["settings"] }
+
+//func (m *maps) vrpp_concurrent_a() int { return m.m["vrpp_concurrent_a"] }
+//func (m *maps) vrpp_concurrent_b() int { return m.m["vrpp_concurrent_b"] }
+func (m *maps) globals() int  { return m.m["globals"] }
+func (m *maps) settings() int { return m.m["settings"] }
 
 func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
 
@@ -243,70 +278,79 @@ func (m *maps) lookup_vrpp_counter(v *bpf_vrpp, c *bpf_counter) int {
 	return ret
 }
 
-func (m *maps) update_vrpp_concurrent(v *bpf_vrpp, c *int64, flag uint64) int {
+func (m *maps) update_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active, flag uint64) int {
 
-	all := make([]int64, xdp.BpfNumPossibleCpus())
+	all := make([]bpf_active, xdp.BpfNumPossibleCpus())
 
 	for n, _ := range all {
-		if c == nil {
-			all[n] = 0
-		} else {
-			all[n] = *c
+		if a != nil {
+			all[n] = *a
 		}
+	}
+
+	if era {
+		v.pad = 1
+	} else {
+		v.pad = 0
 	}
 
 	return xdp.BpfMapUpdateElem(m.vrpp_concurrent(), uP(v), uP(&(all[0])), flag)
 }
 
-func (m *maps) lookup_vrpp_concurrent(v *bpf_vrpp, c *int64) int {
+func (m *maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int {
 
-	co := make([]int64, xdp.BpfNumPossibleCpus())
+	co := make([]bpf_active, xdp.BpfNumPossibleCpus())
+
+	if era {
+		v.pad = 1
+	} else {
+		v.pad = 0
+	}
 
 	ret := xdp.BpfMapLookupElem(m.vrpp_concurrent(), uP(v), uP(&(co[0])))
 
-	var x int64
+	var x bpf_active
 
 	for _, v := range co {
-		x += v
+		if v.current > 0 {
+			x.current += v.current
+		}
 	}
 
-	*c = x
+	*a = x
 
 	return ret
 }
 
-func (m *maps) GlobalStats() (uint64, uint64, uint64, uint64, uint8) {
-	var g bpf_global
-	m.lookup_globals(&g)
+func (m *maps) write_settings() {
+	var zero uint32
+	SETTINGS.heartbeat = 0
+	SETTINGS.mode = m.mode
+	SETTINGS.defcon = m.defcon
 
-	var latency uint64
-	if g.packets > 0 {
-		latency = g.timens / g.packets
+	xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&SETTINGS), xdp.BPF_ANY)
+}
+
+func (m *maps) MODE(mode uint8) {
+	if mode <= 3 {
+		m.mode = mode
+		SETTINGS.mode = mode
 	}
+	m.write_settings()
+}
 
-	//return g.rx_packets, g.rx_octets, latency, uint8(g.defcon)
-	return g.rx_packets, g.rx_octets, g.new_flows, latency, m.defcon
+func (m *maps) ERA(era uint8) {
+	SETTINGS.era = era
+	m.write_settings()
 }
 
 func (m *maps) DEFCON(d uint8) uint8 {
-
-	var zero uint32
-	var s bpf_setting
-
 	if d <= 5 {
 		m.defcon = d
-		s.defcon = m.defcon
-
-		if xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&s), xdp.BPF_ANY) != 0 {
-			panic("oops")
-		}
+		SETTINGS.defcon = m.defcon
 	}
-
-	if xdp.BpfMapLookupElem(m.settings(), uP(&zero), uP(&s)) != 0 {
-		panic("oops")
-	}
-
-	return s.defcon
+	m.write_settings()
+	return m.defcon
 }
 
 func (m *maps) lookup_globals(g *bpf_global) int {
@@ -327,9 +371,9 @@ func (m *maps) lookup_globals(g *bpf_global) int {
 	return ret
 }
 
-func Nat(n uint16, ip IP4) [4]byte {
+func nat_addr(n uint16, ip IP4) IP4 {
 	hl := htons(n)
-	var nat [4]byte
+	var nat IP4
 	nat[0] = ip[0]
 	nat[1] = ip[1]
 	nat[2] = hl[0]
@@ -337,18 +381,18 @@ func Nat(n uint16, ip IP4) [4]byte {
 	return nat
 }
 
-func find_map(x *xdp.XDP, name string, ks int, rs int) int {
+func find_map(x *xdp.XDP, name string, ks int, rs int) (int, error) {
 	m := x.FindMap(name)
 
 	if m == -1 {
-		log.Fatal(name, " not found")
+		return 0, errors.New(name + " not found")
 	}
 
 	if !x.CheckMap(m, ks, rs) {
-		log.Fatal(name, " incorrect size")
+		return 0, errors.New(name + " incorrect size")
 	}
 
-	return m
+	return m, nil
 }
 
 func htons(p uint16) [2]byte {
@@ -358,59 +402,12 @@ func htons(p uint16) [2]byte {
 	return hl
 }
 
-func find_local(ips []IP4) map[IP4]bool {
-	locals := local_addrs()
-	ret := map[IP4]bool{}
-	for _, ip := range ips {
-		_, ok := locals[ip]
-		ret[ip] = ok
-	}
-	return ret
-}
-
-func local_addrs() map[IP4]MAC {
-	locals := map[IP4]MAC{}
-
-	ifaces, err := net.Interfaces()
-
-	if err == nil {
-
-		for _, i := range ifaces {
-			addrs, err := i.Addrs()
-			if err != nil {
-				continue
-			}
-
-			for _, a := range addrs {
-
-				ip, _, err := net.ParseCIDR(a.String())
-
-				if err == nil {
-
-					ip4 := ip.To4()
-
-					if ip4 != nil {
-						var mac, nul MAC
-						copy(mac[:], i.HardwareAddr)
-
-						if mac != nul {
-							locals[IP4{ip4[0], ip4[1], ip4[2], ip4[3]}] = mac
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return locals
-}
-
 func arp_macs() map[IP4]MAC {
 
 	ip2mac := make(map[IP4]MAC)
 	ip2nic := make(map[IP4]*net.Interface)
 
-	re := regexp.MustCompile(`^(\S+)\s+0x1\s+0x.\s+(\S+)\s+\S+\s+(\S+)$`)
+	re := regexp.MustCompile(`^(\S+)\s+0x1\s+0x[26]\s+(\S+)\s+\S+\s+(\S+)$`)
 
 	file, err := os.OpenFile("/proc/net/arp", os.O_RDONLY, os.ModePerm)
 	if err != nil {
@@ -472,57 +469,90 @@ func arp_macs() map[IP4]MAC {
 	return ip2mac
 }
 
-func local_macs() map[IP4]MAC {
-	locals := map[IP4]MAC{}
+func maglev8192(m map[[4]byte]uint8) (r [8192]uint8, b bool) {
 
-	ifaces, err := net.Interfaces()
+	if len(m) < 1 {
+		return r, false
+	}
 
-	if err == nil {
+	a := IP4s(make([]IP4, len(m)))
 
-		for _, i := range ifaces {
-			addrs, err := i.Addrs()
-			if err != nil {
-				continue
-			}
+	n := 0
+	for k, _ := range m {
+		a[n] = k
+		n++
+	}
 
-			for _, a := range addrs {
+	sort.Sort(a)
 
-				ip, _, err := net.ParseCIDR(a.String())
+	h := make([][]byte, len(a))
 
-				if err == nil {
+	for k, v := range a {
+		b := make([]byte, 4)
+		copy(b[:], v[:])
+		h[k] = b
+	}
 
-					ip4 := ip.To4()
+	t := maglev.Maglev8192(h)
 
-					if ip4 != nil {
-						var mac, nul MAC
-						copy(mac[:], i.HardwareAddr)
+	for k, v := range t {
+		ip := a[v]
+		x, ok := m[ip]
+		if !ok {
+			return r, false
+		}
+		r[k] = x
+	}
 
-						if mac != nul {
-							locals[IP4{ip4[0], ip4[1], ip4[2], ip4[3]}] = mac
-						}
-					}
-				}
-			}
+	return r, true
+}
+
+type be_state struct {
+	backend     map[IP4]monitor.Backend
+	health      map[IP4]bool
+	sticky      bool
+	fallback    bool
+	leastconns  IP4
+	weight      uint8
+	bpf_backend bpf_backend
+}
+
+func (curr *be_state) diff(prev *be_state) bool {
+
+	if prev == nil {
+		return true
+	}
+
+	if curr.sticky != prev.sticky ||
+		curr.fallback != prev.fallback ||
+		curr.leastconns != prev.leastconns ||
+		curr.weight != prev.weight {
+		return true
+	}
+
+	for k, v := range curr.backend {
+		if x, ok := prev.backend[k]; !ok || x != v {
+			return true
 		}
 	}
 
-	return locals
-}
-
-/*
-func _ping(ip IP4) chan bool {
-	done := make(chan bool)
-	go func() {
-		fmt.Println("STARTING PING", ip)
-		for {
-			exec.Command("/usr/bin/ping", "-c1", "-W1", ip.String()).Output()
-			select {
-			case <-time.After(10 * time.Second):
-			case <-done:
-				return
-			}
+	for k, v := range prev.backend {
+		if x, ok := curr.backend[k]; !ok || x != v {
+			return true
 		}
-	}()
-	return done
+	}
+
+	for k, v := range curr.health {
+		if x, ok := prev.health[k]; !ok || x != v {
+			return true
+		}
+	}
+
+	for k, v := range prev.health {
+		if x, ok := curr.health[k]; !ok || x != v {
+			return true
+		}
+	}
+
+	return false
 }
-*/

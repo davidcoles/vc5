@@ -19,7 +19,6 @@
 package kernel
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -29,13 +28,34 @@ import (
 	"github.com/davidcoles/vc5/xdp"
 )
 
-func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC) (chan *Healthchecks, func(ip IP4) (MAC, bool)) {
+type NAT struct {
+	hc  chan *Healthchecks
+	arp func(ip IP4) (MAC, bool)
+}
+
+func (m *maps) NAT(h *Healthchecks, myip IP4, myif int, mymac MAC, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC, l types.Logger) *NAT {
+	hc, arp := m.nat(h, myip, myif, mymac, veth, vc5aip, vc5bip, vc5amac, vc5bmac, l)
+	return &NAT{hc: hc, arp: arp}
+}
+
+func (n *NAT) Close() {
+	close(n.hc)
+}
+
+func (n *NAT) Configure(h *Healthchecks) {
+	n.hc <- h
+}
+
+func (n *NAT) ARP() func(ip IP4) (MAC, bool) {
+	return n.arp
+}
+
+func (m *maps) nat(h *Healthchecks, myip IP4, myif int, mymac MAC, veth int, vc5aip, vc5bip IP4, vc5amac, vc5bmac MAC, l types.Logger) (chan *Healthchecks, func(ip IP4) (MAC, bool)) {
 	F := "nat"
 
 	var mu sync.Mutex
 
 	macs := map[IP4]MAC{}
-	local := map[IP4]MAC{}
 
 	ch := make(chan *Healthchecks)
 
@@ -47,7 +67,6 @@ func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, 
 	}
 
 	macs = arp_macs()
-	local = local_macs()
 
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -101,7 +120,6 @@ func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, 
 
 				for k, _ := range rips {
 					if _, ok := pings[k]; !ok {
-						//pings[k] = ping(k)
 						l.NOTICE(F, "Starting ping for", k)
 						pings[k] = ping(icmp, k)
 					}
@@ -116,41 +134,24 @@ func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, 
 			}
 
 			for n, be := range mapping {
-				localhost := IP4{127, 0, 0, 1}
-
 				vip := be[0]
 				rip := be[1]
-				nat := Nat(n, vc5bip)
+				nat := nat_addr(n, vc5bip)
 
-				if rip == localhost {
-					fmt.Println("******************** OBSOLETE")
-					continue
-				}
-
-				mac, _ := get_mac_for_ip(rip)
+				mac, _ := get_mac_for_ip(rip) // OK to use nil MAC if not found - discover later
 				vm := bpf_vipmac{vip: vip, mac: mac}
-
-				mymac, ok := local[myip]
-
-				if !ok {
-					log.Fatal(myip, mymac, ok)
-				}
 
 				vid, srcip, ok := h.VlanID(rip, myip)
 
 				if !ok {
-					fmt.Println("******************** VLAN ID not found", vip, rip, vid, srcip)
+					l.ERR("nat", "VLAN ID not found", vip, rip)
 					continue
 				}
 
-				//fmt.Println("INDEX", rip, nat, egress, mac, vid)
-				l.INFO("nat", rip, nat, egress, mac, vid)
+				//l.INFO("nat", rip, nat, myif, mac, vid)
 
-				out := bpf_nat{vip: vip, mac: mac, srcmac: mymac, srcip: srcip, ifindex: uint32(egress), vid: vid}
+				out := bpf_nat{vip: vip, mac: mac, srcmac: mymac, srcip: srcip, ifindex: uint32(myif), vid: vid}
 				in := bpf_nat{vip: vc5bip, mac: vc5bmac, srcip: nat, ifindex: uint32(veth)}
-
-				//fmt.Println("OUT", nat, out)
-				//fmt.Println("IN", vm, in)
 
 				var update bool = true
 				rec := record{vm: vm, in: in, out: out}
@@ -160,7 +161,6 @@ func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, 
 						update = false
 					} else {
 						if v.vm != rec.vm {
-							//fmt.Println("UPDATING", v.vm)
 							l.NOTICE("nat", "updating", v.vm, "to", rec.vm)
 							xdp.BpfMapDeleteElem(m.vip_mac_to_nat(), uP(&(v.vm)))
 						}
@@ -170,7 +170,6 @@ func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, 
 				recs[n] = rec
 
 				if update {
-					//fmt.Println("WRITING", nat, rip, vm)
 					l.NOTICE("nat", "writing", nat, rip, vm)
 					xdp.BpfMapUpdateElem(m.nat_to_vip_mac(), uP(&nat), uP(&out), xdp.BPF_ANY)
 					xdp.BpfMapUpdateElem(m.vip_mac_to_nat(), uP(&vm), uP(&in), xdp.BPF_ANY)
@@ -180,13 +179,14 @@ func (m *maps) NAT(l types.Logger, myip IP4, h *Healthchecks, egress, veth int, 
 			for n, v := range recs {
 				if _, ok := mapping[n]; !ok {
 					delete(recs, n)
-					nat := Nat(n, vc5bip)
-					//fmt.Println("REMOVING", nat, v.vm)
-					l.NOTICE("nat", "writing", nat, v.vm)
+					nat := nat_addr(n, vc5bip)
+					l.NOTICE("nat", "deleting", nat, v.vm)
 					xdp.BpfMapDeleteElem(m.nat_to_vip_mac(), uP(&nat))
 					xdp.BpfMapDeleteElem(m.vip_mac_to_nat(), uP(&(v.vm)))
 				}
 			}
+
+			// TODO - check for 00:00:00:00:00:00
 		}
 	}()
 
@@ -239,7 +239,6 @@ type ICMPs struct {
 	submit chan string
 }
 
-//func ICMP(source string) *ICMPs {
 func ICMP() *ICMPs {
 
 	var icmp ICMPs
