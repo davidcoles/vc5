@@ -188,7 +188,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 
 			if realmac.IsNil() {
 				// write the out map for hosts with no arp to catch (and drop) on the way out, but don't put return map in
-				n.Logger.CRIT("nat", "VIP/RIP has no ARP entry", vip, rip, realmac)
+				n.Logger.DEBUG("nat", "VIP/RIP has no ARP entry", vip, rip, realmac)
 				continue
 			}
 
