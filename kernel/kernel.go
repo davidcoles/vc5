@@ -35,11 +35,6 @@ import (
 	"github.com/davidcoles/vc5/xdp"
 )
 
-const MODE_DISABLED = 0
-const MODE_SIMPLE = 1
-const MODE_VLAN = 2
-const MODE_MULTINIC = 3
-
 //go:embed bpf/bpf.o
 var BPF_O []byte
 
@@ -52,12 +47,15 @@ type Protocol = types.Protocol
 
 type Healthchecks = healthchecks.Healthchecks
 type Report = monitor.Report
+type Real = healthchecks.Real
+type Backend = healthchecks.Backend
+type Service = healthchecks.Service
 
 type maps = Maps
 type Maps struct {
 	m      map[string]int
 	defcon uint8
-	mode   uint8
+	multi  bool
 }
 
 type bpf_real struct {
@@ -86,7 +84,7 @@ type bpf_setting struct {
 	heartbeat uint64
 	defcon    uint8 // 3 bit
 	era       uint8 // 1 bit
-	mode      uint8 // 2 bit
+	multi     uint8 // 1 bit
 	// [0:0][0:0][0][0:0:0]
 }
 
@@ -115,24 +113,9 @@ type bpf_backend struct {
 	hash [8192]byte
 }
 
-type bpf_vipmac struct {
-	vip [4]byte
-	mac [6]byte
-}
-
-type bpf_nat struct {
-	vip     [4]byte
-	mac     [6]byte
-	srcmac  [6]byte
-	srcip   [4]byte
-	ifindex uint32 //long bpf_redirect(u32 ifindex, u64 flags)
-	vid     uint16
-	_pad    [2]byte
-}
-
 type bpf_active struct {
 	_total  uint64
-	current int64 // actually __s64 in bpf, drop any negative readings
+	current int64
 }
 
 type real_info struct {
@@ -167,10 +150,29 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	m.m = make(map[string]int)
 	m.defcon = 5
 
-	x, err := xdp.LoadBpfFile_(BPF_O, "incoming", "outgoing", native, vetha, vethb, eth...)
+	//x, err := xdp.LoadBpfFile_(BPF_O, "incoming", "outgoing", native, vetha, vethb, eth...)
+
+	x, err := xdp.LoadBpfProgram(BPF_O)
 
 	if err != nil {
 		return nil, err
+	}
+
+	err = x.LoadBpfSection("outgoing", false, vetha)
+	if err != nil {
+		return nil, err
+	}
+
+	err = x.LoadBpfSection("outgoing", true, vethb)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, e := range eth {
+		err = x.LoadBpfSection("incoming", native, e)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// balancer
@@ -179,11 +181,7 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	}
 
 	// nat
-	if m.m["nat_to_vip_mac"], err = find_map(x, "nat_to_vip_mac", 4, 28); err != nil {
-		return nil, err
-	}
-
-	if m.m["vip_mac_to_nat"], err = find_map(x, "vip_mac_to_nat", 10, 28); err != nil {
+	if m.m["nat"], err = find_map(x, "nat", 20, 28); err != nil {
 		return nil, err
 	}
 
@@ -200,20 +198,20 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
-	//if m.m["vrpp_concurrent_a"], err = find_map(x, "vrpp_concurrent_a", 12, 16); err != nil {
-	//	return nil, err
-	//}
-
-	//if m.m["vrpp_concurrent_b"], err = find_map(x, "vrpp_concurrent_b", 12, 16); err != nil {
-	//	return nil, err
-	//}
-
 	// control
 	if m.m["settings"], err = find_map(x, "settings", 4, 16); err != nil {
 		return nil, err
 	}
 
+	if m.m["redirect_map_hash"], err = find_map(x, "redirect_map_hash", 4, 4); err != nil {
+		return nil, err
+	}
+
 	if m.m["redirect_map"], err = find_map(x, "redirect_map", 4, 4); err != nil {
+		return nil, err
+	}
+
+	if m.m["redirect_mac"], err = find_map(x, "redirect_mac", 4, 6); err != nil {
 		return nil, err
 	}
 
@@ -227,17 +225,15 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	return &m, nil
 }
 
-func (m *maps) service_backend() int { return m.m["service_backend"] }
-func (m *maps) nat_to_vip_mac() int  { return m.m["nat_to_vip_mac"] }
-func (m *maps) vip_mac_to_nat() int  { return m.m["vip_mac_to_nat"] }
-func (m *maps) vrpp_counter() int    { return m.m["vrpp_counter"] }
-
-func (m *maps) vrpp_concurrent() int { return m.m["vrpp_concurrent"] }
-
-//func (m *maps) vrpp_concurrent_a() int { return m.m["vrpp_concurrent_a"] }
-//func (m *maps) vrpp_concurrent_b() int { return m.m["vrpp_concurrent_b"] }
-func (m *maps) globals() int  { return m.m["globals"] }
-func (m *maps) settings() int { return m.m["settings"] }
+func (m *maps) service_backend() int   { return m.m["service_backend"] }
+func (m *maps) vrpp_counter() int      { return m.m["vrpp_counter"] }
+func (m *maps) vrpp_concurrent() int   { return m.m["vrpp_concurrent"] }
+func (m *maps) globals() int           { return m.m["globals"] }
+func (m *maps) settings() int          { return m.m["settings"] }
+func (m *maps) nat() int               { return m.m["nat"] }
+func (m *maps) redirect_map_hash() int { return m.m["redirect_map_hash"] }
+func (m *maps) redirect_map() int      { return m.m["redirect_map"] }
+func (m *maps) redirect_mac() int      { return m.m["redirect_mac"] }
 
 func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
 
@@ -325,17 +321,26 @@ func (m *maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int 
 func (m *maps) write_settings() {
 	var zero uint32
 	SETTINGS.heartbeat = 0
-	SETTINGS.mode = m.mode
 	SETTINGS.defcon = m.defcon
+
+	if m.multi {
+		SETTINGS.multi = 1
+	} else {
+		SETTINGS.multi = 0
+	}
 
 	xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&SETTINGS), xdp.BPF_ANY)
 }
 
-func (m *maps) MODE(mode uint8) {
-	if mode <= 3 {
-		m.mode = mode
-		SETTINGS.mode = mode
+func (m *maps) MODE(mode bool) {
+	if mode {
+		m.multi = true
+		SETTINGS.multi = 1
+	} else {
+		m.multi = false
+		SETTINGS.multi = 0
 	}
+
 	m.write_settings()
 }
 
@@ -402,7 +407,7 @@ func htons(p uint16) [2]byte {
 	return hl
 }
 
-func arp_macs() map[IP4]MAC {
+func arp() map[IP4]MAC {
 
 	ip2mac := make(map[IP4]MAC)
 	ip2nic := make(map[IP4]*net.Interface)
@@ -505,54 +510,4 @@ func maglev8192(m map[[4]byte]uint8) (r [8192]uint8, b bool) {
 	}
 
 	return r, true
-}
-
-type be_state struct {
-	backend     map[IP4]monitor.Backend
-	health      map[IP4]bool
-	sticky      bool
-	fallback    bool
-	leastconns  IP4
-	weight      uint8
-	bpf_backend bpf_backend
-}
-
-func (curr *be_state) diff(prev *be_state) bool {
-
-	if prev == nil {
-		return true
-	}
-
-	if curr.sticky != prev.sticky ||
-		curr.fallback != prev.fallback ||
-		curr.leastconns != prev.leastconns ||
-		curr.weight != prev.weight {
-		return true
-	}
-
-	for k, v := range curr.backend {
-		if x, ok := prev.backend[k]; !ok || x != v {
-			return true
-		}
-	}
-
-	for k, v := range prev.backend {
-		if x, ok := curr.backend[k]; !ok || x != v {
-			return true
-		}
-	}
-
-	for k, v := range curr.health {
-		if x, ok := prev.health[k]; !ok || x != v {
-			return true
-		}
-	}
-
-	for k, v := range prev.health {
-		if x, ok := curr.health[k]; !ok || x != v {
-			return true
-		}
-	}
-
-	return false
 }

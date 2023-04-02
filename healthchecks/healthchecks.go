@@ -19,8 +19,9 @@
 package healthchecks
 
 import (
-	"errors"
-	"fmt"
+	"encoding/json"
+	//"errors"
+	//"fmt"
 	"net"
 	"time"
 
@@ -41,23 +42,18 @@ type Metadata struct {
 	Description string `json:",omitempty"`
 }
 
-type NAT struct {
-	VIP IP4
-	RIP IP4
-}
-
 type Backend struct {
 	IP  IP4
-	MAC MAC
 	VID uint16
 	Idx uint16
 }
 
 type Real struct {
-	NAT    uint16
 	RIP    IP4 // get rid of this
+	NAT    IP4
+	MAC    MAC
+	VID    uint16
 	Checks Checks
-	Index  uint16
 	Probe  Probe
 }
 
@@ -65,6 +61,7 @@ type Probe struct {
 	Passed   bool
 	Time     time.Time
 	Duration time.Duration
+	Message  string
 }
 
 type Service struct {
@@ -92,6 +89,7 @@ type Interface struct {
 	Index int
 	Name  string
 	Addr  NET
+	MAC   MAC
 }
 
 type vr [2]IP4
@@ -101,441 +99,187 @@ func (v vr) MarshalText() ([]byte, error) {
 }
 
 type Healthchecks struct {
-	Virtual    map[IP4]Virtual      `json:",omitempty"`
-	Backend    map[IP4]uint16       `json:",omitempty"`
-	Backends   map[IP4]Backend      `json:",omitempty"`
-	VID        map[IP4]uint16       `json:",omitempty"`
-	NATs       map[vr]uint16        `json:",omitempty"`
-	VLANs      map[uint16]Interface `json:",omitempty"`
-	Interfaces map[int]Interface    `json:",omitempty"`
-	Egress     map[IP4]int          `json:",omitempty"`
-	VLANMode   bool
+	Virtual map[IP4]Virtual `json:",omitempty"`
+	_VID    map[IP4]uint16  `json:",omitempty"`
+	VLAN    map[uint16]string
+	//VLANMode bool // get rid of this
+	//Redirect map[uint16]int32 `json:",omitempty"`
 }
 
-func (h *Healthchecks) NAT() map[uint16][2]IP4 {
-	m := map[uint16][2]IP4{}
-	for k, v := range h.NATs {
-		m[v] = k
-	}
-	return m
+func Load(c *config2.Conf) (*Healthchecks, error) {
+	return _ConfHealthchecks(c, nil)
 }
 
-func nats(hc *Healthchecks, list [][2]IP4) (map[uint16][2]IP4, error) {
-	old := map[uint16][2]IP4{}
-
-	if hc != nil {
-		old = hc.NAT()
-	}
-
-	new := map[[2]IP4]bool{}
-	for _, v := range list {
-		new[v] = true
-	}
-
-	o := map[[2]IP4]uint16{}
-	r := map[uint16][2]IP4{}
-	var n uint16
-	for k, v := range old {
-		o[v] = k
-	}
-
-	for k, _ := range new {
-		if x, ok := o[k]; ok {
-			r[x] = k
-		} else {
-		find:
-			n++
-			if n > 65000 {
-				return nil, errors.New("NAT mapping limit exceeded")
-			}
-
-			if _, ok := old[n]; ok {
-				goto find
-			}
-
-			r[n] = k
-		}
-	}
-
-	return r, nil
+func (h *Healthchecks) Reload(c *config2.Conf) (*Healthchecks, error) {
+	return _ConfHealthchecks(c, h)
 }
 
-func (c *Healthchecks) BackendIdx() map[uint16]IP4 {
-	return c.backends()
-}
+func (h *Healthchecks) VLANs() map[uint16]string { return h.VLAN }
+func (h *Healthchecks) VID(r IP4) uint16         { return h._VID[r] }
 
-func (c *Healthchecks) backends() map[uint16]IP4 {
-	b := map[uint16]IP4{}
-	for k, v := range c.Backend {
-		b[v] = k
-	}
-	return b
-}
-
-func rips(c *Healthchecks, new_ []IP4) (map[uint16]IP4, error) {
-
-	new := map[IP4]bool{}
-
-	for _, ip := range new_ {
-		new[ip] = true
-	}
-
-	old := map[uint16]IP4{}
-
-	if c != nil {
-		old = c.backends()
-	}
-
-	o := map[IP4]uint16{}
-	r := map[uint16]IP4{}
-	var n uint16
-
-	for k, v := range old {
-		o[v] = k
-	}
-
-	for k, _ := range new {
-		if x, ok := o[k]; ok {
-			r[x] = k
-		} else {
-		find:
-			n++
-			if n > 255 {
-				return nil, errors.New("Real server limit exceeded")
-			}
-
-			if _, ok := old[n]; ok {
-				goto find
-			}
-
-			r[n] = k
-		}
-	}
-
-	return r, nil
-}
-
-func (c *Healthchecks) _RIP(r IP4) uint16 {
-	return c.Backend[r]
-}
-
-func (c *Healthchecks) _NAT(vip, rip IP4) uint16 {
-
-	x, ok := c.NATs[[2]IP4{vip, rip}]
-
-	if ok {
-		return x
-	}
-
-	return 0
-
-}
-
-func Load(n NET, c *config2.Conf) (*Healthchecks, error) {
-	return _ConfHealthchecks(n, c, nil)
-}
-
-func (h *Healthchecks) Reload(n NET, c *config2.Conf) (*Healthchecks, error) {
-	return _ConfHealthchecks(n, c, h)
-}
-
-func _ConfHealthchecks(mynet NET, c *config2.Conf, old *Healthchecks) (*Healthchecks, error) {
+func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error) {
 
 	var hc Healthchecks
 
 	hc.Virtual = map[IP4]Virtual{}
+	hc._VID = map[IP4]uint16{}
 
-	_backend, err := rips(old, c.Reals())
+	//hc.VLANMode = len(c.Vlans()) > 0
 
-	if err != nil {
-		return nil, err
-	}
+	//if old != nil && old.VLANMode != hc.VLANMode {
+	//	return nil, errors.New("VLAN mode has changed")
+	//}
 
-	hc.Backend = map[IP4]uint16{}
-	for k, v := range _backend {
-		hc.Backend[v] = k
-	}
-
-	//hc.vlan = c.Vlans()
-
-	/**********************************************************************/
-
-	hc.VLANs = map[uint16]Interface{}
-	hc.VID = map[IP4]uint16{}
-	//hc.Interfaces = map[int]Interface{}
-	//hc.Egress = map[IP4]int{}
-
-	_, ipnet := mynet.IPNet()
-	hw := HWInventory()
-
-	hc.VLANMode = len(c.VLANs) > 0
-
-	if !hc.VLANMode {
-
-		// In simple mode - ensure that every backend is in our subnet
-		for be, _ := range hc.Backend {
-			if ip := net.IPv4(be[0], be[1], be[2], be[3]); ipnet.Contains(ip) {
-				hc.VID[be] = 0
-			} else {
-				return nil, errors.New(fmt.Sprint("No VLAN for", be))
-			}
-		}
-
-	} else {
-
-		// In VLAN mode - find IP address, MAC and interface to send probes from
-		for vlanid, subnet := range c.VLANs {
-			if ok, name, index, addr, _ := hw.MatchSubnet(subnet); ok {
-				hc.VLANs[vlanid] = Interface{Index: index, Name: name, Addr: addr}
-			} else {
-				return nil, errors.New(fmt.Sprint("No interface for VLAN", vlanid))
-			}
-		}
-
-		// Determine which VLAN ID to use for each backend
-		for be, _ := range hc.Backend {
-			if ok, vid := findvlan(hc.VLANs, be); ok {
-				hc.VID[be] = vid
-			} else {
-				return nil, errors.New(fmt.Sprint("No VLAN for", be))
-			}
-		}
-	}
-
-	/**********************************************************************
-
-	// In multi-NIC mode, determine which ifindex to bpf_redirect traffic to, and IP address, MAC to send probes from
-	for be, _ := range hc.Backend {
-		if ok, name, index, addr, _ := hw.MatchIP4(be); ok {
-			hc.Interfaces[index] = Interface{Index: index, Name: name, Addr: addr}
-			hc.Egress[be] = index
-		} else {
-			return nil, errors.New(fmt.Sprint("No interface for backend", be))
-		}
-	}
-
-	/**********************************************************************/
-
-	mapping, err := nats(old, c.Nats())
-
-	if err != nil {
-		return nil, err
-	}
-
-	hc.NATs = map[vr]uint16{}
-	for k, v := range mapping {
-		hc.NATs[v] = k
-	}
-
-	ips := []IP4{}
+	hc.VLAN = c.VLANs
 
 	for vip, x := range c.VIPs {
 
 		v := Virtual{Services: map[L4]Service{}}
 
 		for l4, y := range x {
-			reals := map[IP4]Real{}
-			for rip, z := range y.RIPs {
-				ips = append(ips, rip)
-				r := hc._RIP(rip)
-				n := hc._NAT(vip, rip)
-				if r == 0 || n == 0 {
-					msg := fmt.Sprintf("%s/%s: %d %d", vip.String(), rip.String(), r, n)
-					return nil, errors.New(msg)
-				}
 
-				real := Real{RIP: rip, NAT: n, Checks: z.Checks(), Index: r}
+			reals := map[IP4]Real{}
+
+			for rip, z := range y.RIPs {
+				real := Real{RIP: rip, Checks: z.Checks()}
 				reals[rip] = real
 			}
 
-			m := Metadata{Name: y.Name, Description: y.Description}
-			s := Service{Metadata: m, FallbackChecks: y.Local, Fallback: y.Fallback, Minimum: y.Need, Sticky: y.Sticky, Reals: reals}
-			v.Services[l4] = s
+			v.Services[l4] = Service{
+				Metadata:       Metadata{Name: y.Name, Description: y.Description},
+				FallbackChecks: y.Local,
+				Fallback:       y.Fallback,
+				Minimum:        y.Need,
+				Sticky:         y.Sticky,
+				Reals:          reals,
+			}
 		}
 
 		hc.Virtual[vip] = v
 	}
 
+	//if !hc.VLANMode {
+	//	for be, _ := range hc.RIPs() {
+	//		hc._VID[be] = 0
+	//	}
+	//} else {
+	// Determine which VLAN ID to use for each backend
+	for be, _ := range hc.RIPs() {
+		if ok, vid := findvlan2(hc.VLAN, be); ok {
+			hc._VID[be] = vid
+		} else {
+			hc._VID[be] = 0
+			//return nil, errors.New(fmt.Sprint("No VLAN for", be))
+		}
+	}
+	//}
+
+	// write vlan id to each rip entry in services
+	for _, v := range hc.Virtual {
+		for _, s := range v.Services {
+			for rip, real := range s.Reals {
+				real.VID = hc._VID[rip]
+				s.Reals[rip] = real
+			}
+		}
+	}
+
 	return &hc, nil
 }
 
-func (c *Healthchecks) VlanID(r IP4, s IP4) (vid uint16, src IP4, ok bool) {
-	src = s
-
-	vid, ok = c.VID[r]
-
-	if vid == 0 {
-		return
-	}
-
-	i, o := c.VLANs[vid]
-
-	if !o {
-		return vid, src, false
-	}
-
-	src = i.Addr.IP
-
-	return
-}
-
-func (c *Healthchecks) Iface(r IP4) (uint32, IP4, uint16) {
-	var i IP4 = IP4{0, 0, 0, 0}
-
-	vid, _ := c.VID[r]
-
-	if vid == 0 {
-		return 0, i, 0
-	}
-
-	vlan, ok := c.VLANs[vid]
-
-	if !ok {
-		return 0, i, 0
-	}
-
-	return uint32(vlan.Index), vlan.Addr.IP, vid
-}
-
 /**********************************************************************/
-
-type HW []IF
-
-type IF struct {
-	Index int
-	Name  string
-	MAC   [6]byte
-	Addrs []AD
-}
-
-type AD struct {
-	CIDR  string
-	NET   NET
-	IP    net.IP
-	IPNet *net.IPNet
-}
-
-func (ifs HW) MatchIP(ip net.IP) (bool, string, int, NET, [6]byte) {
-	for _, i := range ifs {
-		for _, a := range i.Addrs {
-			if a.IPNet.Contains(ip) {
-				return true, i.Name, i.Index, a.NET, i.MAC
-			}
-		}
-	}
-
-	return false, "", 0, NET{}, [6]byte{}
-}
-
-func (ifs HW) MatchIP4(i IP4) (bool, string, int, NET, [6]byte) {
-	ip := net.IPv4(i[0], i[1], i[2], i[3])
-	for _, i := range ifs {
-		for _, a := range i.Addrs {
-			if a.IPNet.Contains(ip) {
-				return true, i.Name, i.Index, a.NET, i.MAC
-			}
-		}
-	}
-
-	return false, "", 0, NET{}, [6]byte{}
-}
-
-func (ifs HW) MatchIPNet(ipn *net.IPNet) (bool, string, int, NET, [6]byte) {
-	for _, i := range ifs {
-		for _, a := range i.Addrs {
-			if a.IPNet.String() == ipn.String() {
-				return true, i.Name, i.Index, a.NET, i.MAC
-			}
-		}
-	}
-
-	return false, "", 0, NET{}, [6]byte{}
-}
-
-func (ifs HW) MatchSubnet(n NET) (bool, string, int, NET, [6]byte) {
-	_, ipnet := n.IPNet()
-	for _, i := range ifs {
-		for _, a := range i.Addrs {
-			if a.IPNet.String() == ipnet.String() {
-				return true, i.Name, i.Index, a.NET, i.MAC
-			}
-		}
-	}
-
-	return false, "", 0, NET{}, [6]byte{}
-}
-
-func HWInventory() HW {
-	ifaces, err := net.Interfaces()
-
-	if err != nil {
-		return nil
-	}
-
-	var hw []IF
-
-	for _, i := range ifaces {
-
-		if i.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-
-		if i.Flags&net.FlagUp == 0 {
-			continue
-		}
-
-		if i.Flags&net.FlagBroadcast == 0 {
-			continue
-		}
-
-		if len(i.HardwareAddr) != 6 {
-			continue
-		}
-
-		addr, err := i.Addrs()
-
-		var ad []AD
-
-		if err == nil {
-			for _, a := range addr {
-				cidr := a.String()
-				ip, ipnet, err := net.ParseCIDR(cidr)
-				if err == nil {
-
-					n, err := types.Net(cidr)
-
-					if err == nil && ip.To4() != nil {
-
-						ad = append(ad, AD{CIDR: cidr, NET: n, IP: ip.To4(), IPNet: ipnet})
-					}
-				}
-			}
-		}
-
-		var mac [6]byte
-
-		copy(mac[:], i.HardwareAddr)
-
-		hw = append(hw, IF{Index: i.Index, Name: i.Name, MAC: mac, Addrs: ad})
-	}
-
-	return hw
-}
 
 func ToNET(ipnet *net.IPNet) NET {
 	n, _ := types.Net(ipnet.String())
 	return n
 }
 
-func findvlan(vlans map[uint16]Interface, be IP4) (bool, uint16) {
-	for vid, iface := range vlans {
-		ip := net.IPv4(be[0], be[1], be[2], be[3])
-		_, ipnet := iface.Addr.IPNet()
+func findvlan2(vlans map[uint16]string, ip IP4) (bool, uint16) {
+	for vid, cidr := range vlans {
 
-		if ipnet.Contains(ip) {
-			return true, vid
+		_, ipnet, err := net.ParseCIDR(cidr)
+
+		if err == nil {
+			if ipnet.Contains(ip.IP()) {
+				return true, vid
+			}
 		}
 	}
 
 	return false, 0
+}
+
+func (h *Healthchecks) DeepCopy() *Healthchecks {
+	j, err := json.MarshalIndent(h, "", "  ")
+
+	if err != nil {
+		panic(err)
+	}
+
+	var n Healthchecks
+
+	err = json.Unmarshal(j, &n)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return &n
+}
+
+func (h *Healthchecks) JSON() string {
+	j, _ := json.MarshalIndent(h, "", "  ")
+	return string(j)
+}
+
+func (h *Healthchecks) xDeepCopy() *Healthchecks {
+	var n Healthchecks
+
+	n = *h
+
+	n.Virtual = map[IP4]Virtual{}
+
+	for vip, v := range h.Virtual {
+
+		v2 := v
+		v2.Services = map[L4]Service{}
+		n.Virtual[vip] = v2
+
+		for l4, s := range v.Services {
+
+			s2 := s
+			s2.Reals = map[IP4]Real{}
+			v2.Services[l4] = s2
+
+			for rip, r := range s.Reals {
+				s2.Reals[rip] = r
+			}
+		}
+	}
+
+	return &n
+}
+
+func (h *Healthchecks) RIPs() map[IP4]IP4 {
+	r := map[IP4]IP4{}
+	for _, v := range h.Virtual {
+		for _, s := range v.Services {
+			for rip, _ := range s.Reals {
+				r[rip] = rip
+			}
+		}
+	}
+	return r
+}
+
+func (h *Healthchecks) Tuples() map[[2]IP4]bool {
+	n := map[[2]IP4]bool{}
+	for vip, v := range h.Virtual {
+		for _, s := range v.Services {
+			for rip, _ := range s.Reals {
+				n[[2]IP4{vip, rip}] = true
+			}
+		}
+	}
+	return n
 }

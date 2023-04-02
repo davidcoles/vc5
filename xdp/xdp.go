@@ -250,3 +250,68 @@ func XDPTest(bindata []byte, program string, native bool, nic string, p2, n2 str
 
 	return &xdp, nil
 }
+
+/**********************************************************************/
+
+func LoadBpfProgram(bindata []byte) (*XDP, error) {
+	tmpfile, err := ioutil.TempFile("/tmp", "balancer")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(tmpfile.Name())
+
+	if _, err := tmpfile.Write(bindata); err != nil {
+		return nil, err
+	}
+
+	if err := tmpfile.Close(); err != nil {
+		return nil, err
+	}
+
+	var xdp XDP
+
+	xdp.p = C.load_bpf_file2(C.CString(tmpfile.Name()))
+
+	if xdp.p == nil {
+		return nil, errors.New("Oops")
+	}
+
+	return &xdp, nil
+}
+
+func (xdp *XDP) LoadBpfFile__(bindata []byte, p1, p2 string, native bool, vetha, vethb string, eth ...string) error {
+
+	if vetha != "" {
+		C.xdp_link_detach2(C.CString(vetha))
+		if C.load_bpf_section(xdp.p, C.CString(vetha), C.CString(p2), C.int(0)) != 0 {
+			return errors.New("load_bpf_section() failed for " + vetha)
+		}
+	}
+
+	/* weirdly, this seems to need to be set up in naive mode or probes don't succeed */
+	if vethb != "" {
+		C.xdp_link_detach2(C.CString(vethb))
+		if C.load_bpf_section(xdp.p, C.CString(vethb), C.CString(p2), C.int(1)) != 0 {
+			return errors.New("load_bpf_section() failed for " + vethb)
+		}
+	}
+
+	for _, iface := range eth {
+		n := boolint(native)
+		C.xdp_link_detach2(C.CString(iface))
+		if C.load_bpf_section(xdp.p, C.CString(iface), C.CString(p1), C.int(n)) != 0 {
+			return errors.New("load_bpf_section() failed for " + iface)
+		}
+	}
+
+	return nil
+}
+
+func (xdp *XDP) LoadBpfSection(p1 string, native bool, eth string) error {
+	C.xdp_link_detach2(C.CString(eth))
+	if C.load_bpf_section(xdp.p, C.CString(eth), C.CString(p1), C.int(boolint(native))) != 0 {
+		return errors.New("load_bpf_section() failed for " + eth)
+	}
+
+	return nil
+}

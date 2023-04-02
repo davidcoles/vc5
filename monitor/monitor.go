@@ -19,6 +19,7 @@
 package monitor
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -39,12 +40,10 @@ type Healthchecks = healthchecks.Healthchecks
 type Service = healthchecks.Service
 type Probe = healthchecks.Probe
 type Virtual = healthchecks.Virtual
-type Backend = healthchecks.Backend
 type Report = healthchecks.Healthchecks
 
 type context struct {
-	sock    string  // UNIX domain docket to communicate with netns NAT server
-	base    [2]byte // 1st two octets of NAT /16 range
+	sock    string // UNIX domain docket to communicate with netns NAT server
 	vip     IP4
 	l4      L4
 	log     types.Logger
@@ -54,53 +53,55 @@ type context struct {
 	notify  chan bool
 }
 
+func ud(b bool) string {
+	if b {
+		return "UP"
+	}
+
+	return "DOWN"
+}
+
 func (m *Mon) manage(l types.Logger) {
 	var changed bool
-	var count uint64
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	defer close(m.C)
 
 	for {
 		select {
-
-		case h, ok := <-m.in: // new config
+		case h, ok := <-m.in: // new configuration
 			if !ok {
 				return
 			}
-			//l.CRIT("CONFIG")
-			m.fn(h, false) // apply the config
+			m.apply(h)     // apply the config
 			changed = true // let downstream know of the change next tick
 
-		case <-m.nt: // backend changed
-			//l.CRIT("NOTIFICATION")
-			changed = true
-
-		case <-ticker.C: // once per second if changed and force every 60s to update ARP
-			count++
-			if changed || count%60 == 0 {
+		case <-ticker.C: // notify downstream if changed
+			if changed {
 				select {
-				case m.C <- m.fn(nil, false):
-					//l.CRIT("SENT", count%60)
+				default: // don't block
+				case m.C <- m.status():
 					changed = false
-					count = 0
-				default:
 				}
 			}
+
+		case <-m.notify: // something changed
+			changed = true
 		}
 	}
 }
 
 type Mon struct {
-	fn func(*healthchecks.Healthchecks, bool) Report
-	C  chan healthchecks.Healthchecks
-	in chan *Healthchecks
-	nt chan bool
+	fn     func(*healthchecks.Healthchecks, bool) Report
+	C      chan healthchecks.Healthchecks
+	in     chan *Healthchecks
+	notify chan bool
 }
 
-func Monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool), l types.Logger) (*Mon, Healthchecks) {
-	m := &Mon{C: make(chan Healthchecks), in: make(chan *Healthchecks), nt: make(chan bool)}
-	m.fn = m.monitor(h, ip, sock, lookup, l)
+func Monitor(h *Healthchecks, sock string, l types.Logger) (*Mon, Healthchecks) {
+	m := &Mon{C: make(chan Healthchecks), in: make(chan *Healthchecks), notify: make(chan bool)}
+	m.fn = m.monitor(h, sock, l)
 	r := m.fn(nil, false)
 	go m.manage(l)
 	return m, r
@@ -110,18 +111,23 @@ func (m *Mon) Update(h *Healthchecks) {
 	m.in <- h
 }
 
+func (m *Mon) status() Healthchecks {
+	return m.fn(nil, false)
+}
+
+func (m *Mon) apply(h *Healthchecks) {
+	m.fn(h, false)
+}
+
 func (m *Mon) Close() {
 	m.fn(nil, true)
 }
 
-func natify(t [2]byte, p uint16) [4]byte { return [4]byte{t[0], t[1], byte(p >> 8), byte(p & 0xff)} }
-
-func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) (MAC, bool), l types.Logger) func(*Healthchecks, bool) Report {
+func (m *Mon) monitor(h *Healthchecks, sock string, l types.Logger) func(*Healthchecks, bool) Report {
 
 	var status Healthchecks
 
 	virts := map[IP4]*Virt{}
-	backends := map[uint16]Backend{}
 
 	update := func(h *Healthchecks, fin bool) {
 
@@ -129,18 +135,11 @@ func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) 
 
 			status = *h
 
-			backends = map[uint16]Backend{}
-
-			for k, v := range h.BackendIdx() {
-				_, _, vid := h.Iface(v)
-				backends[k] = Backend{IP: v, VID: vid}
-			}
-
 			for vip, services := range h.Virtual {
 				if v, ok := virts[vip]; ok {
 					v.Reconfigure(services)
 				} else {
-					virts[vip] = StartVirt(services, context{vip: vip, base: [2]byte{ip[0], ip[1]}, sock: sock, log: l, notify: m.nt})
+					virts[vip] = StartVirt(services, context{vip: vip, sock: sock, log: l, notify: m.notify})
 				}
 			}
 
@@ -165,29 +164,12 @@ func (m *Mon) monitor(h *Healthchecks, ip IP4, sock string, lookup func(ip IP4) 
 	return func(h *Healthchecks, fin bool) Report {
 		update(h, false)
 
-		r := status                    // take a new copy of the config root
-		r.Backends = map[IP4]Backend{} // clear deep structure
+		r := status // take a new copy of the config root
 		r.Virtual = map[IP4]Virtual{}
 
 		for k, fn := range virts {
 			v := fn.Status()
 			r.Virtual[k] = v
-		}
-
-		all := []IP4{}
-
-		for _, v := range backends {
-			all = append(all, v.IP)
-		}
-
-		for k, v := range backends {
-			var mac MAC
-			if lookup != nil {
-				mac, _ = lookup(v.IP)
-			}
-
-			backend := Backend{IP: v.IP, MAC: mac, VID: v.VID, Idx: k}
-			r.Backends[v.IP] = backend
 		}
 
 		update(nil, fin)
@@ -439,7 +421,7 @@ func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real,
 	nat := c.vip
 
 	if !local {
-		nat = natify(c.base, real.NAT)
+		nat = real.NAT
 	}
 
 	if c.new_vip {
@@ -456,16 +438,24 @@ func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real,
 
 	return func(ip *healthchecks.Real, fin bool) Probe {
 
+		mutex.Lock()
+		defer mutex.Unlock()
+
 		if ip != nil {
-			ch <- ip.Checks
+			if ch != nil {
+				ch <- ip.Checks
+			} else {
+				c.log.ERR("probe", "trying to send on closed channel")
+			}
 		}
 
 		if fin {
 			close(ch)
+			ch = nil
 		}
 
-		mutex.Lock()
-		defer mutex.Unlock()
+		//mutex.Lock()
+		//defer mutex.Unlock()
 		return probe
 	}
 }
@@ -494,7 +484,7 @@ func healthy(b [5]bool) bool {
 
 func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock string, checks Checks, l types.Logger, notify chan bool) chan Checks {
 
-	ch := make(chan Checks)
+	ch := make(chan Checks, 1000)
 
 	go func() {
 
@@ -509,15 +499,20 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock stri
 			case <-t.C:
 
 				now := time.Now()
-				history = rotate(history, probes(nat, sock, checks))
+				//history = rotate(history, probes(nat, sock, checks))
+
+				ok, msg := probes(nat, sock, checks)
+				history = rotate(history, ok)
 
 				mutex.Lock()
 				last := probe.Passed
 				probe.Duration = time.Now().Sub(now)
 				probe.Passed = healthy(history)
+				probe.Message = msg
 
 				if probe.Passed != last {
-					l.NOTICE("monitor", vip, l4, rip, nat, "went", probe.Passed)
+					//l.NOTICE("monitor", vip, l4, rip, nat, "went", probe.Passed)
+					l.NOTICE("monitor", fmt.Sprintf("Real server %s for %s:%s (NAT address %s) went %s: %s", rip, vip, l4, nat, ud(ok), msg))
 					probe.Time = time.Now()
 					if notify != nil {
 						select {
@@ -539,37 +534,37 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock stri
 	return ch
 }
 
-func probes(nat IP4, socket string, checks Checks) bool {
+func probes(nat IP4, socket string, checks Checks) (bool, string) {
 
 	for _, c := range checks.Http {
 		if !netns.Probe(socket, nat, "http", c) {
-			return false
+			return false, "HTTP probe failed"
 		}
 	}
 
 	for _, c := range checks.Https {
 		if !netns.Probe(socket, nat, "https", c) {
-			return false
+			return false, "HTTPS probe failed"
 		}
 	}
 
 	for _, c := range checks.Tcp {
 		if !netns.Probe(socket, nat, "tcp", c) {
-			return false
+			return false, "TCP probe failed"
 		}
 	}
 
 	for _, c := range checks.Syn {
 		if !netns.Probe(socket, nat, "syn", c) {
-			return false
+			return false, "SYN probe failed"
 		}
 	}
 
 	for _, c := range checks.Dns {
 		if !netns.Probe(socket, nat, "dns", c) {
-			return false
+			return false, "DNS probe failed"
 		}
 	}
 
-	return true
+	return true, "OK"
 }

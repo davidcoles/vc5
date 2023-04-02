@@ -19,7 +19,6 @@
 // TODO
 // manage existing connection (SYN/RST/etc)
 // sticky sessions
-// multi-nic mode
 // BGP stats/state
 // time since last state change for reals/services/vips
 
@@ -28,13 +27,18 @@
 // * adding a new service to an existing vip, service should start in "up" state to prevent vip being withdrawn (chaos)
 // * adding a new real to an existing service, host checks should start in "down" state to prevent hash being changed
 
-// config file change -> nat (+mac address changes) -> monitor (+backend changes) -> balancer (+stats) -> console
+// MAC address uniqueness check
+
+// override webserver port from config
+// clean up tag/multinic
+// add warning for untagged hosts
 
 package main
 
 import (
 	"embed"
 	"encoding/json"
+	//"errors"
 	"flag"
 	"fmt"
 	"io/ioutil"
@@ -64,16 +68,19 @@ type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
 
-var kill = flag.Uint("k", 0, "killswitch engage")
 var level = flag.Uint("l", LOG_ERR, "debug level level")
+var kill = flag.Uint("k", 0, "killswitch engage - automatic shutoff after k minutes")
 var dfcn = flag.Uint("d", 5, "defcon readiness level")
-var sock = flag.String("s", "", "used when spawning healthcheck server")
-var bond = flag.String("i", "", "name of egress interface to use (eg. bond0, br0)")
-var port = flag.String("w", ":9999", "webserver address:port to listen on")
+var sock = flag.String("s", "", "unix domain socket to use when spawning healthcheck server")
+var bond = flag.String("i", "", "name of egress interface to use (eg. bond0)")
 var root = flag.String("r", "", "webserver root directory")
+var websrv = flag.String("w", ":9999", "webserver address:port to listen on")
 var native = flag.Bool("n", false, "load xdp program in native mode")
+var multi = flag.Bool("m", false, "multi-nic mode")
 
 func main() {
+
+	start := time.Now()
 
 	flag.Parse()
 	args := flag.Args()
@@ -86,34 +93,9 @@ func main() {
 		return
 	}
 
-	s, err := net.Listen("tcp", *port)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	temp, err := ioutil.TempFile("/tmp", "prefix")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer os.Remove(temp.Name())
-
-	sock := temp.Name()
-
 	file := args[0]
 	myip := args[1]
 	peth := args[2:]
-
-	mynet, err := vc5.Net(myip)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for _, v := range peth {
-		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
-		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
-	}
 
 	conf, err := vc5.LoadConf(file)
 
@@ -127,7 +109,38 @@ func main() {
 		return
 	}
 
-	hc, err := vc5.Load(conf, mynet)
+	if conf.Webserver != "" {
+		*websrv = conf.Webserver
+	}
+
+	s, err := net.Listen("tcp", *websrv)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	temp, err := ioutil.TempFile("/tmp", "prefix")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer os.Remove(temp.Name())
+
+	for _, v := range peth {
+		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
+		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
+	}
+
+	mynic := *bond
+
+	if mynic == "" {
+		mynic = peth[0]
+	}
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	hc, err := vc5.Load(conf)
 
 	if err != nil {
 		log.Fatal(err)
@@ -145,20 +158,29 @@ func main() {
 		ReadinessLevel:  uint8(*dfcn),
 		KillSwitch:      *kill,
 		Native:          *native,
-		Socket:          sock,
-		NetnsCommand:    []string{os.Args[0], "-s", sock},
+		MultiNIC:        *multi,
+		Socket:          temp.Name(),
+		NetnsCommand:    []string{os.Args[0], "-s", temp.Name()},
 		Interfaces:      peth,
 		EgressInterface: *bond,
 		Logger:          logger,
 	}
 
-	err = lb.Start(mynet.IP, hc)
+	ip := net.ParseIP(myip)
+
+	if ip == nil {
+		log.Fatal("IP is nil")
+	}
+
+	//err = lb.Start(mynet.IP, hc)
+	err = lb.Start(ip, hc)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	pool := NewBGPPool(mynet.IP, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
+	//pool := NewBGPPool(mynet.IP, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
+	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
 
 	sig := make(chan os.Signal)
 	//signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
@@ -175,7 +197,7 @@ func main() {
 				lb.DEFCON(0)
 				lb.Close()
 				time.Sleep(1 * time.Second)
-				os.Remove(sock)
+				os.Remove(temp.Name())
 				log.Fatal("EXITING ", s)
 			case syscall.SIGQUIT:
 				log.Println("RELOAD")
@@ -187,7 +209,7 @@ func main() {
 					log.Println(err)
 				} else {
 
-					h, err := hc.Reload(mynet, conf)
+					h, err := hc.Reload(conf)
 
 					if err != nil {
 						log.Println(err)
@@ -329,7 +351,7 @@ func main() {
 
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		w.Write(prometheus(stats))
+		w.Write(prometheus(stats, start))
 	})
 
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
@@ -384,28 +406,34 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 		stats.RHI[vip] = v.Healthy
 		for l4, s := range v.Services {
 			reals := map[IP4]Real{}
-			//for n, probe := range s.Probe {
-			for n, real_ := range s.Reals {
-				probe := real_.Probe
-				r := cf.Backends[n]
-				t := Target{VIP: vip, RIP: r.IP, Protocol: l4.Protocol.Number(), Port: l4.Port}
+
+			var servers uint8
+			var healthy uint8
+
+			for rip, real := range s.Reals {
+				servers++
+
+				if real.Probe.Passed {
+					healthy++
+				}
+
+				t := Target{VIP: vip, RIP: rip, Protocol: l4.Protocol.Number(), Port: l4.Port}
 				c := ss[t]
 
 				stats.Concurrent += c.Concurrent
 
-				mac := cf.Backends[r.IP].MAC.String()
+				when := int64(time.Now().Sub(real.Probe.Time) / time.Millisecond)
 
-				when := int64(time.Now().Sub(probe.Time) / time.Millisecond)
-
-				reals[r.IP] = Real{
-					Up:         probe.Passed,
+				reals[rip] = Real{
+					Up:         real.Probe.Passed,
 					When:       when,
-					Duration:   int64(probe.Duration / time.Millisecond),
+					Message:    real.Probe.Message,
+					Duration:   int64(real.Probe.Duration / time.Millisecond),
 					Octets:     c.Octets,
 					Packets:    c.Packets,
 					Flows:      c.Flows,
 					Concurrent: c.Concurrent,
-					MAC:        mac,
+					MAC:        real.MAC.String(),
 				}
 			}
 			stats.VIPs[vip][l4] = Service{
@@ -416,6 +444,9 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 				FallbackUp:  s.FallbackProbe.Passed,
 				Name:        s.Metadata.Name,
 				Description: s.Metadata.Description,
+				Servers:     servers,
+				Healthy:     healthy,
+				Minimum:     s.Minimum,
 			}
 		}
 	}
@@ -454,11 +485,15 @@ type Service struct {
 	FlowsPS     uint64       `json:"flows_ps"`
 	Concurrent  uint64       `json:"concurrent"`
 	Reals       map[IP4]Real `json:"rips"`
+	Minimum     uint16       `json:"minimum"`
+	Servers     uint8        `json:"servers"`
+	Healthy     uint8        `json:"healthy"`
 }
 
 type Real struct {
 	Up         bool   `json:"up"`
 	When       int64  `json:"when_ms"`
+	Message    string `json:"message"`
 	Duration   int64  `json:"duration_ms"`
 	Octets     uint64 `json:"octets"`
 	OctetsPS   uint64 `json:"octets_ps"`
@@ -538,9 +573,12 @@ func ulimit() {
 }
 
 /**********************************************************************/
-func prometheus(g *Stats) []byte {
+func prometheus(g *Stats, start time.Time) []byte {
+
+	uptime := time.Now().Sub(start) / time.Second
 
 	m := []string{
+		"# TYPE vc5_uptime counter",
 		"# TYPE vc5_average_latency_ns gauge",
 		"# TYPE vc5_packets_per_second gauge",
 		"# TYPE vc5_current_connections gauge",
@@ -572,6 +610,7 @@ func prometheus(g *Stats) []byte {
 		return 0
 	}
 
+	m = append(m, fmt.Sprintf("vc5_uptime %d", uptime))
 	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
 	m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.PacketsPS))
 	m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
@@ -620,7 +659,17 @@ type BGPPool struct {
 	wait chan bool
 }
 
-func NewBGPPool(rid [4]byte, asn uint16, hold uint16, communities []uint32, peer []string) *BGPPool {
+func NewBGPPool(ip net.IP, asn uint16, hold uint16, communities []uint32, peer []string) *BGPPool {
+	var rid IP4
+
+	foo := ip.To4()
+
+	if foo == nil {
+		log.Fatal("oops")
+	}
+
+	copy(rid[:], foo[:])
+
 	b := &BGPPool{nlri: make(chan map[IP4]bool), peer: make(chan []string), wait: make(chan bool)}
 	go b.manage(rid, asn, hold, communities)
 	b.peer <- peer
@@ -791,13 +840,3 @@ const (
 	LOG_INFO    = 6 /* informational */
 	LOG_DEBUG   = 7 /* debug-level messages */
 )
-
-/*
-	re := regexp.MustCompile("^screen")
-
-	term, ok := os.LookupEnv("TERM")
-
-	if !ok || !re.MatchString(term) {
-		log.Fatal("Must run under screen for now for safety")
-	}
-*/

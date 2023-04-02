@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -210,6 +211,14 @@ func (i IP4) IsNil() bool {
 	return false
 }
 
+func (m MAC) IsNil() bool {
+	var n MAC
+	if m == n {
+		return true
+	}
+	return false
+}
+
 func (i *IP4) IP() net.IP {
 	return net.IPv4(i[0], i[1], i[2], i[3])
 }
@@ -230,6 +239,26 @@ func (i *IP4) UnmarshalJSON(d []byte) error {
 		return nil
 	}
 	return errors.New("Badly formated IPv4 address: " + string(d))
+}
+
+func (m *MAC) UnmarshalJSON(d []byte) error {
+	l := len(d)
+	if l < 2 || d[0] != '"' || d[l-1] != '"' {
+		return errors.New("Badly formated MAC address: " + string(d))
+	}
+
+	mac, ok := parseMAC(string(d[1 : l-1]))
+
+	if ok {
+		m[0] = mac[0]
+		m[1] = mac[1]
+		m[2] = mac[2]
+		m[3] = mac[3]
+		m[4] = mac[4]
+		m[5] = mac[5]
+		return nil
+	}
+	return errors.New("Badly formated MAC address: " + string(d))
 }
 
 func (t Thruple) MarshalJSON() ([]byte, error) {
@@ -295,6 +324,7 @@ func (m MAC) MarshalJSON() ([]byte, error) {
 func ParseIP(ip string) ([4]byte, bool) {
 	return parseIP(ip)
 }
+
 func parseIP(ip string) ([4]byte, bool) {
 	var addr [4]byte
 	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
@@ -308,6 +338,27 @@ func parseIP(ip string) ([4]byte, bool) {
 			return addr, false
 		}
 		addr[n] = byte(a)
+	}
+	return addr, true
+}
+
+func parseMAC(s string) ([6]byte, bool) {
+	var addr [6]byte
+	re := regexp.MustCompile(`^([0-9a-f]{2}):([0-9a-f]{2}):([0-9a-f]{2}):([0-9a-f]{2}):([0-9a-f]{2}):([0-9a-f]{2})$`)
+	m := re.FindStringSubmatch(s)
+
+	if len(m) != 7 {
+		return addr, false
+	}
+
+	for n, _ := range addr {
+
+		b, err := hex.DecodeString(m[n+1])
+
+		if err != nil || len(b) != 1 {
+			return addr, false
+		}
+		addr[n] = b[0]
 	}
 	return addr, true
 }
@@ -369,6 +420,10 @@ func (i *NET) Net() (ip IP4) {
 	return
 }
 
+func (i *NET) NetMask() NET {
+	return NET{IP: i.Net(), Mask: i.Mask}
+}
+
 func (i *NET) IPNet() (ip net.IP, ipnet net.IPNet) {
 	ip = net.IPv4(i.IP[0], i.IP[1], i.IP[2], i.IP[3])
 	n := i.mask()
@@ -392,6 +447,27 @@ func (c *NET) UnmarshalJSON(data []byte) error {
 		return errors.New("Badly formed CIDR")
 	}
 
+	re2 := regexp.MustCompile(`^([^/]+)/([^/][^/][^/]+)$`)
+
+	m2 := re2.FindStringSubmatch(m[1])
+
+	if len(m2) == 3 {
+		ip, ok := parseIP(m2[1])
+
+		if !ok {
+			return errors.New("Badly formed NET IP")
+		}
+
+		mask, ok := parseIP(m2[2])
+		if !ok {
+			return errors.New("Badly formed NET mask")
+		}
+
+		c.IP = ip
+		c.Mask = mask
+		return nil
+	}
+
 	ip, ipn, err := net.ParseCIDR(m[1])
 
 	if err != nil {
@@ -413,6 +489,15 @@ func (c *NET) UnmarshalJSON(data []byte) error {
 	copy(c.IP[:], ip4[:])
 	copy(c.Mask[:], mask[:])
 
+	return nil
+}
+
+func (n *NET) Parse(s string) error {
+	m, err := Net(s)
+	if err != nil {
+		return err
+	}
+	*n = m
 	return nil
 }
 

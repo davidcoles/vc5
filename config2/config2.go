@@ -21,7 +21,7 @@ package config2
 import (
 	"encoding/json"
 	"errors"
-	//"fmt"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
@@ -64,10 +64,11 @@ type RHI struct {
 }
 
 type Conf struct {
-	VIPs  map[IP4]map[L4]Serv
-	VLANs map[uint16]NET
-	RHI   RHI
-	Learn uint16
+	VIPs      map[IP4]map[L4]Serv
+	VLANs     map[uint16]string
+	RHI       RHI
+	Learn     uint16
+	Webserver string
 }
 
 func (r *RIP) Checks() Checks {
@@ -78,6 +79,18 @@ func (r *RIP) Checks() Checks {
 	c.Syn = r.Syn
 	c.Dns = r.Dns
 	return c
+}
+
+func (c *Conf) Vlans() map[uint16]NET {
+	m := map[uint16]NET{}
+	for k, v := range c.VLANs {
+		fmt.Println("VLAN", k, v)
+		n, e := types.Net(v)
+		if e == nil {
+			m[k] = n
+		}
+	}
+	return m
 }
 
 type community uint32
@@ -210,44 +223,4 @@ func Load(file string) (*Conf, error) {
 	}
 
 	return c, nil
-}
-
-func (c *Conf) Reals() []IP4 {
-
-	real := map[IP4]bool{}
-
-	for _, l := range c.VIPs {
-		for _, s := range l {
-			for r, _ := range s.RIPs {
-				real[r] = false
-			}
-		}
-	}
-
-	var n []IP4
-	for k, _ := range real {
-		n = append(n, k)
-	}
-
-	return n
-}
-
-func (c *Conf) Nats() [][2]IP4 {
-
-	nat := map[[2]IP4]bool{}
-
-	for v, l := range c.VIPs {
-		for _, s := range l {
-			for r, _ := range s.RIPs {
-				nat[[2]IP4{v, r}] = false
-			}
-		}
-	}
-
-	var n [][2]IP4
-	for k, _ := range nat {
-		n = append(n, k)
-	}
-
-	return n
 }

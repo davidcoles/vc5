@@ -19,8 +19,9 @@
 package kernel
 
 import (
-	"encoding/json"
 	"fmt"
+	"net"
+	"sort"
 	"sync"
 	"time"
 
@@ -33,44 +34,73 @@ const (
 	B = true
 )
 
+type l4Service struct {
+	vip IP4
+	svc L4
+}
+
 type Counter struct {
 	Octets     uint64
 	Packets    uint64
 	Flows      uint64
 	Concurrent uint64
-	// globals ...
-	Latency uint64
-	DEFCON  uint8
+	Latency    uint64 // global only
+	DEFCON     uint8  // global only
 }
 
 type Balancer struct {
 	maps   *maps
-	report chan Report
-	stats  func() map[Target]Counter
+	checks chan Healthchecks
+	stats  map[Target]bool
+	conns  map[Target]bpf_active
+	mutex  sync.Mutex
+	logger types.Logger
+}
+
+func (m *maps) Balancer(c Healthchecks, l types.Logger) *Balancer {
+	b := &Balancer{maps: m, logger: l, checks: make(chan Healthchecks)}
+	go b.balancer()
+	b.checks <- c
+	return b
 }
 
 func (b *Balancer) Close() {
-	close(b.report)
+	close(b.checks)
 }
 
-func (b *Balancer) Configure(r Report) {
-	b.report <- r
+func (b *Balancer) Configure(r Healthchecks) {
+	b.checks <- r
 }
 
 func (b *Balancer) Stats() map[Target]Counter {
-	return b.stats()
-}
+	// local copies of stats to fill in
+	stats := map[Target]Counter{}
+	conns := map[Target]bpf_active{}
 
-func (m *maps) Balancer(c Report, l types.Logger) *Balancer {
-	report, stats := m.balancer(c, l)
-	return &Balancer{maps: m, report: report, stats: stats}
+	b.mutex.Lock()
+	for k, _ := range b.stats {
+		stats[k] = Counter{}
+	}
+	for k, v := range b.conns {
+		conns[k] = v
+	}
+	b.mutex.Unlock()
+
+	for k, _ := range stats {
+		var bc bpf_counter
+		vrrp := bpf_vrpp{vip: k.VIP, rip: k.RIP, port: htons(k.Port), protocol: k.Protocol}
+		b.maps.lookup_vrpp_counter(&vrrp, &bc)
+		stats[k] = Counter{Octets: bc.octets, Packets: bc.packets, Flows: bc.flows, Concurrent: uint64(conns[k].current)}
+	}
+
+	return stats
 }
 
 func (b *Balancer) Global() Counter {
 	var g bpf_global
 	b.maps.lookup_globals(&g)
 
-	var latency uint64
+	var latency uint64 = 500 // 500ns target value
 	if g.perf_packets > 0 {
 		latency = g.perf_timens / g.perf_packets
 	}
@@ -78,194 +108,189 @@ func (b *Balancer) Global() Counter {
 	return Counter{Octets: g.rx_octets, Packets: g.rx_packets, Flows: g.new_flows, Latency: latency, DEFCON: b.maps.defcon}
 }
 
-func (m *maps) balancer(c Report, l types.Logger) (chan Report, func() map[Target]Counter) {
+func (b *Balancer) balancer() {
 	FACILITY := "balancer"
 
-	var mu sync.Mutex
-	type l4Service struct {
-		vip IP4
-		svc L4
-	}
-
-	ch := make(chan Report)
-
-	stats := map[Target]bool{}       // list of stats to collect - not values!
-	conns := map[Target]bpf_active{} // current active connections cache
+	b.stats = map[Target]bool{} // list of stats to collect - not values!
+	b.conns = map[Target]bpf_active{}
 
 	done := make(chan bool)
+	defer close(done)
+	go b.connections(done)
 
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
+	state := map[l4Service]*be_state{}
+	vips := map[IP4]bool{}
 
-		var era uint8
+	for h := range b.checks {
 
-		for {
-			select {
-			case <-done:
-				return
+		b.logger.DEBUG(FACILITY, "Configuration update")
 
-			case <-ticker.C:
+		if false {
+			fmt.Println(h.JSON())
+		}
 
-				s := map[Target]bool{}
-				c := map[Target]bpf_active{}
+		services := map[l4Service]bool{}
+		targets := map[Target]bool{}
 
-				// grab a copy of stats that we're interested in
-				mu.Lock()
-				for k, v := range stats {
-					s[k] = v
-				}
-				mu.Unlock()
+		interfaces := scanifs()
+		for vlanid, prefix := range h.VLANs() {
+			iface, _ := interfaces[prefix]
 
-				era++
-				old := era%2 == 0
+			fmt.Println("!!!!!!!!!!!", vlanid, prefix, iface.index, iface.mac.String())
 
-				m.ERA(era) // write back new setting to kernel
+			_vlanid := uint32(vlanid)
+			_ifindex := uint32(iface.index)
 
-				// iterate over the selection reading counters at our leisure
-				for v, _ := range s {
-					var a bpf_active
-					vrrp := bpf_vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol}
-					m.lookup_vrpp_concurrent(old, &vrrp, &a)                 // lookup previous counter
-					m.update_vrpp_concurrent(old, &vrrp, nil, xdp.BPF_EXIST) // clear previous counter
+			xdp.BpfMapUpdateElem(b.maps.redirect_mac(), uP(&_vlanid), uP(&(iface.mac)), xdp.BPF_ANY)
+			xdp.BpfMapUpdateElem(b.maps.redirect_map(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
+			xdp.BpfMapUpdateElem(b.maps.redirect_map_hash(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
+		}
 
-					c[v] = a
-				}
+		for vip, virtual := range h.Virtual {
 
-				// write counters back to the visible copy
-				mu.Lock()
-				conns = c
-				mu.Unlock()
+			for l4, service := range virtual.Services {
+				b.update_backend_service(vip, l4, service, state)
+				b.create_counters(vip, l4, service.Reals, targets)
+				services[l4Service{vip: vip, svc: l4}] = true // add to log of active services
+			}
+
+			b.maps.update_vrpp_counter(&bpf_vrpp{vip: vip}, &bpf_counter{}, xdp.BPF_NOEXIST) // ICMP responder
+			vips[vip] = true
+		}
+
+		b.remove_stale_stats(targets)
+		b.remove_stale_l4(state, services)
+
+		for vip, _ := range vips {
+			if _, ok := h.Virtual[vip]; !ok {
+				fmt.Println(xdp.BpfMapDeleteElem(b.maps.vrpp_counter(), uP(&bpf_vrpp{vip: vip}))) // remove ICMP responder
+				delete(vips, vip)
 			}
 		}
-	}()
+	}
+}
 
-	get_stats := func() map[Target]Counter {
-		// local copies of stats to fil in
-		s := map[Target]Counter{}
-		c := map[Target]bpf_active{}
+func (b *Balancer) update_backend_service(vip IP4, l4 L4, s Service, state map[l4Service]*be_state) {
+	l4service := l4Service{vip: vip, svc: l4}
 
-		mu.Lock()
-		for k, _ := range stats {
-			s[k] = Counter{}
+	bpf_reals := map[IP4]bpf_real{}
+	for ip, real := range s.Reals {
+		if real.Probe.Passed {
+			bpf_reals[ip] = bpf_real{rip: ip, mac: real.MAC, vid: htons(real.VID)}
 		}
-		for k, v := range conns {
-			c[k] = v
-		}
-		mu.Unlock()
-
-		for k, _ := range s {
-			var b bpf_counter
-			vrrp := bpf_vrpp{vip: k.VIP, rip: k.RIP, port: htons(k.Port), protocol: k.Protocol}
-			m.lookup_vrpp_counter(&vrrp, &b)
-			s[k] = Counter{Octets: b.octets, Packets: b.packets, Flows: b.flows, Concurrent: uint64(c[k].current)}
-		}
-
-		return s
 	}
 
-	go func() {
-		defer close(done)
-		state := map[l4Service]*be_state{}
-		vips := map[IP4]bool{}
+	key := &bpf_service{vip: vip, port: l4.NP(), protocol: l4.PN()}
+	val := &be_state{
+		fallback:  s.FallbackOn,
+		sticky:    s.Sticky,
+		bpf_reals: bpf_reals,
+	}
 
-		for report := range ch {
+	if s.Leastconns {
+		val.leastconns = s.LeastconnsIP
+		val.weight = s.LeastconnsWeight
+	}
 
-			l.CRIT(FACILITY, "Configuration update")
+	now := time.Now()
 
-			if false {
-				js, err := json.MarshalIndent(&report, "", "  ")
-				fmt.Println(string(js), err)
+	if update_backend(val, state[l4service], b.logger) {
+		b.maps.update_service_backend(key, &(val.bpf_backend), xdp.BPF_ANY)
+		b.logger.INFO("balancer", "Updated table for ", vip, l4, val.bpf_backend.hash[:32], time.Now().Sub(now))
+		state[l4service] = val
+	}
+
+}
+
+func (b *Balancer) connections(done chan bool) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	var era uint8
+
+	for {
+		select {
+		case <-done:
+			return
+
+		case <-ticker.C:
+
+			stats := map[Target]bool{}
+			conns := map[Target]bpf_active{}
+
+			// grab a copy of the list stats that we're interested in
+			b.mutex.Lock()
+			for k, v := range b.stats {
+				stats[k] = v
+			}
+			b.mutex.Unlock()
+
+			era++
+			old := era%2 == 0
+
+			b.maps.ERA(era) // write back new setting to kernel
+
+			// iterate over the selection reading counters at our leisure
+			for v, _ := range stats {
+				var a bpf_active
+				vrrp := bpf_vrpp{vip: v.VIP, rip: v.RIP, port: htons(v.Port), protocol: v.Protocol}
+				b.maps.lookup_vrpp_concurrent(old, &vrrp, &a)                 // lookup previous counter
+				b.maps.update_vrpp_concurrent(old, &vrrp, nil, xdp.BPF_EXIST) // clear previous counter
+
+				conns[v] = a
 			}
 
-			services := map[l4Service]bool{}
-			targets := map[Target]bool{}
-
-			for vip, virtual := range report.Virtual {
-
-				vr := bpf_vrpp{vip: vip} // all oher fields 0
-				m.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
-				vips[vip] = true
-
-				for l4, s := range virtual.Services {
-
-					l4service := l4Service{vip: vip, svc: l4}
-
-					services[l4service] = true
-
-					// update what stats we should harvest
-					//for ip, _ := range s.Probe {
-					for ip, _ := range s.Reals {
-						if be, ok := report.Backends[ip]; ok {
-							vr := bpf_vrpp{vip: vip, rip: be.IP, port: htons(l4.Port), protocol: l4.Protocol.Number()}
-							m.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
-							m.update_vrpp_concurrent(A, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
-							m.update_vrpp_concurrent(B, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
-							b := Target{VIP: vip, RIP: be.IP, Port: l4.Port, Protocol: l4.Protocol.Number()}
-							mu.Lock()
-							stats[b] = true
-							targets[b] = true
-							mu.Unlock()
-						}
-					}
-
-					health := map[IP4]bool{}
-					//for i, p := range s.Probe {
-					//	health[i] = p.Passed
-					//}
-					for ip, real := range s.Reals {
-						health[ip] = real.Probe.Passed
-					}
-
-					key := &bpf_service{vip: vip, port: l4.NP(), protocol: l4.PN()}
-					val := &be_state{fallback: s.FallbackOn, sticky: s.Sticky, leastconns: s.LeastconnsIP, weight: s.LeastconnsWeight, health: health, backend: report.Backends}
-
-					now := time.Now()
-
-					if update_backend(val, state[l4service], l) {
-						m.update_service_backend(key, &(val.bpf_backend), xdp.BPF_ANY)
-						l.INFO("balancer", "Updated table for ", vip, l4, val.bpf_backend.hash[:32], time.Now().Sub(now))
-						state[l4service] = val
-					}
-				}
-			}
-
-			// remove stale backend stats (vip/rip/port/protocol)
-			for k, _ := range stats {
-				if _, ok := targets[k]; !ok {
-					vr := bpf_vrpp{vip: k.VIP, rip: k.RIP, port: htons(k.Port), protocol: k.Protocol}
-					xdp.BpfMapDeleteElem(m.vrpp_counter(), uP(&vr))
-					xdp.BpfMapDeleteElem(m.vrpp_concurrent(), uP(&vr))
-					vr.pad = 1
-					xdp.BpfMapDeleteElem(m.vrpp_concurrent(), uP(&vr))
-					mu.Lock()
-					delete(stats, k)
-					mu.Unlock()
-				}
-			}
-
-			// remove stale l4 service backend records (vip/port/protocol)
-			for k, _ := range state {
-				if _, ok := services[k]; !ok {
-					s := bpf_service{vip: k.vip, port: k.svc.NP(), protocol: k.svc.PN()}
-					xdp.BpfMapDeleteElem(m.service_backend(), uP(&s))
-					delete(state, k)
-				}
-			}
-
-			// remove stale vip records (vip/port/protocol)
-			for vip, _ := range vips {
-				if _, ok := report.Virtual[vip]; !ok {
-					s := bpf_service{vip: vip}
-					xdp.BpfMapDeleteElem(m.service_backend(), uP(&s))
-				}
-				delete(vips, vip) // ??? block above?
-			}
+			// write counters back to the visible copy
+			b.mutex.Lock()
+			b.conns = conns
+			b.mutex.Unlock()
 		}
-	}()
+	}
+}
 
-	ch <- c
-	return ch, get_stats
+func (b *Balancer) create_counters(vip IP4, l4 L4, reals map[IP4]Real, targets map[Target]bool) {
+	m := b.maps
+
+	// ensure that backend counters for the service exists
+	for rip, _ := range reals {
+		vr := bpf_vrpp{vip: vip, rip: rip, port: htons(l4.Port), protocol: l4.Protocol.Number()}
+		m.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
+		m.update_vrpp_concurrent(A, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist
+		m.update_vrpp_concurrent(B, &vr, nil, xdp.BPF_NOEXIST) // create 'B' counter if it does not exist
+		target := Target{VIP: vip, RIP: rip, Port: l4.Port, Protocol: l4.Protocol.Number()}
+
+		b.mutex.Lock()
+		b.stats[target] = true
+		targets[target] = true
+		b.mutex.Unlock()
+	}
+}
+
+func (b *Balancer) remove_stale_stats(targets map[Target]bool) {
+	m := b.maps
+
+	for k, _ := range b.stats {
+		if _, ok := targets[k]; !ok {
+			vr := bpf_vrpp{vip: k.VIP, rip: k.RIP, port: htons(k.Port), protocol: k.Protocol}
+			xdp.BpfMapDeleteElem(m.vrpp_counter(), uP(&vr))
+			xdp.BpfMapDeleteElem(m.vrpp_concurrent(), uP(&vr))
+			vr.pad = 1
+			xdp.BpfMapDeleteElem(m.vrpp_concurrent(), uP(&vr))
+
+			b.mutex.Lock()
+			delete(b.stats, k)
+			b.mutex.Unlock()
+		}
+	}
+}
+func (b *Balancer) remove_stale_l4(state map[l4Service]*be_state, services map[l4Service]bool) {
+	for k, _ := range state {
+		if _, ok := services[k]; !ok {
+			s := bpf_service{vip: k.vip, port: k.svc.NP(), protocol: k.svc.PN()}
+			xdp.BpfMapDeleteElem(b.maps.service_backend(), uP(&s))
+			delete(state, k)
+		}
+	}
 }
 
 func update_backend(curr, prev *be_state, l types.Logger) bool {
@@ -287,35 +312,145 @@ func update_backend(curr, prev *be_state, l types.Logger) bool {
 		flag[0] |= F_FALLBACK
 	}
 
-	m := map[[4]byte]uint8{}
+	mapper := map[[4]byte]uint8{}
+	list := IP4s(make([]IP4, 0, len(curr.bpf_reals)))
 
-	for k, v := range curr.health {
-		if b, ok := curr.backend[k]; ok && v {
-			m[b.IP] = uint8(b.Idx)
+	for ip, _ := range curr.bpf_reals {
+		list = append(list, ip)
+	}
+
+	sort.Sort(list)
+
+	var real [256]bpf_real
+
+	for i, ip := range list {
+		if i < 255 {
+			idx := uint8(i) + 1
+			mapper[ip] = idx
+			real[idx] = curr.bpf_reals[ip]
+		} else {
+			fmt.Println("more than 255 hosts", ip, i)
 		}
 	}
 
-	curr.bpf_backend.hash, _ = maglev8192(m)
-
-	for _, b := range curr.backend {
-		curr.bpf_backend.real[b.Idx] = bpf_real{rip: b.IP, mac: b.MAC, vid: htons(b.VID)}
-	}
+	curr.bpf_backend.real = real
+	curr.bpf_backend.hash, _ = maglev8192(mapper)
 
 	var rip IP4
 	var mac MAC
-	var vid uint16
+	var vid [2]byte
 
 	if !curr.leastconns.IsNil() {
-		//fmt.Println(curr.leastconns)
-		if b, ok := curr.backend[curr.leastconns]; ok {
+		if n, ok := mapper[curr.leastconns]; ok {
 			flag[1] = curr.weight
-			rip = b.IP
-			mac = b.MAC
-			vid = b.VID
+			rip = real[n].rip
+			mac = real[n].mac
+			vid = real[n].vid
 		}
 	}
 
-	curr.bpf_backend.real[0] = bpf_real{rip: rip, mac: mac, vid: htons(vid), flag: flag}
+	curr.bpf_backend.real[0] = bpf_real{rip: rip, mac: mac, vid: vid, flag: flag}
 
 	return true
+}
+
+type be_state struct {
+	sticky      bool
+	fallback    bool
+	leastconns  IP4
+	weight      uint8
+	bpf_backend bpf_backend
+	bpf_reals   map[IP4]bpf_real
+}
+
+func bpf_reals_differ(a, b map[IP4]bpf_real) bool {
+	for k, v := range a {
+		if x, ok := b[k]; !ok {
+			return true
+		} else {
+			if x != v {
+				return true
+			}
+		}
+	}
+
+	for k, _ := range b {
+		if _, ok := a[k]; !ok {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (curr *be_state) diff(prev *be_state) bool {
+
+	if prev == nil {
+		return true
+	}
+
+	if curr.sticky != prev.sticky ||
+		curr.fallback != prev.fallback ||
+		curr.leastconns != prev.leastconns ||
+		curr.weight != prev.weight {
+		return true
+	}
+
+	if bpf_reals_differ(curr.bpf_reals, prev.bpf_reals) {
+		return true
+	}
+
+	return false
+}
+
+type iface struct {
+	index int
+	mac   MAC
+}
+
+func scanifs() (ret map[string]iface) {
+
+	ret = map[string]iface{}
+
+	ifaces, err := net.Interfaces()
+
+	if err != nil {
+		return
+	}
+
+	for _, i := range ifaces {
+
+		if i.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		if i.Flags&net.FlagUp == 0 {
+			continue
+		}
+
+		if i.Flags&net.FlagBroadcast == 0 {
+			continue
+		}
+
+		if len(i.HardwareAddr) != 6 {
+			continue
+		}
+
+		var mac MAC
+		copy(mac[:], i.HardwareAddr[:])
+
+		addr, err := i.Addrs()
+
+		if err == nil {
+			for _, a := range addr {
+				cidr := a.String()
+				ip, ipnet, err := net.ParseCIDR(cidr)
+				if err == nil && ip.To4() != nil {
+					ret[ipnet.String()] = iface{index: i.Index, mac: mac}
+				}
+			}
+		}
+	}
+
+	return
 }

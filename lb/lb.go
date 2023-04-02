@@ -2,6 +2,7 @@ package lb
 
 import (
 	//"fmt"
+	"errors"
 	"log"
 	"net"
 	"os/exec"
@@ -41,6 +42,7 @@ type LoadBalancer struct {
 	ReadinessLevel  uint8
 	KillSwitch      uint
 	Native          bool
+	MultiNIC        bool
 	Socket          string
 	NetnsCommand    []string
 	Interfaces      []string
@@ -80,7 +82,15 @@ func (lb *LoadBalancer) Update(hc *healthchecks.Healthchecks) {
 	lb.update <- hc
 }
 
-func (lb *LoadBalancer) Start(ip IP4, hc *healthchecks.Healthchecks) error {
+func (lb *LoadBalancer) Start(ipaddr net.IP, hc *healthchecks.Healthchecks) error {
+
+	ip4 := ipaddr.To4()
+
+	if ip4 == nil {
+		return errors.New("Not an IPv4 address")
+	}
+
+	ip := IP4{ip4[0], ip4[1], ip4[2], ip4[3]}
 
 	l := lb.Logger
 
@@ -146,13 +156,7 @@ func (lb *LoadBalancer) Start(ip IP4, hc *healthchecks.Healthchecks) error {
 		return err
 	}
 
-	mode := uint8(kernel.MODE_SIMPLE)
-
-	if hc.VLANMode {
-		mode = kernel.MODE_VLAN
-	}
-
-	lb.maps.MODE(mode)
+	lb.maps.MODE(lb.MultiNIC)
 
 	if lb.ReadinessLevel != 0 {
 		lb.DEFCON(lb.ReadinessLevel)
@@ -164,11 +168,33 @@ func (lb *LoadBalancer) Start(ip IP4, hc *healthchecks.Healthchecks) error {
 
 	go netns.Spawn(NAMESPACE, args...)
 
-	lb.nat = lb.maps.NAT(hc, ip, bondidx, bondmac, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac, l)
-	lb.monitor, lb.report = monitor.Monitor(hc, vc5bip, sock, lb.nat.ARP(), l)
+	lb.nat = &kernel.NAT{
+		Maps: lb.maps,
+
+		DefaultIP:     ip,
+		PhysicalMAC:   bondmac,
+		PhysicalIndex: bondidx,
+
+		VC5aIf: vc5aidx,
+		VC5aIP: vc5aip,
+		VC5bIP: vc5bip,
+
+		VC5aMAC: vc5amac,
+		VC5bMAC: vc5bmac,
+
+		Logger: l,
+	}
+
+	//var hc2 *healthchecks.Healthchecks
+	//lb.nat, hc2 = lb.maps.NAT(hc, ip, bondidx, bondmac, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac, l)
+
+	hc2 := lb.nat.NAT(hc)
+
+	lb.monitor, lb.report = monitor.Monitor(hc2, sock, l)
 	lb.balancer = lb.maps.Balancer(lb.report, l)
 
 	lb.update = make(chan *healthchecks.Healthchecks)
+
 	go lb.background()
 
 	if lb.KillSwitch > 0 {
@@ -185,29 +211,30 @@ func (lb *LoadBalancer) Start(ip IP4, hc *healthchecks.Healthchecks) error {
 }
 
 func (lb *LoadBalancer) background() {
-	defer func() {
-		lb.monitor.Close()
-		lb.nat.Close()
-		lb.balancer.Close()
+
+	go func() {
+		defer lb.balancer.Close()
+		for h := range lb.monitor.C {
+			log.Println("MONITOR update")
+			lb.mutex.Lock()
+			lb.report = *(h.DeepCopy())
+			lb.mutex.Unlock()
+			lb.balancer.Configure(h)
+		}
 	}()
 
-	for {
-		select {
-		case h, ok := <-lb.update: // reconfigure NAT and healthchecks
-			if !ok {
-				return
-			}
-			lb.mutex.Lock()
-			lb.nat.Configure(h)
+	go func() {
+		defer lb.monitor.Close()
+		for h := range lb.nat.C {
+			log.Println("NAT update")
 			lb.monitor.Update(h)
-			lb.mutex.Unlock()
-
-		case report := <-lb.monitor.C: // new config to apply to load balancer
-			lb.mutex.Lock()
-			lb.report = report
-			lb.balancer.Configure(report)
-			lb.mutex.Unlock()
 		}
+	}()
+
+	defer lb.nat.Close()
+	for h := range lb.update {
+		log.Println("CONF update")
+		lb.nat.Configure(h)
 	}
 }
 
@@ -274,6 +301,6 @@ func (lb *LoadBalancer) LoadConf(file string, mynet NET) (*healthchecks.Healthch
 }
 */
 
-func (lb *LoadBalancer) Load(conf *config2.Conf, mynet NET) (*healthchecks.Healthchecks, error) {
-	return healthchecks.Load(mynet, conf)
+func (lb *LoadBalancer) Load(conf *config2.Conf) (*healthchecks.Healthchecks, error) {
+	return healthchecks.Load(conf)
 }

@@ -60,6 +60,33 @@ static __always_inline int equmac(unsigned char *a, unsigned char *b) {
 
 /**********************************************************************/
 
+struct natkey {
+    __be32 src_ip;
+    __be32 dst_ip;
+    __u8 src_mac[6];
+    __u8 dst_mac[6];
+};
+
+struct natval {
+    __u32 ifindex;
+    __be32 src_ip;
+    __be32 dst_ip;
+    __u16 vlan;
+    __u8 multi;
+    __u8 pad;    
+    __u8 src_mac[6];
+    __u8 dst_mac[6];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct natkey);
+    __type(value, struct natval);
+    __uint(max_entries, 65536);
+} nat SEC(".maps");
+
+/**********************************************************************/
+
 struct flow {
     __be32 src;
     __be32 dst;
@@ -85,39 +112,6 @@ struct {
 } flow_state SEC(".maps");
 
 /**********************************************************************/
-
-struct vipmac {
-    __be32 vip;
-    __u8 mac[6];
-};
-
-struct nat {
-    __be32 dstip;
-    __u8 dstmac[6];
-    __u8 srcmac[6];
-    __be32 srcip;
-    __u32 ifindex; // long bpf_redirect(u32 ifindex, u64 flags)
-    __u16 vid;
-    __u8 pad[2];
-    //__u16 pad;
-};
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, __u8[4]);
-    __type(value, struct nat);
-    __uint(max_entries, 1024);
-} nat_to_vip_mac SEC(".maps");
-
-struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, __u8[10]);
-    __type(value, struct nat);
-    __uint(max_entries, 1024);
-} vip_mac_to_nat SEC(".maps");
-
-/**********************************************************************/
-
 struct real {
     __be32 rip;
     __be16 vid;
@@ -229,7 +223,7 @@ struct setting {
     __u64 heartbeat;
     __u8 defcon;
     __u8 era;
-    __u8 mode;
+    __u8 multi;
 };
 
 struct {
@@ -240,13 +234,28 @@ struct {
 } settings SEC(".maps");
 
 
-// unused so far
 struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
     __type(key, __u32);
     __type(value, __u32);
     __uint(max_entries, 32);
 } redirect_map SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_DEVMAP_HASH);
+    __type(key, __u32);
+    __type(value, __u32);
+    __uint(max_entries, 4096);
+} redirect_map_hash SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, __u8[6]);
+    __uint(max_entries, 4096);
+} redirect_mac SEC(".maps");
+
+
 
 #define DEFCON0 0 // LB disabled - XDP_PASS all traffic
 #define DEFCON1 1 // only global stats (and periodic check for settings) and stateless forwarding done
@@ -255,17 +264,12 @@ struct {
 #define DEFCON4 4 // flow state table written to
 #define DEFCON5 5 // flow concurrency?
 
-#define MODE_DISABLED 0
-#define MODE_SIMPLE   1
-#define MODE_VLAN     2
-#define MODE_MULTINIC 3
-
 #define CONTINUE XDP_ABORTED
 
 const int ZERO = 0;
 __u8 DEFCON = DEFCON5;
 //__u8 ERA = 0;
-__u8 MODE = MODE_DISABLED;
+__u8 MULTINIC = 0;
 
 
 static __always_inline void write_perf(struct global *global, __u64 start) {
@@ -425,13 +429,19 @@ static __always_inline int handle_icmp(struct ethhdr *eth, struct iphdr *ipv4, s
     return XDP_TX;
 }
 
-
 static __always_inline int redirect_packet(struct ethhdr *eth, char *dst, __u32 map_entry, struct global *global, __u64 start)
 {
-    maccpy(eth->h_source, eth->h_dest);
+    __u8 *mac = bpf_map_lookup_elem(&redirect_mac, &map_entry);
+    
+    if(!mac || nulmac(mac)) {
+    	return XDP_DROP;
+    }
+
+    maccpy(eth->h_source, mac);
     maccpy(eth->h_dest, dst);
     write_perf(global, start);
-    return bpf_redirect_map(&redirect_map, map_entry, XDP_DROP);
+    return bpf_redirect_map(&redirect_map_hash, map_entry, XDP_DROP);
+    //return bpf_redirect_map(&redirect_map, map_entry, XDP_DROP);
 }
 
 static __always_inline int bounce_packet(struct ethhdr *eth, char *dst, struct global *global, __u64 start)
@@ -477,6 +487,8 @@ static __always_inline int existing_tcp_flow(struct ethhdr *eth, struct vlan_hdr
 		goto invalid_state; // unlikely that we should echo packet back to source on l2lb
 	    }
 
+
+	    /*
 	    if(tag != NULL) {
 
 		if(MODE != MODE_VLAN)
@@ -493,6 +505,20 @@ static __always_inline int existing_tcp_flow(struct ethhdr *eth, struct vlan_hdr
 		if(state->vid != 0)
 		    goto invalid_state; // VLAN ID not allowed if in non-VLAN mode
 	    }
+	    */
+
+	    if(state->vid == 0) {
+		// traffic should be untagged - drop if not
+		if(tag != NULL) goto drop_packet;
+	    } else {
+		// traffic should be tagged (or multi-nic mode - not yet implemented)
+		if(tag == NULL) {
+		    if(!MULTINIC)
+			goto drop_packet;
+		} else {
+		    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
+		}
+	    }
 
 	    if(ip_decrease_ttl(ipv4) == 0) {
 		goto drop_packet;
@@ -504,8 +530,8 @@ static __always_inline int existing_tcp_flow(struct ethhdr *eth, struct vlan_hdr
 	    
 	    be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, octets, 0);
 	    
-	    if(MODE == MODE_MULTINIC)
-		return redirect_packet(eth, state->mac, state->vid, global, start);
+	    if(MULTINIC)
+		return redirect_packet(eth, state->mac, bpf_ntohs(state->vid), global, start);
 
 	    return bounce_packet(eth, state->mac, global, start);
 	    
@@ -551,7 +577,9 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 
 	if(equmac(real->mac, eth->h_source))
 	    goto invalid_real; // unlikely we would want to echo packet back to source on an l2lb
-	
+
+
+	/*
 	if(tag != NULL) {
 	    if(MODE != MODE_VLAN)
 		goto invalid_real; // We shouldn't be receiving tagged traffic in non-vlan mode
@@ -568,6 +596,19 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	    if(real->vid != 0)
 		goto invalid_real; // VLAN ID not allowed if in non-VLAN mode
 	}
+	*/
+
+	if(real->vid == 0) {
+	    // traffic should be untagged - drop if not
+	    if(tag != NULL) goto drop_packet;
+	} else {
+	    if(tag == NULL) {
+		if(!MULTINIC)
+		    goto drop_packet;
+	    } else {
+		tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (real->vid & bpf_htons(0x0fff));
+	    }
+	}
 
 	if(ipv4->protocol == IPPROTO_TCP) { // maybe don't store initial SYN?
 	    if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
@@ -575,8 +616,8 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	}
 
 
-	if(MODE == MODE_MULTINIC)
-	    return redirect_packet(eth, real->mac, real->vid, global, start);
+	if(MULTINIC)
+	    return redirect_packet(eth, real->mac, bpf_ntohs(real->vid), global, start);
 	
 	return bounce_packet(eth, real->mac, global, start);
 
@@ -596,8 +637,119 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 }
 
 
+static __always_inline void recompute(struct iphdr *iph, struct tcphdr *tcp, struct udphdr *udp, struct icmphdr *icmp, void *data_end)
+{    
+    iph->check = 0;
+    if(tcp) {
+	iph->check = ipv4_checksum((void *) iph, (void *)tcp);
+	tcp->check = 0;
+	tcp->check = l4_checksum(iph, tcp, data_end);
+    } else if (udp) {
+	iph->check = ipv4_checksum((void *) iph, (void *)udp);
+	udp->check = 0;
+	udp->check = l4_checksum(iph, udp, data_end);
+    } else if (icmp) {
+	iph->check = ipv4_checksum((void *) iph, (void *)icmp);	
+    } else {
+        iph->check = ipv4_checksum((void *) iph, (void *)(iph+ sizeof(struct iphdr)));
+    }
+}
+
+static __always_inline int nat_packet(struct xdp_md *ctx, struct ethhdr *eth, struct vlan_hdr *tag, struct iphdr *iph, struct tcphdr *tcp, struct udphdr *udp, struct icmphdr *icmp, void *data_end, int outgoing)
+{
+    struct natkey nkey = {.src_ip = iph->saddr, .dst_ip = iph->daddr };
+    maccpy(nkey.src_mac, eth->h_source);
+    maccpy(nkey.dst_mac, eth->h_dest);    
+    
+    struct natval *nval = bpf_map_lookup_elem(&nat, &nkey);
+    
+    if(!nval) {
+	if(outgoing) {
+	    iph->ttl = 1; // prevent packets from running amok
+	    recompute(iph, tcp, udp, icmp, data_end);
+	}
+	return CONTINUE;
+    }
+
+    if(nulmac(nval->src_mac) || nulmac(nval->dst_mac) || nval->src_ip == 0 || nval->dst_ip == 0) {
+	return XDP_DROP;
+    }
+    
+    if(iph->ttl == 1) {
+	return XDP_DROP;
+    }
+    
+    iph->saddr = nval->src_ip;
+    iph->daddr = nval->dst_ip;
+    maccpy(eth->h_source, nval->src_mac);
+    maccpy(eth->h_dest, nval->dst_mac);
+    
+    iph->ttl = 1; // prevent packets from running amok
+    
+    if(tcp != NULL) {
+	iph->check = 0;
+	iph->check = ipv4_checksum((void *) iph, tcp);
+	tcp->check = 0;
+	tcp->check = l4_checksum(iph, tcp, data_end);
+    } else if(udp != NULL) {
+	iph->check = 0;
+	iph->check = ipv4_checksum((void *) iph, udp);
+	udp->check = 0;
+	udp->check = l4_checksum(iph, udp, data_end);
+    } else if (icmp) {
+	iph->check = 0;
+	iph->check = ipv4_checksum((void *) iph, (void *)icmp);	
+    } else {
+	return XDP_DROP;
+    }
+    
+    /*
+    if(outgoing) {
+	if(MODE == MODE_VLAN) {
+	    if(nval->vlan != 0 && vlan_tag_push(ctx, eth, nval->vlan) < 0)
+		return XDP_DROP;
+	}
+    } else {
+	if(tag != NULL && vlan_tag_pop(ctx, eth) < 0)
+	    return XDP_DROP;
+    }
+    */
+
+
+    if(outgoing) {
+	//if(nval->vlan != 0) {
+	//    if(!(nval->multi)) {
+	//	if(vlan_tag_push(ctx, eth, nval->vlan) < 0) return XDP_DROP;
+	//    }
+	//}
+    } else {
+	if(tag != NULL && vlan_tag_pop(ctx, eth) < 0) return XDP_DROP;
+    }
+        
+    if(nval->ifindex == 0)
+	return XDP_DROP;
+    
+    return bpf_redirect(nval->ifindex, 0);
+}
+
+static __always_inline int outgoing_nat(struct xdp_md *ctx, struct ethhdr *eth, struct vlan_hdr *tag, struct iphdr *iph, struct tcphdr *tcp, struct udphdr *udp, struct icmphdr *icmp, void *data_end)
+    
+{
+    return nat_packet(ctx, eth, tag, iph, tcp, udp, icmp, data_end, 1);
+}
+
+static __always_inline int returning_nat(struct xdp_md *ctx, struct ethhdr *eth, struct vlan_hdr *tag, struct iphdr *iph, struct tcphdr *tcp, struct udphdr *udp, struct icmphdr *icmp, void *data_end)
+    
+{
+    return nat_packet(ctx, eth, tag, iph, tcp, udp, icmp, data_end, 0);
+}
+
+
+
+
+
 //SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
-int xdp_main_func(struct xdp_md *ctx, int natting)
+int xdp_main_func(struct xdp_md *ctx, int outgoing)
 {
     void *data_end = (void *)(long)ctx->data_end;
     void *data     = (void *)(long)ctx->data;
@@ -630,10 +782,9 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     
     struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO);
     if(setting) {
-	//ERA = setting->era;
 	era = setting->era;	
 	DEFCON = setting->defcon;
-	MODE = setting->mode;
+	MULTINIC = setting->multi;
 	
 	switch(DEFCON) {
 	case DEFCON0:
@@ -647,21 +798,11 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	    DEFCON = DEFCON5;
 	    break;
 	}
-
-	switch(MODE) {
-	case MODE_DISABLED:
-	case MODE_SIMPLE:
-	case MODE_VLAN:
-	case MODE_MULTINIC:
-	    break;
-	default:
-	    MODE = MODE_DISABLED;
-	}
 	
 	// check for heartbeat from userland - disable LB functionality
 	__u64 hb = setting->heartbeat;	
 	if(hb == 0) {
-	    setting->heartbeat = start + (60l * SECOND_NS); // 5m
+	    setting->heartbeat = start + (60l * SECOND_NS);
 	} else if(hb < start) {
 	    return XDP_PASS;
 	}
@@ -694,7 +835,6 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	eth_proto = tag->h_vlan_encapsulated_proto;
     }
     
-
     /* We don't deal wih any traffic that is not IPv4 */
     if (eth_proto != bpf_htons(ETH_P_IP))
 	return XDP_PASS;
@@ -713,7 +853,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     // ignore evil bit and DF, drop if more fragments flag set, or fragent offset is not 0
     if ((ipv4->frag_off & bpf_htons(0x3fff)) != 0)
 	return XDP_DROP;
-
+    
     struct tcphdr *tcp = NULL;
     struct udphdr *udp = NULL;
     struct icmphdr *icmp = NULL;
@@ -729,7 +869,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	if (data + nh_off > data_end)
 	    return XDP_DROP;
 	
-	if (natting == 2)
+	if (outgoing)
 	    goto OUTGOING_PROBE;
 	
 	// respond to pings to configured VIPs
@@ -746,7 +886,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	if (data + nh_off > data_end)
 	    return XDP_DROP;
 	
-	if (natting == 2)
+	if (outgoing)
 	    goto OUTGOING_PROBE;
 	
 	switch((action = new_flow(eth, tag, ipv4, udp->source, udp->dest, global, start, octets))) {
@@ -770,7 +910,7 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
 	if (data + nh_off > data_end)
 	    return XDP_DROP;
     
-	if (natting == 2)
+	if (outgoing)
 	    goto OUTGOING_PROBE;
 	
 	switch((action = existing_tcp_flow(eth, tag, ipv4, tcp, global, start, octets, era))) {
@@ -804,121 +944,24 @@ int xdp_main_func(struct xdp_md *ctx, int natting)
     }
     
     //CHECK_RETURNING_PROBE:
-    struct nat *vme = NULL;
-    struct vipmac vm = {.vip = ipv4->saddr};
-    maccpy(vm.mac, eth->h_source);
-    
-    if ((vme = bpf_map_lookup_elem(&vip_mac_to_nat, &vm))) {
-
-	if(ipv4->ttl == 1) {
-	    return XDP_DROP;
-	}
-	
-	ipv4->saddr = vme->srcip; // (nat addr)
-	ipv4->daddr = vme->dstip; // (vc5vb addr)
-	maccpy(eth->h_dest, vme->dstmac);
-
-	ipv4->ttl = 1; // just in case ...
-
-	if(tcp != NULL) {
-	    ipv4->check = 0;
-	    ipv4->check = ipv4_checksum((void *) ipv4, tcp);
-	    tcp->check = 0;
-	    tcp->check = l4_checksum(ipv4, tcp, data_end);
-	} else if(udp != NULL) {
-	    ipv4->check = 0;
-	    ipv4->check = ipv4_checksum((void *) ipv4, udp);
-	    udp->check = 0;
-	    udp->check = l4_checksum(ipv4, udp, data_end);
-	} else if (icmp != NULL) {
-	    ipv4->check = 0;
-	    ipv4->check = ipv4_checksum((void *) ipv4, icmp);	
-	} else {
-	    return XDP_DROP;
-	}
-	
-	/* if probe reply was received on a VLAN then remove the tag - if that fails then drop it */
-	if(tag != NULL && vlan_tag_pop(ctx, eth) < 0)
-	    return XDP_DROP;
-	
-	if(vme->ifindex == 0)
-	    return XDP_DROP;
-	
-	return bpf_redirect(vme->ifindex, 0);
+    switch(action = returning_nat(ctx, eth, tag, ipv4, tcp, udp, icmp, data_end)) {
+    case CONTINUE:
+	break;
+    default:
+	return action;
     }
-  
+    
     return XDP_PASS;
 
-
+    
  OUTGOING_PROBE:
-
-    //if(ipv4->ttl == 1) {
-    //	return XDP_DROP;
-    //}
-    
-    vme = bpf_map_lookup_elem(&nat_to_vip_mac, &(ipv4->daddr));
-    if (vme) {
-
-	ipv4->saddr = vme->srcip;
-	ipv4->daddr = vme->dstip;
-	maccpy(eth->h_source, vme->srcmac);
-	maccpy(eth->h_dest, vme->dstmac);
-
-	ipv4->ttl = 1; // prevent packets from running amok
-	
-	if(tcp != NULL) {
-	    ipv4->check = 0;
-	    ipv4->check = ipv4_checksum((void *) ipv4, tcp);
-	    tcp->check = 0;
-	    tcp->check = l4_checksum(ipv4, tcp, data_end);
-	} else if(udp != NULL) {
-	    ipv4->check = 0;
-	    ipv4->check = ipv4_checksum((void *) ipv4, udp);
-	    udp->check = 0;
-	    udp->check = l4_checksum(ipv4, udp, data_end);
-	} else if (icmp) {
-	    ipv4->check = 0;
-	    ipv4->check = ipv4_checksum((void *) ipv4, (void *)icmp);	
-	} else {
-	    return XDP_DROP;
-	}
-	
-	if(MODE == MODE_VLAN) {
-	    if(vme->vid != 0 && vlan_tag_push(ctx, eth, vme->vid) < 0)
-		return XDP_DROP;
-	}
-	
-	if(MODE == MODE_MULTINIC)
-	    return bpf_redirect_map(&redirect_map, vme->vid, XDP_DROP);
-	
-	if(vme->ifindex == 0)
-	    return XDP_DROP;
-	
-	return bpf_redirect(vme->ifindex, 0);
+    switch(action = outgoing_nat(ctx, eth, tag, ipv4, tcp, udp, icmp, data_end)) {
+    case CONTINUE:
+	break;
+    default:
+	return action;
     }
 
-
-    // this also gets executed on vc5b for returning packets, seemingly.
-    ipv4->ttl = 1;
-    
-    if(tcp) {
-	ipv4->check = 0;
-	ipv4->check = ipv4_checksum((void *) ipv4, (void *)tcp);
-	tcp->check = 0;
-	tcp->check = l4_checksum(ipv4, tcp, data_end);
-    } else if (udp) {
-	ipv4->check = 0;
-	ipv4->check = ipv4_checksum((void *) ipv4, (void *)udp);
-	udp->check = 0;
-	udp->check = l4_checksum(ipv4, udp, data_end);
-    } else if (icmp) {
-	ipv4->check = 0;
-	ipv4->check = ipv4_checksum((void *) ipv4, (void *)icmp);	
-    } else {
-	ipv4->check = 0;
-        ipv4->check = ipv4_checksum((void *) ipv4, (void *)( tcp+ sizeof(struct iphdr)));
-    }
-    
     return XDP_PASS;
 }
 
@@ -928,14 +971,9 @@ SEC("incoming") int xdp_main_func0(struct xdp_md *ctx)
     return xdp_main_func(ctx, 0);
 }
 
-//SEC("pass") int xdp_main_func1(struct xdp_md *ctx)
-//{
-//    return XDP_PASS;
-//}
-
 SEC("outgoing") int xdp_main_func2(struct xdp_md *ctx)
 {
-    return xdp_main_func(ctx, 2);   
+    return xdp_main_func(ctx, 1);   
 }
 
 char _license[] SEC("license") = "GPL";
