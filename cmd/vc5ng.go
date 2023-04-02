@@ -29,7 +29,6 @@
 
 // MAC address uniqueness check
 
-// override webserver port from config
 // clean up tag/multinic
 // add warning for untagged hosts
 

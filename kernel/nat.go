@@ -163,7 +163,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 				}
 			}
 
-			fmt.Println("XXXXX", vip, rip, vlanid, vlanip)
+			n.Logger.DEBUG("vip/rip/vlanid/vlanip", vip, rip, vlanid, vlanip)
 
 			var multi uint8
 
@@ -188,7 +188,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 
 			if realmac.IsNil() {
 				// write the out map for hosts with no arp to catch (and drop) on the way out, but don't put return map in
-				n.Logger.CRIT("nat", fmt.Sprintln("VIP/RIP has no ARP entry", vip, rip, realmac))
+				n.Logger.CRIT("nat", "VIP/RIP has no ARP entry", vip, rip, realmac)
 				continue
 			}
 
@@ -479,20 +479,4 @@ func vlan_ip(prefix string) (nul IP4, idx int, mac MAC, fail bool) {
 	}
 
 	return
-}
-
-func redirect_map_hash(maps *Maps, new, old map[uint16]int) {
-	for k, v := range new {
-		x := uint32(k)
-		i := uint32(v)
-
-		fmt.Println("NNNNNNNNNNN", k, v)
-		xdp.BpfMapUpdateElem(maps.redirect_map_hash(), uP(&x), uP(&i), xdp.BPF_ANY)
-	}
-
-	//for k, _ := range old {
-	//	if _, ok := new[k]; !ok {
-	//		xdp.BpfMapDeleteElem(maps.redirect_map_hash(), uP(&k))
-	//	}
-	//}
 }

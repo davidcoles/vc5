@@ -136,7 +136,7 @@ func (b *Balancer) balancer() {
 		for vlanid, prefix := range h.VLANs() {
 			iface, _ := interfaces[prefix]
 
-			fmt.Println("!!!!!!!!!!!", vlanid, prefix, iface.index, iface.mac.String())
+			b.logger.DEBUG("Writing redirect map", vlanid, prefix, iface.mac.String(), iface.index)
 
 			_vlanid := uint32(vlanid)
 			_ifindex := uint32(iface.index)
