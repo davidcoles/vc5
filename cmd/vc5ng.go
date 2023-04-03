@@ -87,7 +87,8 @@ func main() {
 	ulimit()
 
 	if *sock != "" {
-		signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
+		//signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
+		signal.Ignore(syscall.SIGHUP)
 		vc5.NetnsServer(*sock)
 		return
 	}
@@ -182,23 +183,17 @@ func main() {
 	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
 
 	sig := make(chan os.Signal)
-	//signal.Notify(sig, os.Interrupt, syscall.SIGQUIT, syscall.SIGINT)
-	signal.Notify(sig)
+	//signal.Notify(sig, os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
+	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGQUIT)
+	//signal.Notify(sig)  // alll
 
 	go func() {
 		for {
 			s := <-sig
 			switch s {
-			case syscall.SIGURG:
-			case syscall.SIGCHLD:
-			case syscall.SIGWINCH:
-			default:
-				lb.DEFCON(0)
-				lb.Close()
-				time.Sleep(1 * time.Second)
-				os.Remove(temp.Name())
-				log.Fatal("EXITING ", s)
 			case syscall.SIGQUIT:
+				fallthrough
+			case syscall.SIGUSR2:
 				log.Println("RELOAD")
 				time.Sleep(1 * time.Second)
 

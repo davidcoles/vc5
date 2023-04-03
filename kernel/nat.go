@@ -93,14 +93,13 @@ type natkey struct {
 }
 
 type natval struct {
-	ifindex uint32 //__u32 ifindex;
-	src_ip  IP4    //__be32 src_ip;
-	dst_ip  IP4    //__be32 dst_ip;
-	vlan    uint16 //__u16 vlan;
-	multi   byte   //__u8 multi;
-	_pad    byte   //__u8 _pad];
-	src_mac MAC    //__u8 src_mac[6];
-	dst_mac MAC    //__u8 dst_mac[6];
+	ifindex uint32  //__u32 ifindex;
+	src_ip  IP4     //__be32 src_ip;
+	dst_ip  IP4     //__be32 dst_ip;
+	vlan    uint16  //__u16 vlan;
+	_pad    [2]byte //__u8 _pad];
+	src_mac MAC     //__u8 src_mac[6];
+	dst_mac MAC     //__u8 dst_mac[6];
 }
 
 func (n *natkey) String() string {
@@ -165,21 +164,14 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 
 			n.Logger.DEBUG("vip/rip/vlanid/vlanip", vip, rip, vlanid, vlanip)
 
-			var multi uint8
-
-			//if n.MultiNIC {
-			//physmac = MAC{0x00, 0x50, 0x56, 0x90, 0xad, 0x24}
-			//physif = 21
-			multi = 1
 			if vlanid != 0 {
 				physmac = ifmacs[vlanid]
 				physif = uint32(redirect[vlanid])
 			}
-			//}
 
 			// outgoing probes
 			key := natkey{src_ip: vc5bip, src_mac: vc5bmac, dst_ip: nat, dst_mac: vc5amac}
-			val := natval{src_ip: vlanip, src_mac: physmac, dst_ip: vip, dst_mac: realmac, ifindex: physif, vlan: vlanid, multi: multi}
+			val := natval{src_ip: vlanip, src_mac: physmac, dst_ip: vip, dst_mac: realmac, ifindex: physif, vlan: vlanid}
 			n.Logger.DEBUG("nat", "Outgoing map", key.String(), val.String())
 
 			table[key] = true

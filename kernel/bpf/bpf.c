@@ -72,8 +72,7 @@ struct natval {
     __be32 src_ip;
     __be32 dst_ip;
     __u16 vlan;
-    __u8 multi;
-    __u8 pad;    
+    __u8 pad[2];
     __u8 src_mac[6];
     __u8 dst_mac[6];
 };
@@ -703,25 +702,7 @@ static __always_inline int nat_packet(struct xdp_md *ctx, struct ethhdr *eth, st
 	return XDP_DROP;
     }
     
-    /*
     if(outgoing) {
-	if(MODE == MODE_VLAN) {
-	    if(nval->vlan != 0 && vlan_tag_push(ctx, eth, nval->vlan) < 0)
-		return XDP_DROP;
-	}
-    } else {
-	if(tag != NULL && vlan_tag_pop(ctx, eth) < 0)
-	    return XDP_DROP;
-    }
-    */
-
-
-    if(outgoing) {
-	//if(nval->vlan != 0) {
-	//    if(!(nval->multi)) {
-	//	if(vlan_tag_push(ctx, eth, nval->vlan) < 0) return XDP_DROP;
-	//    }
-	//}
     } else {
 	if(tag != NULL && vlan_tag_pop(ctx, eth) < 0) return XDP_DROP;
     }
