@@ -102,8 +102,6 @@ type Healthchecks struct {
 	Virtual map[IP4]Virtual `json:",omitempty"`
 	_VID    map[IP4]uint16  `json:",omitempty"`
 	VLAN    map[uint16]string
-	//VLANMode bool // get rid of this
-	//Redirect map[uint16]int32 `json:",omitempty"`
 }
 
 func Load(c *config2.Conf) (*Healthchecks, error) {
@@ -122,13 +120,6 @@ func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error
 	var hc Healthchecks
 
 	hc.Virtual = map[IP4]Virtual{}
-	hc._VID = map[IP4]uint16{}
-
-	//hc.VLANMode = len(c.Vlans()) > 0
-
-	//if old != nil && old.VLANMode != hc.VLANMode {
-	//	return nil, errors.New("VLAN mode has changed")
-	//}
 
 	hc.VLAN = c.VLANs
 
@@ -158,33 +149,33 @@ func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error
 		hc.Virtual[vip] = v
 	}
 
-	//if !hc.VLANMode {
-	//	for be, _ := range hc.RIPs() {
-	//		hc._VID[be] = 0
-	//	}
-	//} else {
-	// Determine which VLAN ID to use for each backend
-	for be, _ := range hc.RIPs() {
-		if ok, vid := findvlan2(hc.VLAN, be); ok {
-			hc._VID[be] = vid
+	hc.buildvid()
+
+	return &hc, nil
+}
+
+func (h *Healthchecks) buildvid() {
+
+	h._VID = map[IP4]uint16{}
+
+	// determine which VLAN to use for each rip
+	for be, _ := range h.RIPs() {
+		if ok, vid := findvlan2(h.VLAN, be); ok {
+			h._VID[be] = vid
 		} else {
-			hc._VID[be] = 0
-			//return nil, errors.New(fmt.Sprint("No VLAN for", be))
+			h._VID[be] = 0
 		}
 	}
-	//}
 
 	// write vlan id to each rip entry in services
-	for _, v := range hc.Virtual {
+	for _, v := range h.Virtual {
 		for _, s := range v.Services {
 			for rip, real := range s.Reals {
-				real.VID = hc._VID[rip]
+				real.VID = h._VID[rip]
 				s.Reals[rip] = real
 			}
 		}
 	}
-
-	return &hc, nil
 }
 
 /**********************************************************************/
@@ -224,40 +215,14 @@ func (h *Healthchecks) DeepCopy() *Healthchecks {
 		panic(err)
 	}
 
+	n.buildvid()
+
 	return &n
 }
 
 func (h *Healthchecks) JSON() string {
 	j, _ := json.MarshalIndent(h, "", "  ")
 	return string(j)
-}
-
-func (h *Healthchecks) xDeepCopy() *Healthchecks {
-	var n Healthchecks
-
-	n = *h
-
-	n.Virtual = map[IP4]Virtual{}
-
-	for vip, v := range h.Virtual {
-
-		v2 := v
-		v2.Services = map[L4]Service{}
-		n.Virtual[vip] = v2
-
-		for l4, s := range v.Services {
-
-			s2 := s
-			s2.Reals = map[IP4]Real{}
-			v2.Services[l4] = s2
-
-			for rip, r := range s.Reals {
-				s2.Reals[rip] = r
-			}
-		}
-	}
-
-	return &n
 }
 
 func (h *Healthchecks) RIPs() map[IP4]IP4 {

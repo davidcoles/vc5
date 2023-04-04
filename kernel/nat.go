@@ -21,7 +21,7 @@ package kernel
 import (
 	"errors"
 	"fmt"
-	"log"
+	//"log"
 	"net"
 	"time"
 
@@ -51,22 +51,24 @@ type NAT struct {
 	maps  *maps
 }
 
-func (n *NAT) NAT(h *Healthchecks) *Healthchecks {
+func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 	n.C = make(chan *Healthchecks)
 	n.in = make(chan *Healthchecks)
 
 	n.pings = map[IP4]chan bool{}
 	n.maps = n.Maps
 
-	natMap, err := nats(nil, h.Tuples())
+	icmp := ICMP()
 
-	if err != nil {
-		panic(err)
+	if icmp == nil {
+		return nil, errors.New("ICMP failed")
 	}
 
-	go n.nat(h, natMap)
+	natMap := nats(nil, h.Tuples())
 
-	return copyhc(n.VC5aIP, h, natMap, arp()) // fill in MACs + NAT addresses
+	go n.nat(h, natMap, icmp)
+
+	return copyhc(n.VC5aIP, h, natMap, arp()), nil // fill in MACs + NAT addresses
 }
 
 func (n *NAT) Close() {
@@ -97,7 +99,7 @@ type natval struct {
 	src_ip  IP4     //__be32 src_ip;
 	dst_ip  IP4     //__be32 dst_ip;
 	vlan    uint16  //__u16 vlan;
-	_pad    [2]byte //__u8 _pad];
+	_pad    [2]byte //__u8 _pad[2];
 	src_mac MAC     //__u8 src_mac[6];
 	dst_mac MAC     //__u8 dst_mac[6];
 }
@@ -110,7 +112,7 @@ func (n *natval) String() string {
 	return fmt.Sprintf("{%s %s %s %s %d %d}", n.src_ip, n.dst_ip, n.src_mac, n.dst_mac, n.vlan, n.ifindex)
 }
 
-func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
+func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 	physip := n.DefaultIP
 
@@ -131,7 +133,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 	prev := map[natkey]bool{}
 	redirect := map[uint16]int{}
 
-	icmp := ICMP()
+	//icmp := ICMP()
 
 	vlans, redirect, ifmacs := resolve_vlans(h.VLANs(), n.Logger)
 	n.ping(h.RIPs(), icmp)  // start/stop pings
@@ -143,6 +145,10 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 		table := map[natkey]bool{}
 
 		for vr, idx := range natMap {
+			if idx == 0 {
+				continue
+			}
+
 			vip := vr[0]
 			rip := vr[1]
 			nat := nat_addr(idx, vc5bip)
@@ -162,7 +168,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 				}
 			}
 
-			n.Logger.DEBUG("vip/rip/vlanid/vlanip", vip, rip, vlanid, vlanip)
+			n.Logger.DEBUG("nat", "vip/rip/vlanid/vlanip", vip, rip, vlanid, vlanip)
 
 			if vlanid != 0 {
 				physmac = ifmacs[vlanid]
@@ -214,15 +220,11 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16) {
 			}
 
 			n.ping(h.RIPs(), icmp) // start/stop pings
+
 			vlans, redirect, ifmacs = resolve_vlans(h.VLANs(), n.Logger)
 
-			nm, err := nats(natMap, h.Tuples())
+			natMap = nats(natMap, h.Tuples())
 
-			if err != nil {
-				panic(err)
-			}
-
-			natMap = nm
 			time.Sleep(time.Second) // give ARP a second to resolve
 		}
 	}
@@ -246,20 +248,26 @@ func (n *NAT) ping(rips map[IP4]IP4, icmp *ICMPs) {
 	}
 }
 
-func nats(old map[[2]IP4]uint16, new map[[2]IP4]bool) (map[[2]IP4]uint16, error) {
+func nats(old map[[2]IP4]uint16, new map[[2]IP4]bool) map[[2]IP4]uint16 {
 
 	var n uint16
 	o := map[uint16][2]IP4{}
 	r := map[[2]IP4]uint16{}
 
+	tmp := map[[2]IP4]uint16{}
+
 	for k, v := range old {
 		if v == 0 {
-			return nil, errors.New("Zero NAT entry")
+			//return nil, errors.New("Zero NAT entry")
+			continue
 		}
 
 		if _, ok := o[v]; ok {
-			return nil, errors.New("Duplicate NAT entry")
+			//return nil, errors.New("Duplicate NAT entry")
+			continue
 		}
+
+		tmp[k] = v // sanitised
 
 		o[v] = k
 		//if _, ok := new[k]; ok {
@@ -268,13 +276,14 @@ func nats(old map[[2]IP4]uint16, new map[[2]IP4]bool) (map[[2]IP4]uint16, error)
 	}
 
 	for k, _ := range new {
-		if x, ok := old[k]; ok {
+		if x, ok := tmp[k]; ok {
 			r[k] = x
 		} else {
 		find:
 			n++
 			if n > 65000 {
-				return nil, errors.New("NAT mapping limit exceeded")
+				//return nil, errors.New("NAT mapping limit exceeded")
+				return r
 			}
 
 			if _, ok := o[n]; ok {
@@ -288,12 +297,13 @@ func nats(old map[[2]IP4]uint16, new map[[2]IP4]bool) (map[[2]IP4]uint16, error)
 	for k, v := range old {
 		if x, ok := r[k]; ok {
 			if v != x {
-				log.Fatal("NAT map entries differ", k, v, x)
+				//log.Fatal("NAT map entries differ", k, v, x)
+				panic(fmt.Sprint("NAT map entries differ: ", k, v, x))
 			}
 		}
 	}
 
-	return r, nil
+	return r
 }
 
 func copyhc(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Healthchecks {
@@ -306,8 +316,8 @@ func copyhc(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Hea
 
 				n, ok := m[[2]IP4{vip, rip}]
 
-				if !ok {
-					log.Fatal("Missing NAT", vip, rip, m)
+				if !ok || n == 0 {
+					panic(fmt.Sprintf("NAT is 0: %s/%s", vip.String(), rip.String()))
 				}
 
 				r.NAT = nat_addr(n, ip)
@@ -374,7 +384,8 @@ func ICMP() *ICMPs {
 
 	c, err := net.ListenPacket("ip4:icmp", "")
 	if err != nil {
-		log.Fatalf("listen err, %s", err)
+		//log.Fatalf("listen err, %s", err)
+		return nil
 	}
 
 	icmp.submit = make(chan string, 1000)
@@ -392,7 +403,8 @@ func (s *ICMPs) probe(socket net.PacketConn) {
 		socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
 
 		if _, err := socket.WriteTo(EchoRequest(), &net.IPAddr{IP: net.ParseIP(target)}); err != nil {
-			log.Fatalf("WriteTo err, %s", err)
+			//log.Println("WriteTo err:", err)
+			// oops
 		}
 	}
 }

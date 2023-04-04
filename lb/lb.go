@@ -49,13 +49,12 @@ type LoadBalancer struct {
 	EgressInterface string
 	Logger          types.Logger
 
-	monitor  *monitor.Mon
 	balancer *kernel.Balancer
-	nat      *kernel.NAT
 	maps     *kernel.Maps
 	report   monitor.Report
-	update   chan *healthchecks.Healthchecks
 	mutex    sync.Mutex
+
+	update chan *healthchecks.Healthchecks
 }
 
 func (lb *LoadBalancer) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
@@ -168,7 +167,7 @@ func (lb *LoadBalancer) Start(ipaddr net.IP, hc *healthchecks.Healthchecks) erro
 
 	go netns.Spawn(NAMESPACE, args...)
 
-	lb.nat = &kernel.NAT{
+	nat := &kernel.NAT{
 		Maps: lb.maps,
 
 		DefaultIP:     ip,
@@ -185,17 +184,21 @@ func (lb *LoadBalancer) Start(ipaddr net.IP, hc *healthchecks.Healthchecks) erro
 		Logger: l,
 	}
 
-	//var hc2 *healthchecks.Healthchecks
-	//lb.nat, hc2 = lb.maps.NAT(hc, ip, bondidx, bondmac, vc5aidx, vc5aip, vc5bip, vc5amac, vc5bmac, l)
+	hc2, err := nat.NAT(hc)
 
-	hc2 := lb.nat.NAT(hc)
+	if err != nil {
+		return err
+	}
 
-	lb.monitor, lb.report = monitor.Monitor(hc2, sock, l)
+	monitor, report := monitor.Monitor(hc2, sock, l)
+	lb.report = report
+	//lb.monitor, lb.report = monitor.Monitor(hc2, sock, l)
+
 	lb.balancer = lb.maps.Balancer(lb.report, l)
 
 	lb.update = make(chan *healthchecks.Healthchecks)
 
-	go lb.background()
+	go lb.background(nat, monitor, lb.balancer)
 
 	if lb.KillSwitch > 0 {
 		// temporary auto kill switch
@@ -210,31 +213,31 @@ func (lb *LoadBalancer) Start(ipaddr net.IP, hc *healthchecks.Healthchecks) erro
 	return nil
 }
 
-func (lb *LoadBalancer) background() {
+func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balancer *kernel.Balancer) {
 
 	go func() {
-		defer lb.balancer.Close()
-		for h := range lb.monitor.C {
+		defer balancer.Close()
+		for h := range monitor.C {
 			log.Println("MONITOR update")
 			lb.mutex.Lock()
 			lb.report = *(h.DeepCopy())
 			lb.mutex.Unlock()
-			lb.balancer.Configure(h)
+			balancer.Configure(h)
 		}
 	}()
 
 	go func() {
-		defer lb.monitor.Close()
-		for h := range lb.nat.C {
+		defer monitor.Close()
+		for h := range nat.C {
 			log.Println("NAT update")
-			lb.monitor.Update(h)
+			monitor.Update(h)
 		}
 	}()
 
-	defer lb.nat.Close()
+	defer nat.Close()
 	for h := range lb.update {
 		log.Println("CONF update")
-		lb.nat.Configure(h)
+		nat.Configure(h)
 	}
 }
 

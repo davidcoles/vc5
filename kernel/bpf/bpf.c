@@ -659,9 +659,13 @@ static __always_inline int nat_packet(struct xdp_md *ctx, struct ethhdr *eth, st
     struct natkey nkey = {.src_ip = iph->saddr, .dst_ip = iph->daddr };
     maccpy(nkey.src_mac, eth->h_source);
     maccpy(nkey.dst_mac, eth->h_dest);    
+
+    if(nkey.src_ip == 0 || nkey.dst_ip == 0) {
+	return XDP_DROP;
+    }
     
     struct natval *nval = bpf_map_lookup_elem(&nat, &nkey);
-    
+
     if(!nval) {
 	if(outgoing) {
 	    iph->ttl = 1; // prevent packets from running amok
@@ -759,6 +763,8 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	}
     }
 
+    // ctx->ingress_ifindex;
+    
     __u8 era = 0;
     
     struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO);

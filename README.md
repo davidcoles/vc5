@@ -1,10 +1,13 @@
 # VC5
 
-A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
+A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load
+balancer (L4LB) for Linux using XDP/eBPF.
 
-This is very much a proof of concept at this stage - most everything is incomplete and poorly defined!
+This is very much a proof of concept at this stage - most everything
+is incomplete and poorly defined!
 
-If you think that this may be useful and have any questions/suggestions, feel free to contact me at vc5lb@proton.me
+If you think that this may be useful and have any
+questions/suggestions, feel free to contact me at vc5lb@proton.me
 
 ## Homepage
 
@@ -12,13 +15,22 @@ The code is hosted at GitHub, https://github.com/davidcoles/vc5
 
 Clone with `git clone https://github.com/davidcoles/vc5.git`
 
+## vc5ng
+
+NB: A new execuatble `vc5ng` has been added. The code for this is
+largely separate. This overcomes many of the resirctions with the
+original code and so will now replace it going forward. Some of the
+documentation and examples may not have been updated so please bear
+this in mind. If you have issues that you cannot resolve please
+contact me at the address above.
+
 ## About
 
 VC5 is a network load balancer designed to work as replacement for
 legacy hardware appliances. It allows a service with a Virtual IP
 address (VIP) to be distributed to a set of real servers. Real servers
-might run the service themselves or work as proxies for another layer
-of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
+might run the service themselves or acting as proxies for another
+layer of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
 offload). The VIP needs to be configured on a loopback device on real
 server, eg.: `ip a add 192.168.101.1/32 dev lo`
 
@@ -66,23 +78,24 @@ Run `make`. This will pull a copy of
 [libbpf](https://github.com/libbpf/libbpf), build the binary and
 transform the YAML config file to a more verbose JSON config format.
 
-Run the vc5 binary with arguments of the JSON file,
+Run the `vc5ng` binary with arguments of the JSON file,
 your IP address and network interface name, eg.:
 
-  `cmd/vc5 cmd/vc5.json 10.10.100.200 ens192`
+  `cmd/vc5ng cmd/vc5.json 10.10.100.200 ens192`
 
 If this doesn't bomb out then you should have a load balancer up and
-running. A virtual network device and net namespace will be created
-for performing NATted healthchecks to VIPs on the backend servers. A
-webserver (running on port 80 by default) will display logs,
-statistics and backend status. There is Prometheus metric endpoint for
-collecting statistics.
+running. A virtual network device and network namespace will be
+created for performing NATed healthchecks to VIPs on the backend
+servers. A webserver (running on port 80 by default) will display
+logs, statistics and backend status. There is Prometheus metric
+endpoint for collecting statistics.
 
 To dynamically alter the services running on the load balancer, change
 the YAML file appropriately and regenerate the JSON file (`make
-vc5.json`). Sending a HUP signal to the main process will cause it to
-reload the JSON configuration file and apply any changes. The new
-configuration will be reflected in the web console.
+vc5.json`). Sending a USR2 signal (or, for now SIGQUIT - Ctrl-\ in a
+terminal) to the main process will cause it to reload the JSON
+configuration file and apply any changes. The new configuration will
+be reflected in the web console.
 
 You can add static routing to forward traffic for a VIP to the load
 balancer, or configure BGP peers in the YAML file to have routes
@@ -117,32 +130,25 @@ protocol bgp loadbalancers {
 ```
 
 If you enable ECMP on your router/client ("merge paths on;" in BIRD's
-kernel protocol) then you can load balance traffic to multiple load
-balancers. VC5 uses multicast to share a flow state table so peers
+kernel protocol) then you can distribute traffic to multiple load
+balancers.
+
+VC5 uses multicast to share a flow state table so peers
 will learn about each other's connections and take over in the case of
-one load balancer going down.
-
-If you wish to run the driver in native mode, but it does not support
-XDP_REDIRECT then a slighly more involved network setup is needed at
-this stage. Run your physical interface in a bridge (see sample
-netplan config in bridge.yaml) and add the -n (native) -b (bridge
-mode) and -i (interface) flags to vc5 like so:
-
-  `cmd/vc5 -n -b -i br0 cmd/vc5.json 10.10.100.200 enp130s0f1`
+one load balancer going down. *NB: This is note enabled in `vc5ng` just yet!
 
 ## Operation
 
 There are two modes of operation, simple and VLAN based. In simple
 mode all hosts must be on the same subnet as the primary address of
 the load balancer. In VLAN mode (enabled by declaring entries under
-the "vlan" section), all server entries must match a VLAN/CIDR subnet
+the "vlan" section), server entries should match a VLAN/CIDR subnet
 entry. VLAN tagged interfaces need to be created in the OS and have an
-IP address assigned within the subnet, and the interface names must be
-of the (printf) form "vlan%d" (vlan2, vlan53, vlan1356, etc.).
+IP address assigned within the subnet.
 
 Traffic into the load balancer needs to be on a tagged VLAN (no
-pushing or popping of 802.1Q is done). The IP address specified on the
-command line will be used to bind the connection to BGP peers, so
+pushing or popping of 802.1Q is done - yet). The IP address specified on the
+command line will be used to bind the connection to BGP peers, and so
 should be on one of the VLAN tagged interfaces (with appropriate
 routing for BGP egress if the router is not on the same subnet,
 eg. route reflectors).
@@ -150,15 +156,14 @@ eg. route reflectors).
 Sample netplan and VC5 configurations are in the
 [examples/](examples/) directory.
 
-
-## vc5ng
-
-A new execuatble `vc5ng` has been added. The code for this is largely
-separate. It seems like the problem with not being able to use an Intel
-NIC in native mode with bpf_redirect has been overcome, so there is no
-need to set up a bridge and there is less code to deal with the two
-different modes of operation. BGP and stats reporting is more cleanly
-split out, so this should make for a more maintainable codebase.
+A Multi-NIC mode has been added (-m flag) to `vc5ng`. Subnets matching
+each (untagged) NIC should be declared with an arbitrary "VLAN ID" in
+the config file. The code will discover the IP address/interface
+bindings and use bpf_redirect() to forward packets out the correct
+interface. This makes it possible to have multiple VLANs supported on
+a VMWare virtual machine with multiple network interfaces - trunked
+VLANs are not easily supported on VMWare as there is an all-or-nothing
+approach, which may not be practical/desirable in a large installation.
 
 
 ## Performance

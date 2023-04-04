@@ -536,6 +536,10 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock stri
 
 func probes(nat IP4, socket string, checks Checks) (bool, string) {
 
+	if nat.IsNil() {
+		return false, "NAT address is nil"
+	}
+
 	for _, c := range checks.Http {
 		if !netns.Probe(socket, nat, "http", c) {
 			return false, "HTTP probe failed"
