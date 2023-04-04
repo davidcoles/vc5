@@ -18,7 +18,7 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 ## vc5ng
 
 NB: A new execuatble `vc5ng` has been added. The code for this is
-largely separate. This overcomes many of the resirctions with the
+largely separate. This overcomes many of the restrictions with the
 original code and so will now replace it going forward. Some of the
 documentation and examples may not have been updated so please bear
 this in mind. If you have issues that you cannot resolve please
@@ -29,18 +29,18 @@ contact me at the address above.
 VC5 is a network load balancer designed to work as replacement for
 legacy hardware appliances. It allows a service with a Virtual IP
 address (VIP) to be distributed to a set of real servers. Real servers
-might run the service themselves or acting as proxies for another
+might run the service themselves or act as proxies for another
 layer of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
 offload). The VIP needs to be configured on a loopback device on real
 server, eg.: `ip a add 192.168.101.1/32 dev lo`
 
 One server with a 10Gbit/s network interface should be capable of
-supporting a service of 100Gbit/s due to the asymmetric nature of most
-internet traffic. For smaller services a modest virtual machine or two
-will likely handle a few Gbit/s.
+supporting an HTTP service with 100Gbit/s egress bandwidth due to the
+asymmetric nature of most internet traffic. For smaller services a
+modest virtual machine or two will likely handle a few Gbit/s.
 
 If one instance is not sufficient then more servers may be added to
-horizontally scale capacity (or provide redundancy) using the ECMP
+horizontally scale capacity (and provide redundancy) using the ECMP
 feature of routing hardware. 802.3ad bonded interfaces and 802.1Q VLAN
 trunking is supported (see [examples/](examples/) directory).
 
