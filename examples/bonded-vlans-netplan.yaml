@@ -48,31 +48,3 @@ network:
       addresses: [192.168.5.200/24]
       accept-ra: no
       link-local: []
-
-
-
-# If you want to use native mode, but the the driver does not support
-# XDP_REDIRECT, then put your main interface on a bridge (see below)
-# and pass the -n, -b and -i flags to the script. This will XDP_PASS
-# returned probe packes, and the bridge will pass them to the virtual
-# interface
-
-# eg.: cmd/vc5 -n -b -i br0 cmd/vc5.json 192.168.2.200 enp3s4f0 enp3s4f1
-
-#  bridges:
-#    br0:
-#      interfaces: [bond0]
-#      parameters:
-#        stp: no
-#      accept-ra: no
-#      link-local: []
-#      dhcp4: false
-#      addresses:
-#        - 192.168.0.123/24
-#      gateway4: 192.168.0.1
-#      nameservers:
-#        addresses:
-#          - 1.1.1.1
-#          - 8.8.8.8
-#        search:
-#          - example.com

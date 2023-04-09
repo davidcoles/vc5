@@ -97,6 +97,12 @@ func main() {
 	myip := args[1]
 	peth := args[2:]
 
+	ip := net.ParseIP(myip)
+
+	if ip == nil {
+		log.Fatal("IP is nil")
+	}
+
 	conf, err := vc5.LoadConf(file)
 
 	if err != nil {
@@ -166,14 +172,8 @@ func main() {
 		Logger:          logger,
 	}
 
-	ip := net.ParseIP(myip)
-
-	if ip == nil {
-		log.Fatal("IP is nil")
-	}
-
 	//err = lb.Start(mynet.IP, hc)
-	err = lb.Start(ip, hc)
+	err = lb.Start(myip, hc)
 
 	if err != nil {
 		log.Fatal(err)

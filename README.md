@@ -37,11 +37,12 @@ server, eg.: `ip a add 192.168.101.1/32 dev lo`
 One server with a 10Gbit/s network interface should be capable of
 supporting an HTTP service with 100Gbit/s egress bandwidth due to the
 asymmetric nature of most internet traffic. For smaller services a
-modest virtual machine or two will likely handle a few Gbit/s.
+modest virtual machine or two will likely handle a service generating
+a few Gbit/s of traffic.
 
 If one instance is not sufficient then more servers may be added to
 horizontally scale capacity (and provide redundancy) using the ECMP
-feature of routing hardware. 802.3ad bonded interfaces and 802.1Q VLAN
+feature of routers. 802.3ad bonded interfaces and 802.1Q VLAN
 trunking is supported (see [examples/](examples/) directory).
 
 No kernel modules or complex setups are required, although for best
@@ -84,16 +85,16 @@ your IP address and network interface name, eg.:
   `cmd/vc5ng cmd/vc5.json 10.10.100.200 ens192`
 
 If this doesn't bomb out then you should have a load balancer up and
-running. A virtual network device and network namespace will be
+running. A virtual network device pair and network namespace will be
 created for performing NATed healthchecks to VIPs on the backend
 servers. A webserver (running on port 80 by default) will display
-logs, statistics and backend status. There is Prometheus metric
+logs, statistics and backend status. There is Prometheus metrics
 endpoint for collecting statistics.
 
 To dynamically alter the services running on the load balancer, change
 the YAML file appropriately and regenerate the JSON file (`make
-vc5.json`). Sending a USR2 signal (or, for now SIGQUIT - Ctrl-\ in a
-terminal) to the main process will cause it to reload the JSON
+cmd/vc5.json`). Sending a USR2 signal (or, for now, SIGQUIT - Ctrl-\
+in a terminal) to the main process will cause it to reload the JSON
 configuration file and apply any changes. The new configuration will
 be reflected in the web console.
 
@@ -102,10 +103,11 @@ balancer, or configure BGP peers in the YAML file to have routes
 automatically injected to your routing table when services are
 healthy.
 
-If you don't have a routed environment then you can test with a client
-machine on the same VLAN. Either add a static route on the client
-machine pointing to the load balancer, or run BIRD/Quagga on client
-and add the client's IP address to the BGP section of the YAML config.
+If you don't have control over your routers then you can test with a
+client machine on the same VLAN. Either add a static route on the
+client machine pointing to the load balancer, or run BIRD/Quagga on
+the client and add the client's IP address to the BGP section of the
+YAML config.
 
 Sample bird.conf snippet:
 
@@ -135,18 +137,22 @@ balancers.
 
 VC5 uses multicast to share a flow state table so peers
 will learn about each other's connections and take over in the case of
-one load balancer going down. *NB: This is note enabled in `vc5ng` just yet!
+one load balancer going down. *NB: This is not enabled in `vc5ng` just yet!
 
 ## Operation
 
-There are two modes of operation, simple and VLAN based. In simple
-mode all hosts must be on the same subnet as the primary address of
-the load balancer. In VLAN mode (enabled by declaring entries under
-the "vlan" section), server entries should match a VLAN/CIDR subnet
-entry. VLAN tagged interfaces need to be created in the OS and have an
-IP address assigned within the subnet.
+There are three modes of operation, simple, VLAN and multi-NIC
+based. In simple mode all hosts must be on the same subnet as the
+primary address of the load balancer. In VLAN mode (enabled by
+declaring entries under the "vlan" section), server entries should
+match a VLAN/CIDR subnet entry. VLAN tagged interfaces need to be
+created in the OS and have an IP address assigned within the
+subnet. In multi-NIC mode subnets are tagged in the same manner as
+VLANs, but bpf_redirect() is used to send traffic out of the
+appropriate interface (rather than changing the VLAN ID and using
+XDP_TX).
 
-Traffic into the load balancer needs to be on a tagged VLAN (no
+In VLAN mode, traffic into the load balancer needs to be on a tagged VLAN (no
 pushing or popping of 802.1Q is done - yet). The IP address specified on the
 command line will be used to bind the connection to BGP peers, and so
 should be on one of the VLAN tagged interfaces (with appropriate
@@ -166,22 +172,53 @@ VLANs are not easily supported on VMWare as there is an all-or-nothing
 approach, which may not be practical/desirable in a large installation.
 
 
+## Development
+
+Ultimately, it would be good to be able to use this as a library such
+that the frontend can be controlled by the user. The configuration
+could be generated from a dynamic source such as nodes that want to
+participate in a pool for a service subscribing to a ZooKeeper
+cluster, or pulled as JSON from an HTTP endpoint. A minimal code
+snippet for getting a loadbalancer up and running (after obtaining an
+initial config) could look like:
+
+```
+lb := &vc5.LoadBalancer{
+  Native:          true,
+  Socket:          "/run/vc5socket",
+  NetnsCommand:    []string{os.Args[0], "-s", "/run/vc5socket"},
+  Interfaces:      []string{"enp130s0f0", "enp130s0f1"},
+  EgressInterface: "bond0",
+}
+
+err = lb.Start("10.1.2.3", healthchecks)
+
+if err != nil {
+  log.Fatal(err)
+}
+```
+
+With subsequent configuration updates communicated with
+`lb.Update(healthchecks)`. Status and statistics can be obtained from
+the `lb` object.
+
+
 ## Performance
 
 This has mostly been tested using Icecast backend servers with clients
 pulling a mix of low and high bitrate streams (48kbps - 192kbps).
 
 It seems that a VMWare guest (4 core, 8GB) using the XDP generic
-driver will comfortably support 100K concurrent clients,
-380Mbps/700Kpps through the load balancer and 8Gbps of traffic from
-the backends directly to the clients.
+driver will support 100K concurrent clients, 380Mbps/700Kpps through
+the load balancer and 8Gbps of traffic from the backends directly to
+the clients.
 
-A server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6 physical
-cores and an Intel 10Gbps NIC (ixgbe driver) in native mode will
-support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic back
-to clients. This was at a load of ~25% on the CPU - clearly it can do
-significantly more than this, but resources for running more client
-and backend servers were not available at the time.
+A bare-metal server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6
+physical cores and an Intel 10Gbps NIC (ixgbe driver) in native mode
+will support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic
+back to clients. This was at a load of ~25% on the CPU - clearly it
+can do significantly more than this, but resources for running more
+client and backend servers were not available at the time.
 
 
 
@@ -208,6 +245,8 @@ and VC5 configurations).
 
 
 ## Notes
+
+My scribblings - likely not useful to anyone else ...
 
 https://wiki.nftables.org/wiki-nftables/index.php/Performing_Network_Address_Translation_(NAT)
 
@@ -237,22 +276,3 @@ Latencies - 120K clents virtual LB:
 https://yhbt.net/lore/xdp-newbies/CANLN0e5_HtYC1XQ=Z=JRLe-+3bTqoEWdbHJEGhbF7ZT=gz=ynQ@mail.gmail.com/T/
 
 
-Issue with ixgbe driver:
-
-(This may well be a misunderstanding on my part, but I can't get it to work, so ...)
-
-In native mode, packets from veth interface are not accepted by
-enp130s0f1 (or bond0/br0) if bpf_redirect used.
-
-Way around this is to put a bridge on the device/bond and add the veth
-device to the bridge. The packets, once rewritten, can be XDP_PASSed
-
-In bridge mode:
-
-Can't redirect packes to vlanNNN, so ALL probes must be passed to bridge.
-This means than any probes to VLANs must have 802.1Q header pushed on.
-
-In non-bridge mode:
-
-All probes to be bpf_rediercted to maind interface or vlanNNN.
-802.1Q headers must NOT be added.

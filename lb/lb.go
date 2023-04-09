@@ -81,7 +81,14 @@ func (lb *LoadBalancer) Update(hc *healthchecks.Healthchecks) {
 	lb.update <- hc
 }
 
-func (lb *LoadBalancer) Start(ipaddr net.IP, hc *healthchecks.Healthchecks) error {
+func (lb *LoadBalancer) Start(ipaddr_ string, hc *healthchecks.Healthchecks) error {
+
+	ipaddr := net.ParseIP(ipaddr_)
+
+	if ipaddr == nil {
+		//log.Fatal("IP is nil")
+		return errors.New("Invalid IP address")
+	}
 
 	ip4 := ipaddr.To4()
 
