@@ -41,8 +41,8 @@ modest virtual machine or two will likely handle a service generating
 a few Gbit/s of traffic.
 
 If one instance is not sufficient then more servers may be added to
-horizontally scale capacity (and provide redundancy) using the ECMP
-feature of routers. 802.3ad bonded interfaces and 802.1Q VLAN
+horizontally scale capacity (and provide redundancy) using your
+router's ECMP feature. 802.3ad bonded interfaces and 802.1Q VLAN
 trunking is supported (see [examples/](examples/) directory).
 
 No kernel modules or complex setups are required, although for best
@@ -141,16 +141,16 @@ one load balancer going down. *NB: This is not enabled in `vc5ng` just yet!
 
 ## Operation
 
-There are three modes of operation, simple, VLAN and multi-NIC
+There are three modes of operation, simple, VLAN, and multi-NIC
 based. In simple mode all hosts must be on the same subnet as the
 primary address of the load balancer. In VLAN mode (enabled by
-declaring entries under the "vlan" section), server entries should
-match a VLAN/CIDR subnet entry. VLAN tagged interfaces need to be
-created in the OS and have an IP address assigned within the
-subnet. In multi-NIC mode subnets are tagged in the same manner as
-VLANs, but bpf_redirect() is used to send traffic out of the
-appropriate interface (rather than changing the VLAN ID and using
-XDP_TX).
+declaring entries under the "vlans" section of the YAML/JSON config
+file), server entries should match a VLAN/CIDR subnet entry. VLAN
+tagged interfaces need to be created in the OS and have an IP address
+assigned within the subnet. In multi-NIC mode subnets are tagged in
+the same manner as VLANs, but bpf_redirect() is used to send traffic
+out of the appropriate interface (rather than changing the VLAN ID and
+using XDP_TX).
 
 In VLAN mode, traffic into the load balancer needs to be on a tagged VLAN (no
 pushing or popping of 802.1Q is done - yet). The IP address specified on the

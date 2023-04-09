@@ -69,6 +69,7 @@ distclean: clean
 
 tests:
 	cd maglev/ && go test -v
+	cd kernel/ && go test -v
 wc:
 	find bgp4 cmd config2 healthchecks kernel lb maglev monitor netns types xdp  -name \*.go | xargs wc
 	wc kernel/bpf/*.c

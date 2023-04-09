@@ -37,7 +37,6 @@ type NAT struct {
 	DefaultIP     IP4
 	PhysicalMAC   MAC
 	PhysicalIndex int
-	//MultiNIC      bool
 
 	VC5aIf int
 	VC5aIP IP4
@@ -121,19 +120,16 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 	vc5amac := n.VC5aMAC
 	vc5bmac := n.VC5bMAC
-	//physmac := n.PhysicalMAC
 
 	vethif := uint32(n.VC5aIf)
-	//physif := uint32(n.PhysicalIndex)
 
 	ticker := time.NewTicker(5 * time.Second) // fire quickly first time
 	defer ticker.Stop()
 	defer close(n.C)
+	defer icmp.Close()
 
 	prev := map[natkey]bool{}
 	redirect := map[uint16]int{}
-
-	//icmp := ICMP()
 
 	vlans, redirect, ifmacs := resolve_vlans(h.VLANs(), n.Logger)
 	n.ping(h.RIPs(), icmp)  // start/stop pings
@@ -235,7 +231,18 @@ func (n *NAT) ping(rips map[IP4]IP4, icmp *ICMPs) {
 	for k, _ := range rips {
 		if _, ok := n.pings[k]; !ok {
 			n.Logger.NOTICE("icmp", "Starting ping for", k)
-			n.pings[k] = ping(icmp, k)
+			//n.pings[k] = ping(icmp, k)
+			n.pings[k] = make(chan bool)
+			go func(done chan bool) {
+				for {
+					icmp.Ping(k.String())
+					select {
+					case <-time.After(10 * time.Second):
+					case <-done:
+						return
+					}
+				}
+			}(n.pings[k])
 		}
 	}
 
@@ -248,59 +255,53 @@ func (n *NAT) ping(rips map[IP4]IP4, icmp *ICMPs) {
 	}
 }
 
+func xping(icmp *ICMPs, ip IP4) chan bool {
+	// no need to receive a reply - this is only to populate the ARP cache
+	done := make(chan bool)
+	go func() {
+		for {
+			icmp.Ping(ip.String())
+			select {
+			case <-time.After(10 * time.Second):
+			case <-done:
+				return
+			}
+		}
+	}()
+	return done
+}
+
 func nats(old map[[2]IP4]uint16, new map[[2]IP4]bool) map[[2]IP4]uint16 {
 
-	var n uint16
-	o := map[uint16][2]IP4{}
 	r := map[[2]IP4]uint16{}
-
-	tmp := map[[2]IP4]uint16{}
+	o := map[uint16][2]IP4{}
 
 	for k, v := range old {
-		if v == 0 {
-			//return nil, errors.New("Zero NAT entry")
-			continue
+		if _, ok := new[k]; ok {
+			if _, exists := o[v]; !exists {
+				o[v] = k
+				r[k] = v
+			}
 		}
-
-		if _, ok := o[v]; ok {
-			//return nil, errors.New("Duplicate NAT entry")
-			continue
-		}
-
-		tmp[k] = v // sanitised
-
-		o[v] = k
-		//if _, ok := new[k]; ok {
-		//	o[v] = k
-		//}
 	}
 
+	var n uint16
 	for k, _ := range new {
-		if x, ok := tmp[k]; ok {
-			r[k] = x
-		} else {
-		find:
-			n++
-			if n > 65000 {
-				//return nil, errors.New("NAT mapping limit exceeded")
-				return r
-			}
-
-			if _, ok := o[n]; ok {
-				goto find
-			}
-
-			r[k] = n
+		if _, ok := r[k]; ok {
+			continue
 		}
-	}
 
-	for k, v := range old {
-		if x, ok := r[k]; ok {
-			if v != x {
-				//log.Fatal("NAT map entries differ", k, v, x)
-				panic(fmt.Sprint("NAT map entries differ: ", k, v, x))
-			}
+	find:
+		n++
+		if n > 65000 {
+			return r
 		}
+
+		if _, ok := o[n]; ok {
+			goto find
+		}
+
+		r[k] = n
 	}
 
 	return r
@@ -331,92 +332,6 @@ func copyhc(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Hea
 
 	return new
 }
-
-/**********************************************************************/
-func ping(icmp *ICMPs, ip IP4) chan bool {
-	// no need to receive a reply - this is only to populate the ARP cache
-	done := make(chan bool)
-	go func() {
-		for {
-			icmp.Ping(ip.String())
-			select {
-			case <-time.After(10 * time.Second):
-			case <-done:
-				return
-			}
-		}
-	}()
-	return done
-}
-
-/**********************************************************************/
-
-func EchoRequest() []byte {
-
-	var csum uint32
-	wb := make([]byte, 8)
-
-	wb[0] = 8
-	wb[1] = 0
-
-	for n := 0; n < 8; n += 2 {
-		csum += uint32(uint16(wb[n])<<8 | uint16(wb[n+1]))
-	}
-
-	var cs uint16
-
-	cs = uint16(csum>>16) + uint16(csum&0xffff)
-	cs = ^cs
-
-	wb[2] = byte(cs >> 8)
-	wb[3] = byte(cs & 0xff)
-
-	return wb
-}
-
-type ICMPs struct {
-	submit chan string
-}
-
-func ICMP() *ICMPs {
-
-	var icmp ICMPs
-
-	c, err := net.ListenPacket("ip4:icmp", "")
-	if err != nil {
-		//log.Fatalf("listen err, %s", err)
-		return nil
-	}
-
-	icmp.submit = make(chan string, 1000)
-	go icmp.probe(c)
-
-	return &icmp
-}
-
-func (s *ICMPs) probe(socket net.PacketConn) {
-
-	defer socket.Close()
-
-	for target := range s.submit {
-
-		socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
-
-		if _, err := socket.WriteTo(EchoRequest(), &net.IPAddr{IP: net.ParseIP(target)}); err != nil {
-			//log.Println("WriteTo err:", err)
-			// oops
-		}
-	}
-}
-
-func (s *ICMPs) Ping(target string) {
-	select {
-	case s.submit <- target:
-	default:
-	}
-}
-
-/**********************************************************************/
 
 func resolve_vlans(vlans map[uint16]string, logger types.Logger) (map[uint16]IP4, map[uint16]int, map[uint16]MAC) {
 	ips := map[uint16]IP4{}

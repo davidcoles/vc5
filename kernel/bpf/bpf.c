@@ -237,7 +237,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
     __type(key, __u32);
     __type(value, __u32);
-    __uint(max_entries, 32);
+    __uint(max_entries, 4096);
 } redirect_map SEC(".maps");
 
 struct {
