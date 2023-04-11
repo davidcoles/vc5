@@ -180,7 +180,7 @@ func main() {
 	}
 
 	//pool := NewBGPPool(mynet.IP, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
-	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
+	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers, conf.RHI.Listen)
 
 	sig := make(chan os.Signal)
 	//signal.Notify(sig, os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
@@ -653,8 +653,17 @@ type BGPPool struct {
 	wait chan bool
 }
 
-func NewBGPPool(ip net.IP, asn uint16, hold uint16, communities []uint32, peer []string) *BGPPool {
+func NewBGPPool(ip net.IP, asn uint16, hold uint16, communities []uint32, peer []string, listen bool) *BGPPool {
 	var rid IP4
+
+	if listen {
+		go func() {
+			for {
+				bgpListen()
+				time.Sleep(60 * time.Second)
+			}
+		}()
+	}
 
 	foo := ip.To4()
 
@@ -691,6 +700,33 @@ func diff(a, b map[IP4]bool) bool {
 		}
 	}
 	return false
+}
+
+func bgpListen() {
+	l, err := net.Listen("tcp", ":179")
+	if err != nil {
+		//logs.NOTICE("BGP4 listen failed", err)
+		return
+	}
+
+	//logs.WARNING("Listening:", l)
+
+	defer l.Close()
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			//logs.INFO("BGP4 connection failed", err)
+		} else {
+			go func(c net.Conn) {
+				//logs.WARNING("Accepted conn:", c)
+				defer c.Close()
+				time.Sleep(time.Minute)
+				//logs.WARNING("Quitting", c)
+			}(conn)
+		}
+	}
 }
 
 func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32) {

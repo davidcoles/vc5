@@ -57,10 +57,11 @@ type Serv struct {
 }
 
 type RHI struct {
-	AS_Number    uint16
-	Hold_Time    uint16
-	Peers        []string
+	AS_Number    uint16      `json:"as_number"`
+	Hold_Time    uint16      `json:"hold_time"`
+	Peers        []string    `json:"peers"`
 	Communities_ []community `json:"communities,omitempty"`
+	Listen       bool        `json:"listen"`
 }
 
 type Conf struct {
