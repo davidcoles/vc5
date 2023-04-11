@@ -63,7 +63,7 @@ func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 		return nil, errors.New("ICMP failed")
 	}
 
-	natMap := nats(nil, h.Tuples())
+	natMap := nat_index(h.Tuples(), nil)
 
 	go n.nat(h, natMap, icmp)
 
@@ -219,7 +219,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 			vlans, redirect, ifmacs = resolve_vlans(h.VLANs(), n.Logger)
 
-			natMap = nats(natMap, h.Tuples())
+			natMap = nat_index(h.Tuples(), natMap)
 
 			time.Sleep(time.Second) // give ARP a second to resolve
 		}
@@ -231,18 +231,19 @@ func (n *NAT) ping(rips map[IP4]IP4, icmp *ICMPs) {
 	for k, _ := range rips {
 		if _, ok := n.pings[k]; !ok {
 			n.Logger.NOTICE("icmp", "Starting ping for", k)
-			//n.pings[k] = ping(icmp, k)
 			n.pings[k] = make(chan bool)
-			go func(done chan bool) {
+			go func(ip string, done chan bool) {
+				ticker := time.NewTicker(10 * time.Second)
+				defer ticker.Stop()
 				for {
-					icmp.Ping(k.String())
+					icmp.Ping(ip)
 					select {
-					case <-time.After(10 * time.Second):
+					case <-ticker.C:
 					case <-done:
 						return
 					}
 				}
-			}(n.pings[k])
+			}(k.String(), n.pings[k])
 		}
 	}
 
@@ -255,56 +256,40 @@ func (n *NAT) ping(rips map[IP4]IP4, icmp *ICMPs) {
 	}
 }
 
-func xping(icmp *ICMPs, ip IP4) chan bool {
-	// no need to receive a reply - this is only to populate the ARP cache
-	done := make(chan bool)
-	go func() {
-		for {
-			icmp.Ping(ip.String())
-			select {
-			case <-time.After(10 * time.Second):
-			case <-done:
-				return
-			}
-		}
-	}()
-	return done
-}
+func nat_index(tuples map[[2]IP4]bool, previous map[[2]IP4]uint16) (mapping map[[2]IP4]uint16) {
 
-func nats(old map[[2]IP4]uint16, new map[[2]IP4]bool) map[[2]IP4]uint16 {
+	mapping = map[[2]IP4]uint16{}
+	inverse := map[uint16][2]IP4{}
 
-	r := map[[2]IP4]uint16{}
-	o := map[uint16][2]IP4{}
-
-	for k, v := range old {
-		if _, ok := new[k]; ok {
-			if _, exists := o[v]; !exists {
-				o[v] = k
-				r[k] = v
+	for k, v := range previous {
+		if _, ok := tuples[k]; ok {
+			if _, exists := inverse[v]; !exists {
+				inverse[v] = k
+				mapping[k] = v
 			}
 		}
 	}
 
 	var n uint16
-	for k, _ := range new {
-		if _, ok := r[k]; ok {
+	for k, _ := range tuples {
+		if _, ok := mapping[k]; ok {
 			continue
 		}
 
 	find:
 		n++
 		if n > 65000 {
-			return r
+			return
 		}
 
-		if _, ok := o[n]; ok {
+		if _, ok := inverse[n]; ok {
 			goto find
 		}
 
-		r[k] = n
+		mapping[k] = n
 	}
 
-	return r
+	return
 }
 
 func copyhc(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Healthchecks {
