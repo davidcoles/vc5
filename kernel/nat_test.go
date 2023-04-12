@@ -5,8 +5,8 @@ import (
 )
 
 func viprip(x, y int) (IP4, IP4) {
-	vip := nat_addr(uint16(x), IP4{192, 168, 0, 0})
-	rip := nat_addr(uint16(y), IP4{10, 255, 0, 0})
+	vip := natAddress(uint16(x), IP4{192, 168, 0, 0})
+	rip := natAddress(uint16(y), IP4{10, 255, 0, 0})
 	return vip, rip
 }
 
@@ -21,7 +21,7 @@ func TestNAT(t *testing.T) {
 		}
 	}
 
-	natmap1 := nat_index(tuples, nil)
+	natmap1 := natIndex(tuples, nil)
 
 	if len(natmap1) != 65000 {
 		t.Error("natmap1 != 65000 ", len(natmap1))
@@ -30,7 +30,7 @@ func TestNAT(t *testing.T) {
 	vip, rip := viprip(261, 261)
 	tuples[[2]IP4{vip, rip}] = true
 
-	natmap2 := nat_index(tuples, natmap1)
+	natmap2 := natIndex(tuples, natmap1)
 
 	if len(natmap2) != 65000 {
 		t.Error("natmap2 != 65000 ", len(natmap2))
@@ -56,7 +56,7 @@ func TestNAT(t *testing.T) {
 
 	delete(tuples, [2]IP4{vip, rip})
 
-	natmap3 := nat_index(tuples, natmap2)
+	natmap3 := natIndex(tuples, natmap2)
 
 	if len(natmap3) != 65000 {
 		t.Error("natmap3 != 65000 ", len(natmap3))
@@ -80,7 +80,7 @@ func TestNAT(t *testing.T) {
 
 	delete(tuples, [2]IP4{vip, rip})
 
-	natmap4 := nat_index(tuples, natmap3)
+	natmap4 := natIndex(tuples, natmap3)
 
 	if len(natmap4) != 64999 {
 		t.Error("natmap4 != 64999 ", len(natmap4))

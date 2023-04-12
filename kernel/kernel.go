@@ -376,13 +376,15 @@ func (m *maps) lookup_globals(g *bpf_global) int {
 	return ret
 }
 
-func nat_addr(n uint16, ip IP4) IP4 {
+func natAddress(n uint16, ip IP4) IP4 {
 	hl := htons(n)
 	var nat IP4
-	nat[0] = ip[0]
-	nat[1] = ip[1]
-	nat[2] = hl[0]
-	nat[3] = hl[1]
+	if n != 0 {
+		nat[0] = ip[0]
+		nat[1] = ip[1]
+		nat[2] = hl[0]
+		nat[3] = hl[1]
+	}
 	return nat
 }
 

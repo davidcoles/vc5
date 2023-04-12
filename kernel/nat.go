@@ -21,7 +21,6 @@ package kernel
 import (
 	"errors"
 	"fmt"
-	//"log"
 	"net"
 	"time"
 
@@ -63,23 +62,15 @@ func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 		return nil, errors.New("ICMP failed")
 	}
 
-	natMap := nat_index(h.Tuples(), nil)
+	natMap := natIndex(h.Tuples(), nil)
 
 	go n.nat(h, natMap, icmp)
 
-	return copyhc(n.VC5aIP, h, natMap, arp()), nil // fill in MACs + NAT addresses
+	return copyHealthchecks(n.VC5aIP, h, natMap, arp()), nil // fill in MACs + NAT addresses
 }
 
 func (n *NAT) Close() {
 	close(n.in)
-}
-
-func invert(m map[[2]IP4]uint16) map[uint16][2]IP4 {
-	n := map[uint16][2]IP4{}
-	for k, v := range m {
-		n[v] = k
-	}
-	return n
 }
 
 func (n *NAT) Configure(h *Healthchecks) {
@@ -131,7 +122,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 	prev := map[natkey]bool{}
 	redirect := map[uint16]int{}
 
-	vlans, redirect, ifmacs := resolve_vlans(h.VLANs(), n.Logger)
+	vlans, redirect, ifmacs := resolveVLANs(h.VLANs(), n.Logger)
 	n.ping(h.RIPs(), icmp)  // start/stop pings
 	time.Sleep(time.Second) // give ARP a second to resolve
 
@@ -147,7 +138,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 			vip := vr[0]
 			rip := vr[1]
-			nat := nat_addr(idx, vc5bip)
+			nat := natAddress(idx, vc5bip)
 
 			physmac := n.PhysicalMAC
 			physif := uint32(n.PhysicalIndex)
@@ -204,7 +195,7 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 		prev = table
 
-		n.C <- copyhc(vc5aip, h, natMap, macs) // notify downstream of new config
+		n.C <- copyHealthchecks(vc5aip, h, natMap, macs) // notify downstream of new config
 
 		var ok bool
 		select {
@@ -217,9 +208,9 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 			n.ping(h.RIPs(), icmp) // start/stop pings
 
-			vlans, redirect, ifmacs = resolve_vlans(h.VLANs(), n.Logger)
+			vlans, redirect, ifmacs = resolveVLANs(h.VLANs(), n.Logger)
 
-			natMap = nat_index(h.Tuples(), natMap)
+			natMap = natIndex(h.Tuples(), natMap)
 
 			time.Sleep(time.Second) // give ARP a second to resolve
 		}
@@ -256,7 +247,7 @@ func (n *NAT) ping(rips map[IP4]IP4, icmp *ICMPs) {
 	}
 }
 
-func nat_index(tuples map[[2]IP4]bool, previous map[[2]IP4]uint16) (mapping map[[2]IP4]uint16) {
+func natIndex(tuples map[[2]IP4]bool, previous map[[2]IP4]uint16) (mapping map[[2]IP4]uint16) {
 
 	mapping = map[[2]IP4]uint16{}
 	inverse := map[uint16][2]IP4{}
@@ -292,24 +283,16 @@ func nat_index(tuples map[[2]IP4]bool, previous map[[2]IP4]uint16) (mapping map[
 	return
 }
 
-func copyhc(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Healthchecks {
+func copyHealthchecks(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Healthchecks {
 
 	new := h.DeepCopy()
 
 	for vip, v := range h.Virtual {
 		for l4, s := range v.Services {
 			for rip, r := range s.Reals {
-
-				n, ok := m[[2]IP4{vip, rip}]
-
-				if !ok || n == 0 {
-					panic(fmt.Sprintf("NAT is 0: %s/%s", vip.String(), rip.String()))
-				}
-
-				r.NAT = nat_addr(n, ip)
-
+				n, _ := m[[2]IP4{vip, rip}]
+				r.NAT = natAddress(n, ip)
 				r.MAC = macs[rip]
-
 				new.Virtual[vip].Services[l4].Reals[rip] = r
 			}
 		}
@@ -318,13 +301,13 @@ func copyhc(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4]MAC) *Hea
 	return new
 }
 
-func resolve_vlans(vlans map[uint16]string, logger types.Logger) (map[uint16]IP4, map[uint16]int, map[uint16]MAC) {
+func resolveVLANs(vlans map[uint16]string, logger types.Logger) (map[uint16]IP4, map[uint16]int, map[uint16]MAC) {
 	ips := map[uint16]IP4{}
 	ifaces := map[uint16]int{}
 	macs := map[uint16]MAC{}
 
 	for vid, prefix := range vlans {
-		ip, iface, mac, ok := vlan_ip(prefix)
+		ip, iface, mac, ok := vlanIP(prefix)
 		if ok {
 			ips[vid] = ip
 			ifaces[vid] = iface
@@ -337,7 +320,7 @@ func resolve_vlans(vlans map[uint16]string, logger types.Logger) (map[uint16]IP4
 	return ips, ifaces, macs
 }
 
-func vlan_ip(prefix string) (nul IP4, idx int, mac MAC, fail bool) {
+func vlanIP(prefix string) (nul IP4, idx int, mac MAC, _ bool) {
 	ifaces, err := net.Interfaces()
 
 	if err != nil {
