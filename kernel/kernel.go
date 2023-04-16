@@ -203,9 +203,9 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
-	if m.m["redirect_map_hash"], err = find_map(x, "redirect_map_hash", 4, 4); err != nil {
-		return nil, err
-	}
+	//if m.m["redirect_map_hash"], err = find_map(x, "redirect_map_hash", 4, 4); err != nil {
+	//	return nil, err
+	//}
 
 	if m.m["redirect_map"], err = find_map(x, "redirect_map", 4, 4); err != nil {
 		return nil, err
@@ -225,15 +225,16 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	return &m, nil
 }
 
-func (m *maps) service_backend() int   { return m.m["service_backend"] }
-func (m *maps) vrpp_counter() int      { return m.m["vrpp_counter"] }
-func (m *maps) vrpp_concurrent() int   { return m.m["vrpp_concurrent"] }
-func (m *maps) globals() int           { return m.m["globals"] }
-func (m *maps) settings() int          { return m.m["settings"] }
-func (m *maps) nat() int               { return m.m["nat"] }
-func (m *maps) redirect_map_hash() int { return m.m["redirect_map_hash"] }
-func (m *maps) redirect_map() int      { return m.m["redirect_map"] }
-func (m *maps) redirect_mac() int      { return m.m["redirect_mac"] }
+func (m *maps) service_backend() int { return m.m["service_backend"] }
+func (m *maps) vrpp_counter() int    { return m.m["vrpp_counter"] }
+func (m *maps) vrpp_concurrent() int { return m.m["vrpp_concurrent"] }
+func (m *maps) globals() int         { return m.m["globals"] }
+func (m *maps) settings() int        { return m.m["settings"] }
+func (m *maps) nat() int             { return m.m["nat"] }
+
+//func (m *maps) redirect_map_hash() int { return m.m["redirect_map_hash"] }
+func (m *maps) redirect_map() int { return m.m["redirect_map"] }
+func (m *maps) redirect_mac() int { return m.m["redirect_mac"] }
 
 func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
 

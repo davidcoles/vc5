@@ -235,17 +235,18 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
+    //__uint(type, BPF_MAP_TYPE_ARRAY);
     __type(key, __u32);
     __type(value, __u32);
     __uint(max_entries, 4096);
 } redirect_map SEC(".maps");
 
-struct {
-    __uint(type, BPF_MAP_TYPE_DEVMAP_HASH);
-    __type(key, __u32);
-    __type(value, __u32);
-    __uint(max_entries, 4096);
-} redirect_map_hash SEC(".maps");
+//struct {
+//    __uint(type, BPF_MAP_TYPE_DEVMAP_HASH);
+//    __type(key, __u32);
+//    __type(value, __u32);
+//    __uint(max_entries, 4096);
+//} redirect_map_hash SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -439,8 +440,13 @@ static __always_inline int redirect_packet(struct ethhdr *eth, char *dst, __u32 
     maccpy(eth->h_source, mac);
     maccpy(eth->h_dest, dst);
     write_perf(global, start);
-    return bpf_redirect_map(&redirect_map_hash, map_entry, XDP_DROP);
-    //return bpf_redirect_map(&redirect_map, map_entry, XDP_DROP);
+    //__u32 *ifindex = bpf_map_lookup_elem(&redirect_map, &map_entry);
+    //if(!ifindex || *ifindex == 0) {
+    //	return XDP_DROP;
+    //}
+    //return bpf_redirect(*ifindex, 0);
+	
+    return bpf_redirect_map(&redirect_map, map_entry, XDP_DROP);
 }
 
 static __always_inline int bounce_packet(struct ethhdr *eth, char *dst, struct global *global, __u64 start)

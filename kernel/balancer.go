@@ -143,7 +143,7 @@ func (b *Balancer) balancer() {
 
 			xdp.BpfMapUpdateElem(b.maps.redirect_mac(), uP(&_vlanid), uP(&(iface.mac)), xdp.BPF_ANY)
 			xdp.BpfMapUpdateElem(b.maps.redirect_map(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
-			xdp.BpfMapUpdateElem(b.maps.redirect_map_hash(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
+			//xdp.BpfMapUpdateElem(b.maps.redirect_map_hash(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
 		}
 
 		for vip, virtual := range h.Virtual {
