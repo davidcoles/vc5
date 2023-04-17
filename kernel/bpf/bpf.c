@@ -232,7 +232,6 @@ struct {
     __uint(max_entries, 1);
 } settings SEC(".maps");
 
-
 struct {
     __uint(type, BPF_MAP_TYPE_DEVMAP);
     //__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -240,13 +239,6 @@ struct {
     __type(value, __u32);
     __uint(max_entries, 4096);
 } redirect_map SEC(".maps");
-
-//struct {
-//    __uint(type, BPF_MAP_TYPE_DEVMAP_HASH);
-//    __type(key, __u32);
-//    __type(value, __u32);
-//    __uint(max_entries, 4096);
-//} redirect_map_hash SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);

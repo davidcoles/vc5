@@ -68,6 +68,7 @@ type Service struct {
 	Metadata         Metadata
 	Minimum          uint16
 	Healthy          bool
+	Change           time.Time
 	Sticky           bool
 	Fallback         bool
 	FallbackOn       bool
@@ -82,6 +83,7 @@ type Service struct {
 type Virtual struct {
 	Metadata Metadata
 	Healthy  bool
+	Change   time.Time
 	Services map[L4]Service
 }
 

@@ -209,6 +209,9 @@ func virtual(services *healthchecks.Virtual, c context) func(*healthchecks.Virtu
 	c.new_svc = true
 	c.new_rip = true
 
+	var was bool
+	change := time.Now()
+
 	update := func(services *healthchecks.Virtual, fin bool) {
 		if services != nil {
 
@@ -259,6 +262,14 @@ func virtual(services *healthchecks.Virtual, c context) func(*healthchecks.Virtu
 				virt.Healthy = false
 			}
 		}
+
+		if virt.Healthy != was {
+			change = time.Now()
+		}
+
+		virt.Change = change
+
+		was = virt.Healthy
 
 		update(nil, fin)
 
@@ -345,6 +356,9 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 	c.new_vip = false
 	c.new_svc = false
 
+	var was bool
+	change := time.Now()
+
 	return func(service *Service, fin bool) Service {
 		update(service, false)
 
@@ -383,6 +397,14 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 				ret.FallbackOn = true
 			}
 		}
+
+		if ret.Healthy != was {
+			change = time.Now()
+		}
+
+		ret.Change = change
+
+		was = ret.Healthy
 
 		// call function to determine if leastcons should be enabled?
 		// ret.Leastconns, ret.Weight = some_fn(status)

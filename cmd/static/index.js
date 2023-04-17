@@ -86,7 +86,7 @@ function updateStats(url) {
 	    for(var vip in data.rhi) {
 		var tr = append(t, "tr", null, data.rhi[vip] ? "up" : "dn")
 		append(tr, "td", `<a href="#`+vip+`">`+vip+`</a>`)
-		append(tr, "td", data.rhi[vip] ? "UP" : "DOWN")
+		append(tr, "td", dhms(data.when[vip]) + " " + (data.rhi[vip] ? "UP" : "DOWN"))
 	    }
 	    document.getElementById("rhi").replaceWith(rhi);
 	    rhi.id = "rhi";
@@ -102,7 +102,7 @@ function updateStats(url) {
 		var t = append(services, "table")
 		var tr = append(t, "tr")
 		var td = append(tr, "td", vip, "ip")
-		var td = append(tr, "td", data.rhi[vip] ? "UP" : "DOWN", data.rhi[vip] ? "up" : "dn" )		
+		var td = append(tr, "td", dhms(data.when[vip]) + " " + (data.rhi[vip] ? "UP" : "DOWN"), data.rhi[vip] ? "up" : "dn" )		
 		t.setAttribute("id", vip)
 		
 		append(services, "div", "&nbsp;")
@@ -169,10 +169,12 @@ function service(vip, l4, s) {
 	udf = "fb"
     }
 
+    
     var tr = append(t, "tr", null, udf)
     append(tr, "th", vip)
     append(tr, "th", l4)
-    append(tr, "th", up)
+    //append(tr, "th", up)
+    append(tr, "th", dhms(s.when) + " " + (up ? "UP" : "DOWN"))
     append(tr, "th", tsf(s.octets_ps*8) + "bps")
     append(tr, "th", tsf(s.packets_ps) + "pps")
     append(tr, "th", spc(s.concurrent), "ar")
@@ -180,7 +182,7 @@ function service(vip, l4, s) {
     for(var rip in s.rips) {
 	var r = s.rips[rip]
 	var tr = append(t, "tr", null, r.up ? "up" : "dn")
-	var when = dhms(r.when_ms/1000)
+	var when = dhms(r.when)
 	
 	append(tr, "td", rip)
 	append(tr, "td", r.mac)

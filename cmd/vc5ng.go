@@ -36,6 +36,7 @@ package main
 
 import (
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	//"errors"
 	"flag"
@@ -70,12 +71,15 @@ type Target = vc5.Target
 var level = flag.Uint("l", LOG_ERR, "debug level level")
 var kill = flag.Uint("k", 0, "killswitch engage - automatic shutoff after k minutes")
 var dfcn = flag.Uint("d", 5, "defcon readiness level")
+var auth = flag.String("a", "", "user auth")
 var sock = flag.String("s", "", "unix domain socket to use when spawning healthcheck server")
 var bond = flag.String("i", "", "name of egress interface to use (eg. bond0)")
 var root = flag.String("r", "", "webserver root directory")
 var websrv = flag.String("w", ":9999", "webserver address:port to listen on")
 var native = flag.Bool("n", false, "load xdp program in native mode")
 var multi = flag.Bool("m", false, "multi-nic mode")
+
+var hostname string
 
 func main() {
 
@@ -88,7 +92,8 @@ func main() {
 
 	if *sock != "" {
 		//signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
-		signal.Ignore(syscall.SIGHUP)
+		//signal.Ignore(syscall.SIGHUP)
+		signal.Ignore(syscall.SIGUSR2, syscall.SIGQUIT)
 		vc5.NetnsServer(*sock)
 		return
 	}
@@ -245,6 +250,12 @@ func main() {
 		fs = http.FileSystem(http.Dir(*root))
 	}
 
+	hostname, err = os.Hostname()
+
+	if err != nil {
+		hostname = myip
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if fs != nil {
 			file := r.URL.Path
@@ -259,33 +270,26 @@ func main() {
 			}
 		}
 
+		switch r.URL.Path {
+		case "/defcon1":
+			defcon(w, r, lb, 1)
+			return
+		case "/defcon2":
+			defcon(w, r, lb, 2)
+			return
+		case "/defcon3":
+			defcon(w, r, lb, 3)
+			return
+		case "/defcon4":
+			defcon(w, r, lb, 4)
+			return
+		case "/defcon5":
+			defcon(w, r, lb, 5)
+			return
+		}
+
 		r.URL.Path = "static/" + r.URL.Path // there must be a way to avoid this, surely ...
 		handler.ServeHTTP(w, r)
-	})
-
-	http.HandleFunc("/defcon1", func(w http.ResponseWriter, r *http.Request) {
-		lb.DEFCON(1)
-		w.WriteHeader(http.StatusOK)
-	})
-
-	http.HandleFunc("/defcon2", func(w http.ResponseWriter, r *http.Request) {
-		lb.DEFCON(2)
-		w.WriteHeader(http.StatusOK)
-	})
-
-	http.HandleFunc("/defcon3", func(w http.ResponseWriter, r *http.Request) {
-		lb.DEFCON(3)
-		w.WriteHeader(http.StatusOK)
-	})
-
-	http.HandleFunc("/defcon4", func(w http.ResponseWriter, r *http.Request) {
-		lb.DEFCON(4)
-		w.WriteHeader(http.StatusOK)
-	})
-
-	http.HandleFunc("/defcon5", func(w http.ResponseWriter, r *http.Request) {
-		lb.DEFCON(5)
-		w.WriteHeader(http.StatusOK)
 	})
 
 	http.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
@@ -377,27 +381,52 @@ func main() {
 	log.Fatal(server.Serve(s))
 }
 
+func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer, d uint8) {
+
+	switch *auth {
+	case "":
+		w.WriteHeader(http.StatusNotFound)
+		return
+	case ":":
+	default:
+		basic := "Basic " + base64.StdEncoding.EncodeToString([]byte(*auth))
+		authorization, ok := r.Header["Authorization"]
+
+		if !ok || len(authorization) < 1 || authorization[0] != basic {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+	}
+
+	lb.DEFCON(d)
+	w.WriteHeader(http.StatusOK)
+}
+
 func getStats(lb *vc5.LoadBalancer) *Stats {
 
-	cf := lb.Status()
-	gl, ss := lb.Stats()
+	now := time.Now()
+
+	status := lb.Status()
+	global, counters := lb.Stats()
 
 	//j, _ := json.MarshalIndent(cf, "", "  ")
 	//fmt.Println(string(j))
 
 	stats := Stats{
-		Octets:  gl.Octets,
-		Packets: gl.Packets,
-		Flows:   gl.Flows,
-		Latency: gl.Latency,
-		DEFCON:  gl.DEFCON,
+		Octets:  global.Octets,
+		Packets: global.Packets,
+		Flows:   global.Flows,
+		Latency: global.Latency,
+		DEFCON:  global.DEFCON,
 		VIPs:    map[IP4]map[L4]Service{},
 		RHI:     map[IP4]bool{},
+		When:    map[IP4]int64{},
 	}
 
-	for vip, v := range cf.Virtual {
+	for vip, v := range status.Virtual {
 		stats.VIPs[vip] = map[L4]Service{}
 		stats.RHI[vip] = v.Healthy
+		stats.When[vip] = int64(now.Sub(v.Change) / time.Second)
 		for l4, s := range v.Services {
 			reals := map[IP4]Real{}
 
@@ -412,15 +441,13 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 				}
 
 				t := Target{VIP: vip, RIP: rip, Protocol: l4.Protocol.Number(), Port: l4.Port}
-				c := ss[t]
+				c := counters[t]
 
 				stats.Concurrent += c.Concurrent
 
-				when := int64(time.Now().Sub(real.Probe.Time) / time.Millisecond)
-
 				reals[rip] = Real{
 					Up:         real.Probe.Passed,
-					When:       when,
+					When:       int64(time.Now().Sub(real.Probe.Time) / time.Second),
 					Message:    real.Probe.Message,
 					Duration:   int64(real.Probe.Duration / time.Millisecond),
 					Octets:     c.Octets,
@@ -433,6 +460,7 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 			stats.VIPs[vip][l4] = Service{
 				Reals:       reals,
 				Up:          s.Healthy,
+				When:        int64(now.Sub(s.Change) / time.Second),
 				Fallback:    s.Fallback,
 				FallbackOn:  s.FallbackOn,
 				FallbackUp:  s.FallbackProbe.Passed,
@@ -461,6 +489,7 @@ type Stats struct {
 	Latency    uint64                 `json:"latency"`
 	DEFCON     uint8                  `json:"defcon"`
 	RHI        map[IP4]bool           `json:"rhi"`
+	When       map[IP4]int64          `json:"when"`
 	VIPs       map[IP4]map[L4]Service `json:"vips"`
 }
 
@@ -468,6 +497,7 @@ type Service struct {
 	Name        string       `json:"name"`
 	Description string       `json:"description"`
 	Up          bool         `json:"up"`
+	When        int64        `json:"when"`
 	Fallback    bool         `json:"fallback"`
 	FallbackOn  bool         `json:"fallback_on"`
 	FallbackUp  bool         `json:"fallback_up"`
@@ -486,7 +516,7 @@ type Service struct {
 
 type Real struct {
 	Up         bool   `json:"up"`
-	When       int64  `json:"when_ms"`
+	When       int64  `json:"when"`
 	Message    string `json:"message"`
 	Duration   int64  `json:"duration_ms"`
 	Octets     uint64 `json:"octets"`
@@ -583,6 +613,7 @@ func prometheus(g *Stats, start time.Time) []byte {
 		"# TYPE vc5_defcon gauge",
 
 		"# TYPE vc5_rhi gauge",
+		"# TYPE vc5_vip_state_duration counter",
 
 		"# TYPE vc5_service_current_connections gauge",
 		"# TYPE vc5_service_total_connections counter",
@@ -590,11 +621,14 @@ func prometheus(g *Stats, start time.Time) []byte {
 		"# TYPE vc5_service_rx_octets counter",
 		"# TYPE vc5_service_healthcheck gauge",
 
+		"# TYPE vc5_service_state_duration counter",
+
 		"# TYPE vc5_backend_current_connections gauge",
 		"# TYPE vc5_backend_total_connections counter",
 		"# TYPE vc5_backend_rx_packets counter",
 		"# TYPE vc5_backend_rx_octets counter",
 		"# TYPE vc5_backend_healthcheck gauge",
+		"# TYPE vc5_backend_state_duration counter",
 	}
 
 	b2u8 := func(v bool) uint8 {
@@ -604,7 +638,14 @@ func prometheus(g *Stats, start time.Time) []byte {
 		return 0
 	}
 
-	m = append(m, fmt.Sprintf("vc5_uptime %d", uptime))
+	updown := func(v bool) string {
+		if v {
+			return "up"
+		}
+		return "down"
+	}
+
+	m = append(m, fmt.Sprintf(`vc5_uptime{hostname="%s"} %d`, hostname, uptime))
 	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
 	m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.PacketsPS))
 	m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
@@ -618,7 +659,12 @@ func prometheus(g *Stats, start time.Time) []byte {
 		m = append(m, fmt.Sprintf(`vc5_rhi{address="%s"} %d`, i, b2u8(v)))
 	}
 
+	for i, v := range g.When {
+		m = append(m, fmt.Sprintf(`vc5_vip_state_duration{address="%s",state="%s",hostname="%s"} %d`, i, updown(g.RHI[i]), hostname, v))
+	}
+
 	for vip, services := range g.VIPs {
+
 		for l4, v := range services {
 			//d := v.Description
 			s := vip.String() + ":" + l4.String()
@@ -629,14 +675,16 @@ func prometheus(g *Stats, start time.Time) []byte {
 			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Octets))
 
 			m = append(m, fmt.Sprintf(`vc5_service_healthcheck{service="%s",sname="%s"} %d`, s, n, b2u8(v.Up)))
+			m = append(m, fmt.Sprintf(`vc5_service_state_duration{service="%s",sname="%s",state="%s",hostname="%s"} %d`, s, n, updown(v.Up), hostname, v.When))
 
 			for b, v := range v.Reals {
 				m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
 				m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.Flows))
 				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Packets))
 				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Octets))
-
 				m = append(m, fmt.Sprintf(`vc5_backend_healthcheck{service="%s",backend="%s"} %d`, s, b, b2u8(v.Up)))
+
+				m = append(m, fmt.Sprintf(`vc5_backend_state_duration{service="%s",sname="%s",backend="%s",state="%s",hostname="%s",port="%s"} %d`, s, n, b, updown(v.Up), hostname, l4.String(), v.When))
 			}
 		}
 	}
