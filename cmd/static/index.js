@@ -177,7 +177,7 @@ function service(vip, l4, s) {
     append(tr, "th", vip)
     append(tr, "th", l4)
     //append(tr, "th", up)
-    append(tr, "th", dhms(s.when) + " " + (up ? "UP" : "DOWN"))
+    append(tr, "th", dhms(s.when) + " " + up)
     append(tr, "th", tsf(s.octets_ps*8) + "bps")
     append(tr, "th", tsf(s.packets_ps) + "pps")
     append(tr, "th", spc(s.concurrent), "ar")
