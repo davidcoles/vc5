@@ -157,8 +157,11 @@ function service(vip, l4, s) {
     var d = document.createElement("div")
     var t = append(d, "table")
 
+
     var m = append(t, "tr", null, "hd")
-    append(m, "th", esc(s.description) + " (" + esc(s.name) + ")").setAttribute("colspan", "5")
+    append(m, "th", esc(s.name))
+    var title = esc(s.description) + " [" + s.healthy + "/" +s.servers + " healthy, " + s.minimum + " needed]"
+    append(m, "th", title).setAttribute("colspan", 4)
     append(m, "th", `<div title="Estimated concurrent connections">Concurrent*</div>`)
     
     var up = s.up ? "UP" : "DOWN"
@@ -183,10 +186,19 @@ function service(vip, l4, s) {
 	var r = s.rips[rip]
 	var tr = append(t, "tr", null, r.up ? "up" : "dn")
 	var when = dhms(r.when)
+
+	var span = document.createElement("span")
+	span.setAttribute("title", r.message)
+	span.innerHTML = when + " " + (r.up ? "UP" : "DOWN") + " ("+r.duration_ms+"ms)"
+	
 	
 	append(tr, "td", rip)
 	append(tr, "td", r.mac)
-	append(tr, "td", when + " " + (r.up ? "UP" : "DOWN") + " ("+r.duration_ms+"ms)")
+	//append(tr, "td", when + " " + (r.up ? "UP" : "DOWN") + " ("+r.duration_ms+"ms)")
+
+	var td = append(tr, "td")
+	td.appendChild(span)
+	
 	append(tr, "td", spc(r.octets_ps*8), "ar")
 	append(tr, "td", spc(r.packets_ps), "ar")
 	append(tr, "td", spc(r.concurrent), "ar")

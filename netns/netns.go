@@ -37,10 +37,17 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
+var client *http.Client
+
 type probe struct {
 	IP     types.IP4
 	Scheme string
 	Check  types.Check
+}
+
+type response struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
 }
 
 func Spawn(netns string, args ...string) {
@@ -78,8 +85,61 @@ func Spawn(netns string, args ...string) {
 	}
 }
 
+func Probe(path string, ip types.IP4, scheme string, check types.Check) (bool, string) {
+
+	if client == nil {
+		client = &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", path)
+				},
+			},
+		}
+	}
+
+	defer client.CloseIdleConnections()
+
+	p := probe{IP: ip, Scheme: scheme, Check: check}
+
+	buff := new(bytes.Buffer)
+
+	err := json.NewEncoder(buff).Encode(&p)
+
+	if err != nil {
+		return false, "Internal error marshalling probe: " + err.Error()
+	}
+
+	resp, err := client.Post("http://unix/", "application/octet-stream", buff)
+
+	if err != nil {
+		return false, "Internal error contacting netns daemon: " + err.Error()
+	}
+
+	defer resp.Body.Close()
+
+	body, _ := ioutil.ReadAll(resp.Body)
+
+	if resp.StatusCode != 200 {
+		return false, fmt.Sprintf("Internal HTTP error contacting netns daemon: %d", resp.StatusCode)
+	}
+
+	var v response
+
+	err = json.Unmarshal(body, &v)
+
+	if err != nil {
+		return false, "Internal error unmarshalling probe response - " + err.Error()
+	}
+
+	return v.OK, v.Message
+}
+
+/**********************************************************************/
+
 func Server(path string, ip string) {
 	log.Println("RUNNING", path)
+
+	wrong := []byte(`{"ok": false, "message":"all kinds of wrong"}`)
 
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
@@ -101,8 +161,13 @@ func Server(path string, ip string) {
 		body, err := ioutil.ReadAll(r.Body)
 
 		if err != nil {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(fmt.Sprint(err)))
+			w.WriteHeader(http.StatusInternalServerError)
+			js, err := json.Marshal(&response{OK: false, Message: "Couldn't read probe: " + err.Error()})
+			if err != nil {
+				w.Write(wrong)
+			} else {
+				w.Write(js)
+			}
 			return
 		}
 
@@ -111,21 +176,29 @@ func Server(path string, ip string) {
 		err = json.Unmarshal(body, &p)
 
 		if err != nil {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(fmt.Sprint(err)))
+			w.WriteHeader(http.StatusInternalServerError)
+			js, err := json.Marshal(&response{OK: false, Message: "Couldn't unmarshal probe: " + err.Error()})
+			if err != nil {
+				w.Write(wrong)
+			} else {
+				w.Write(js)
+			}
 			return
 		}
 
-		ok, resp := p.probe(syn)
+		resp := p.probe(syn)
 
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(resp))
+		js, err := json.Marshal(&resp)
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write(wrong)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(resp))
+		w.Write(js)
+
 	})
 
 	s, err := net.Listen("unix", path)
@@ -137,53 +210,6 @@ func Server(path string, ip string) {
 	server := http.Server{}
 
 	log.Fatal(server.Serve(s))
-}
-
-var client *http.Client
-
-func Probe(path string, ip types.IP4, scheme string, check types.Check) bool {
-	b, _ := Req(path, ip, scheme, check)
-	return b
-}
-func Req(path string, ip types.IP4, scheme string, check types.Check) (bool, string) {
-
-	if client == nil {
-		client = &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", path)
-				},
-			},
-		}
-	}
-
-	defer client.CloseIdleConnections()
-
-	p := probe{IP: ip, Scheme: scheme, Check: check}
-
-	buff := new(bytes.Buffer)
-	err := json.NewEncoder(buff).Encode(&p)
-
-	if err != nil {
-		return false, "AF_UNIX: " + err.Error()
-	}
-
-	response, err := client.Post("http://unix/", "application/octet-stream", buff)
-
-	if err != nil {
-		return false, "AF_UNIX: " + err.Error()
-	}
-
-	defer response.Body.Close()
-
-	//body, _ := ioutil.ReadAll(response.Body)
-	ioutil.ReadAll(response.Body)
-
-	if response.StatusCode != 200 {
-		return false, fmt.Sprintf("AF_UNIX: %d", response.StatusCode)
-	}
-
-	return true, ""
 }
 
 func (p *probe) httpget() (bool, string) {
@@ -229,7 +255,7 @@ func (p *probe) httpget() (bool, string) {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		return false, fmt.Sprintf("GET: %s:%d %s %v", p.IP, port, url, resp)
+		return false, err.Error()
 	}
 
 	defer resp.Body.Close()
@@ -242,11 +268,7 @@ func (p *probe) httpget() (bool, string) {
 		exp = 200
 	}
 
-	if resp.StatusCode != exp {
-		return false, fmt.Sprintf("%d: %s:%s %s %v", resp.StatusCode, p.IP, port, url, resp)
-	}
-
-	return true, ""
+	return resp.StatusCode == exp, resp.Status
 }
 
 func (p *probe) synprobe(syn *SynChecks) (bool, string) {
@@ -314,7 +336,8 @@ func (p *probe) tcpdial() (bool, string) {
 	return false, fmt.Sprint(err)
 }
 
-func (p *probe) probe(syn *SynChecks) (bool, string) {
+//func (p *probe) probe(syn *SynChecks) (bool, string) {
+func (p *probe) probe(syn *SynChecks) response {
 	//fmt.Println(p)
 
 	var ok bool
@@ -335,5 +358,5 @@ func (p *probe) probe(syn *SynChecks) (bool, string) {
 		st = "Unknown probe type"
 	}
 
-	return ok, st
+	return response{OK: ok, Message: st}
 }

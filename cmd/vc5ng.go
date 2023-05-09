@@ -79,7 +79,7 @@ var websrv = flag.String("w", ":9999", "webserver address:port to listen on")
 var native = flag.Bool("n", false, "load xdp program in native mode")
 var multi = flag.Bool("m", false, "multi-nic mode")
 
-var hostname string
+var nolabel = flag.Bool("N", false, "don't add 'name' label to prometheus metrics")
 
 func main() {
 
@@ -248,12 +248,6 @@ func main() {
 
 	if *root != "" {
 		fs = http.FileSystem(http.Dir(*root))
-	}
-
-	hostname, err = os.Hostname()
-
-	if err != nil {
-		hostname = myip
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -468,7 +462,7 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 				Description: s.Metadata.Description,
 				Servers:     servers,
 				Healthy:     healthy,
-				Minimum:     s.Minimum,
+				Minimum:     uint8(s.Minimum),
 			}
 		}
 	}
@@ -509,7 +503,7 @@ type Service struct {
 	FlowsPS     uint64       `json:"flows_ps"`
 	Concurrent  uint64       `json:"concurrent"`
 	Reals       map[IP4]Real `json:"rips"`
-	Minimum     uint16       `json:"minimum"`
+	Minimum     uint8        `json:"minimum"`
 	Servers     uint8        `json:"servers"`
 	Healthy     uint8        `json:"healthy"`
 }
@@ -601,34 +595,65 @@ func prometheus(g *Stats, start time.Time) []byte {
 
 	uptime := time.Now().Sub(start) / time.Second
 
+	//# HELP haproxy_backend_status Current status of the service (frontend: 0=STOP, 1=UP, 2=FULL - backend: 0=DOWN, 1=UP - server: 0=DOWN, 1=UP, 2=MAINT, 3=DRAIN, 4=NOLB).
+
 	m := []string{
-		"# TYPE vc5_uptime counter",
-		"# TYPE vc5_average_latency_ns gauge",
-		"# TYPE vc5_packets_per_second gauge",
-		"# TYPE vc5_current_connections gauge",
-		"# TYPE vc5_total_connections counter",
+
+		// TYPE
+
+		`# TYPE vc5_uptime counter`,
+		"# TYPE vc5_defcon gauge",
+		"# TYPE vc5_latency gauge",
+		`# TYPE vc5_sessions gauge`,
+		"# TYPE vc5_session_total counter",
 		"# TYPE vc5_rx_packets counter",
 		"# TYPE vc5_rx_octets counter",
-		//"# TYPE vc5_userland_queue_failed counter",
-		"# TYPE vc5_defcon gauge",
 
-		"# TYPE vc5_rhi gauge",
-		"# TYPE vc5_vip_state_duration counter",
+		`# TYPE vc5_vip_status gauge`,
+		`# TYPE vc5_vip_status_duration gauge`,
 
-		"# TYPE vc5_service_current_connections gauge",
-		"# TYPE vc5_service_total_connections counter",
-		"# TYPE vc5_service_rx_packets counter",
-		"# TYPE vc5_service_rx_octets counter",
-		"# TYPE vc5_service_healthcheck gauge",
+		`# TYPE vc5_service_sessions gauge`,
+		`# TYPE vc5_service_sessions_total counter`,
+		`# TYPE vc5_service_rx_packets counter`,
+		`# TYPE vc5_service_rx_octets counter`,
+		`# TYPE vc5_service_status gauge`,
+		`# TYPE vc5_service_status_duration gauge`,
+		`# TYPE vc5_service_reserves_used gauge`,
 
-		"# TYPE vc5_service_state_duration counter",
+		`# TYPE vc5_backend_sessions gauge`,
+		`# TYPE vc5_backend_sessions_total counter`,
+		`# TYPE vc5_backend_rx_packets counter`,
+		`# TYPE vc5_backend_rx_octets counter`,
+		`# TYPE vc5_backend_status gauge`,
+		`# TYPE vc5_backend_status_duration gauge`,
 
-		"# TYPE vc5_backend_current_connections gauge",
-		"# TYPE vc5_backend_total_connections counter",
-		"# TYPE vc5_backend_rx_packets counter",
-		"# TYPE vc5_backend_rx_octets counter",
-		"# TYPE vc5_backend_healthcheck gauge",
-		"# TYPE vc5_backend_state_duration counter",
+		// HELP
+
+		`# HELP vc5_uptime Uptime in seconds`,
+		"# HELP vc5_defcon Readiness level",
+		"# HELP vc5_latency Average packet processing latency in nanoseconds",
+		`# HELP vc5_sessions Estimated number of current active sessions`,
+		"# HELP vc5_session_total Total number of new sessions written to state tracking table",
+		"# HELP vc5_rx_packets Total number of incoming packets",
+		"# HELP vc5_rx_octets Total number incoming bytes",
+
+		`# HELP vc5_vip_status gauge`,
+		`# HELP vc5_vip_status_duration gauge`,
+
+		`# HELP vc5_service_sessions gauge`,
+		`# HELP vc5_service_sessions_total counter`,
+		`# HELP vc5_service_rx_packets counter`,
+		`# HELP vc5_service_rx_octets counter`,
+		`# HELP vc5_service_status gauge`,
+		`# HELP vc5_service_status_duration gauge`,
+		`# HELP vc5_service_reserves_used gauge`,
+
+		`# HELP vc5_backend_sessions gauge`,
+		`# HELP vc5_backend_sessions_total counter`,
+		`# HELP vc5_backend_rx_packets counter`,
+		`# HELP vc5_backend_rx_octets counter`,
+		`# HELP vc5_backend_status gauge`,
+		`# HELP vc5_backend_status_duration gauge`,
 	}
 
 	b2u8 := func(v bool) uint8 {
@@ -645,52 +670,60 @@ func prometheus(g *Stats, start time.Time) []byte {
 		return "down"
 	}
 
-	m = append(m, fmt.Sprintf(`vc5_uptime{hostname="%s"} %d`, hostname, uptime))
-	m = append(m, fmt.Sprintf("vc5_average_latency_ns %d", g.Latency))
-	m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.PacketsPS))
-	m = append(m, fmt.Sprintf(`vc5_current_connections %d`, g.Concurrent))
-	m = append(m, fmt.Sprintf("vc5_total_connections %d", g.Flows))
+	//m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.PacketsPS))
+
+	m = append(m, fmt.Sprintf(`vc5_uptime %d`, uptime))
+	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
+	m = append(m, fmt.Sprintf("vc5_latency %d", g.Latency))
+	m = append(m, fmt.Sprintf(`vc5_sessions %d`, g.Concurrent))
+	m = append(m, fmt.Sprintf("vc5_session_total %d", g.Flows))
 	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Packets))
 	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Octets))
-	//m = append(m, fmt.Sprintf("vc5_userland_queue_failed %d", g.Qfailed))
-	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
-
-	for i, v := range g.RHI {
-		m = append(m, fmt.Sprintf(`vc5_rhi{address="%s"} %d`, i, b2u8(v)))
-	}
 
 	for i, v := range g.When {
-		m = append(m, fmt.Sprintf(`vc5_vip_state_duration{address="%s",state="%s",hostname="%s"} %d`, i, updown(g.RHI[i]), hostname, v))
+		m = append(m, fmt.Sprintf(`vc5_vip_status{vip="%s"} %d`, i, b2u8(g.RHI[i])))
+		m = append(m, fmt.Sprintf(`vc5_vip_status_duration{vip="%s",status="%s"} %d`, i, updown(g.RHI[i]), v))
 	}
 
 	for vip, services := range g.VIPs {
 
 		for l4, v := range services {
-			//d := v.Description
-			s := vip.String() + ":" + l4.String()
-			n := v.Name
-			m = append(m, fmt.Sprintf(`vc5_service_current_connections{service="%s",sname="%s"} %d`, s, n, v.Concurrent))
-			m = append(m, fmt.Sprintf(`vc5_service_total_connections{service="%s",sname="%s"} %d`, s, n, v.Flows))
-			m = append(m, fmt.Sprintf(`vc5_service_rx_packets{service="%s",sname="%s"} %d`, s, n, v.Packets))
-			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{service="%s",sname="%s"} %d`, s, n, v.Octets))
+			labels := fmt.Sprintf(`service="%s"`, vip.String()+":"+l4.String())
 
-			m = append(m, fmt.Sprintf(`vc5_service_healthcheck{service="%s",sname="%s"} %d`, s, n, b2u8(v.Up)))
-			m = append(m, fmt.Sprintf(`vc5_service_state_duration{service="%s",sname="%s",state="%s",hostname="%s"} %d`, s, n, updown(v.Up), hostname, v.When))
+			if !*nolabel && v.Name != "" {
+				labels += fmt.Sprintf(`,name="%s"`, v.Name)
+			}
+
+			reserve := int(v.Servers) - int(v.Minimum) // eg. 3 reserve servers
+			reserve_used := int(v.Servers) - int(v.Healthy)
+
+			var reserve_used_percent = reserve_used * 100
+
+			if reserve > 0 {
+				reserve_used_percent = (100 * int(reserve_used)) / int(reserve)
+			}
+
+			m = append(m, fmt.Sprintf(`vc5_service_sessions{%s} %d`, labels, v.Concurrent))
+			m = append(m, fmt.Sprintf(`vc5_service_sessions_total{%s} %d`, labels, v.Flows))
+			m = append(m, fmt.Sprintf(`vc5_service_rx_packets{%s} %d`, labels, v.Packets))
+			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{%s} %d`, labels, v.Octets))
+			m = append(m, fmt.Sprintf(`vc5_service_status{%s} %d`, labels, b2u8(v.Up)))
+			m = append(m, fmt.Sprintf(`vc5_service_status_duration{%s,status="%s"} %d`, labels, updown(v.Up), v.When))
+			m = append(m, fmt.Sprintf(`vc5_service_reserve_used{%s} %d`, labels, reserve_used_percent))
 
 			for b, v := range v.Reals {
-				m = append(m, fmt.Sprintf(`vc5_backend_current_connections{service="%s",backend="%s"} %d`, s, b, v.Concurrent))
-				m = append(m, fmt.Sprintf(`vc5_backend_total_connections{service="%s",backend="%s"} %d`, s, b, v.Flows))
-				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{service="%s",backend="%s"} %d`, s, b, v.Packets))
-				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{service="%s",backend="%s"} %d`, s, b, v.Octets))
-				m = append(m, fmt.Sprintf(`vc5_backend_healthcheck{service="%s",backend="%s"} %d`, s, b, b2u8(v.Up)))
-
-				m = append(m, fmt.Sprintf(`vc5_backend_state_duration{service="%s",sname="%s",backend="%s",state="%s",hostname="%s",port="%s"} %d`, s, n, b, updown(v.Up), hostname, l4.String(), v.When))
+				l := labels + fmt.Sprintf(`,backend="%s"`, b)
+				m = append(m, fmt.Sprintf(`vc5_backend_sessions{%s} %d`, l, v.Concurrent))
+				m = append(m, fmt.Sprintf(`vc5_backend_sessions_total{%s} %d`, l, v.Flows))
+				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{%s} %d`, l, v.Packets))
+				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{%s} %d`, l, v.Octets))
+				m = append(m, fmt.Sprintf(`vc5_backend_status{%s} %d`, l, b2u8(v.Up)))
+				m = append(m, fmt.Sprintf(`vc5_backend_status_duration{%s,status="%s"} %d`, l, updown(v.Up), v.When))
 			}
 		}
 	}
 
-	all := strings.Join(m, "\n")
-	return []byte(all)
+	return []byte(strings.Join(m, "\n") + "\n")
 }
 
 /**********************************************************************/
@@ -794,7 +827,7 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 
 			for k, v := range peer {
 				for ip, up := range n {
-					//fmt.Println("NLRI", ip, up, "to", k)
+					fmt.Println("NLRI", ip, up, "to", k)
 					logger.NOTICE("peers", "NLRI", ip, up, "to", k)
 					v.NLRI(bgp4.IP4(ip), up)
 				}
@@ -813,7 +846,12 @@ func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uin
 					m[s] = v
 					delete(peer, s)
 				} else {
-					v = bgp4.Session(s, rid, rid, asn, hold, communities, b.wait, nil)
+					h := hold
+					if h == 0 {
+						h = 4
+					}
+
+					v = bgp4.Session(s, rid, rid, asn, h, communities, b.wait, nil)
 					m[s] = v
 					//for k, v := range peer {
 					for ip, up := range nlri {
