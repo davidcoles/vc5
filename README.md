@@ -53,6 +53,16 @@ support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drive
 
 A basic web console and Prometheus metrics server is included: ![Console screenshot](docs/console.jpg)
 
+A sample utility to render traffic from /20 prefixes going through the
+load-balancer is in the [cmd/hilbert/](cmd/hilbert/) directory:
+![cmd/hilbert/hilbert.png](cmd/hilbert/hilbert.png)
+
+A good use for the traffic stats would be to track which prefixes are
+usually active and to generate a table of which /20s to early drop
+traffic from in the case of a DoS/DDoS (particularly spoofed source
+addresses). The drop table is not implemented yet, but will be added
+soon.
+
 A good summary of the concepts in use are discussed in [Patrick
 Shuff's "Building a Billion User Load Balancer"
 talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika

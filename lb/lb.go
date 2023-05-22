@@ -57,6 +57,10 @@ type LoadBalancer struct {
 	update chan *healthchecks.Healthchecks
 }
 
+func (lb *LoadBalancer) Prefixes() [kernel.PREFIXES]uint64 {
+	return lb.maps.ReadPrefixCounters()
+}
+
 func (lb *LoadBalancer) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
 	return lb.balancer.Global(), lb.balancer.Stats()
 }

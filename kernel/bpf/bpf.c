@@ -107,8 +107,29 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct flow);
     __type(value, struct state);
-    __uint(max_entries, 3000000);
+    __uint(max_entries, 1048576);
 } flow_state SEC(".maps");
+
+//struct {
+//    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
+//    __type(key, struct flow);
+//    __type(value, struct state);
+//    __uint(max_entries, MAX_FLOWS_PERCPU);
+//} flow_state_percpu SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(max_entries, 1048576); // counters for each /20 network (16 /20s per /16)
+} prefix_counters SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(max_entries, 16384);
+} prefix_drop SEC(".maps");
 
 /**********************************************************************/
 struct real {
@@ -484,34 +505,12 @@ static __always_inline int existing_tcp_flow(struct ethhdr *eth, struct vlan_hdr
 		goto invalid_state; // unlikely that we should echo packet back to source on l2lb
 	    }
 
-
-	    /*
-	    if(tag != NULL) {
-
-		if(MODE != MODE_VLAN)
-		    goto invalid_state; // We shouldn't be receiving tagged traffic in non-vlan mode
-		
-		if(state->vid == 0)
-		    goto invalid_state; // VLAN ID of 0 not allowed if in VLAN mode
-		
-		tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
-	    } else {
-		if(MODE == MODE_VLAN)
-                    goto invalid_state; // We must be receiving tagged traffic in vlan mode
-		
-		if(state->vid != 0)
-		    goto invalid_state; // VLAN ID not allowed if in non-VLAN mode
-	    }
-	    */
-
 	    if(state->vid == 0) {
-		// traffic should be untagged - drop if not
-		if(tag != NULL) goto drop_packet;
+		if(tag != NULL) goto drop_packet; // traffic should be untagged - drop if not
 	    } else {
-		// traffic should be tagged (or multi-nic mode - not yet implemented)
+		// traffic should be tagged (or multi-nic mode)
 		if(tag == NULL) {
-		    if(!MULTINIC)
-			goto drop_packet;
+		    if(!MULTINIC) goto drop_packet;
 		} else {
 		    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
 		}
@@ -526,6 +525,10 @@ static __always_inline int existing_tcp_flow(struct ethhdr *eth, struct vlan_hdr
 	    /**********************************************************************/
 	    
 	    be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, octets, 0);
+	    
+	    __u32 prefix = bpf_ntohl(ipv4->saddr) >> 12; // obtain /20
+	    __u64 *traffic = bpf_map_lookup_elem(&prefix_counters, &prefix);
+	    if(traffic) (*traffic)++;	
 	    
 	    if(MULTINIC)
 		return redirect_packet(eth, state->mac, bpf_ntohs(state->vid), global, start);
@@ -575,26 +578,6 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	if(equmac(real->mac, eth->h_source))
 	    goto invalid_real; // unlikely we would want to echo packet back to source on an l2lb
 
-
-	/*
-	if(tag != NULL) {
-	    if(MODE != MODE_VLAN)
-		goto invalid_real; // We shouldn't be receiving tagged traffic in non-vlan mode
-	    
-	    if(real->vid == 0)
-		goto invalid_real; // VLAN ID of 0 not allowed if in VLAN mode
-	    
-	    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (real->vid & bpf_htons(0x0fff));
-	} else {
-
-	    if(MODE == MODE_VLAN)
-		goto invalid_real; // We must be receiving tagged traffic in vlan mode
-	    
-	    if(real->vid != 0)
-		goto invalid_real; // VLAN ID not allowed if in non-VLAN mode
-	}
-	*/
-
 	if(real->vid == 0) {
 	    // traffic should be untagged - drop if not
 	    if(tag != NULL) goto drop_packet;
@@ -612,6 +595,9 @@ static __always_inline int new_flow(struct ethhdr *eth, struct vlan_hdr *tag, st
 	    if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, dst, real->rip, octets, DEFCON >= DEFCON4);
 	}
 
+	__u32 prefix = bpf_ntohl(ipv4->saddr) >> 12; // obtain /20
+	__u64 *traffic = bpf_map_lookup_elem(&prefix_counters, &prefix);
+	if(traffic) (*traffic)++;	
 
 	if(MULTINIC)
 	    return redirect_packet(eth, real->mac, bpf_ntohs(real->vid), global, start);
@@ -728,8 +714,81 @@ static __always_inline int returning_nat(struct xdp_md *ctx, struct ethhdr *eth,
 }
 
 
-
-
+//#!/usr/bin/perl
+//foreach my $n (0..63) {
+//    printf "case %2d: return x & %016x;\n", $n, 2**$n;
+//}
+/*
+static __always_inline int drop_map(__u8 n, __u64 x) {
+    switch(n) {
+    case  0: return x & 0x0000000000000001;
+    case  1: return x & 0x0000000000000002;
+    case  2: return x & 0x0000000000000004;
+    case  3: return x & 0x0000000000000008;
+    case  4: return x & 0x0000000000000010;
+    case  5: return x & 0x0000000000000020;
+    case  6: return x & 0x0000000000000040;
+    case  7: return x & 0x0000000000000080;
+    case  8: return x & 0x0000000000000100;
+    case  9: return x & 0x0000000000000200;
+    case 10: return x & 0x0000000000000400;
+    case 11: return x & 0x0000000000000800;
+    case 12: return x & 0x0000000000001000;
+    case 13: return x & 0x0000000000002000;
+    case 14: return x & 0x0000000000004000;
+    case 15: return x & 0x0000000000008000;
+    case 16: return x & 0x0000000000010000;
+    case 17: return x & 0x0000000000020000;
+    case 18: return x & 0x0000000000040000;
+    case 19: return x & 0x0000000000080000;
+    case 20: return x & 0x0000000000100000;
+    case 21: return x & 0x0000000000200000;
+    case 22: return x & 0x0000000000400000;
+    case 23: return x & 0x0000000000800000;
+    case 24: return x & 0x0000000001000000;
+    case 25: return x & 0x0000000002000000;
+    case 26: return x & 0x0000000004000000;
+    case 27: return x & 0x0000000008000000;
+    case 28: return x & 0x0000000010000000;
+    case 29: return x & 0x0000000020000000;
+    case 30: return x & 0x0000000040000000;
+    case 31: return x & 0x0000000080000000;
+    case 32: return x & 0x0000000100000000;
+    case 33: return x & 0x0000000200000000;
+    case 34: return x & 0x0000000400000000;
+    case 35: return x & 0x0000000800000000;
+    case 36: return x & 0x0000001000000000;
+    case 37: return x & 0x0000002000000000;
+    case 38: return x & 0x0000004000000000;
+    case 39: return x & 0x0000008000000000;
+    case 40: return x & 0x0000010000000000;
+    case 41: return x & 0x0000020000000000;
+    case 42: return x & 0x0000040000000000;
+    case 43: return x & 0x0000080000000000;
+    case 44: return x & 0x0000100000000000;
+    case 45: return x & 0x0000200000000000;
+    case 46: return x & 0x0000400000000000;
+    case 47: return x & 0x0000800000000000;
+    case 48: return x & 0x0001000000000000;
+    case 49: return x & 0x0002000000000000;
+    case 50: return x & 0x0004000000000000;
+    case 51: return x & 0x0008000000000000;
+    case 52: return x & 0x0010000000000000;
+    case 53: return x & 0x0020000000000000;
+    case 54: return x & 0x0040000000000000;
+    case 55: return x & 0x0080000000000000;
+    case 56: return x & 0x0100000000000000;
+    case 57: return x & 0x0200000000000000;
+    case 58: return x & 0x0400000000000000;
+    case 59: return x & 0x0800000000000000;
+    case 60: return x & 0x1000000000000000;
+    case 61: return x & 0x2000000000000000;
+    case 62: return x & 0x4000000000000000;
+    case 63: return x & 0x8000000000000000;
+    }
+    return 0;
+}
+*/
 
 //SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 int xdp_main_func(struct xdp_md *ctx, int outgoing)
@@ -838,7 +897,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     // ignore evil bit and DF, drop if more fragments flag set, or fragent offset is not 0
     if ((ipv4->frag_off & bpf_htons(0x3fff)) != 0)
 	return XDP_DROP;
-    
+
     struct tcphdr *tcp = NULL;
     struct udphdr *udp = NULL;
     struct icmphdr *icmp = NULL;
@@ -847,7 +906,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     switch(ipv4->protocol) {
     
     case IPPROTO_ICMP:
-	icmp = data + nh_off;
+	icmp = data + nh_off;    
 	
 	nh_off += sizeof(struct icmphdr);
 	

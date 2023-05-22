@@ -215,6 +215,10 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
+	if m.m["prefix_counters"], err = find_map(x, "prefix_counters", 4, 8); err != nil {
+		return nil, err
+	}
+
 	var zero uint32
 	s := bpf_setting{defcon: m.defcon, era: 0}
 
@@ -231,10 +235,36 @@ func (m *maps) vrpp_concurrent() int { return m.m["vrpp_concurrent"] }
 func (m *maps) globals() int         { return m.m["globals"] }
 func (m *maps) settings() int        { return m.m["settings"] }
 func (m *maps) nat() int             { return m.m["nat"] }
+func (m *maps) prefix_counters() int { return m.m["prefix_counters"] }
 
 //func (m *maps) redirect_map_hash() int { return m.m["redirect_map_hash"] }
 func (m *maps) redirect_map() int { return m.m["redirect_map"] }
 func (m *maps) redirect_mac() int { return m.m["redirect_mac"] }
+
+const PREFIXES = 1048576
+
+func (m *maps) ReadPrefixCounters() [PREFIXES]uint64 {
+
+	var prefixes [PREFIXES]uint64
+
+	for i, _ := range prefixes {
+
+		j := uint32(i)
+		c := make([]uint64, xdp.BpfNumPossibleCpus())
+
+		xdp.BpfMapLookupElem(m.prefix_counters(), uP(&j), uP(&(c[0])))
+
+		var x uint64
+
+		for _, v := range c {
+			x += v
+		}
+
+		prefixes[i] = x
+	}
+
+	return prefixes
+}
 
 func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uint64) int {
 

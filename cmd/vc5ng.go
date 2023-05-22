@@ -20,15 +20,7 @@
 // manage existing connection (SYN/RST/etc)
 // sticky sessions
 // BGP stats/state
-// time since last state change for reals/services/vips
-
-// When:
-// * adding a new vip, all checks should start in down state to prevent traffic being sent to the LB
-// * adding a new service to an existing vip, service should start in "up" state to prevent vip being withdrawn (chaos)
-// * adding a new real to an existing service, host checks should start in "down" state to prevent hash being changed
-
 // MAC address uniqueness check
-
 // clean up tag/multinic
 // add warning for untagged hosts
 
@@ -56,7 +48,7 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5"
-	"github.com/davidcoles/vc5/bgp4"
+	"github.com/davidcoles/vc5/peers"
 )
 
 var logger *Logger
@@ -78,35 +70,38 @@ var root = flag.String("r", "", "webserver root directory")
 var websrv = flag.String("w", ":9999", "webserver address:port to listen on")
 var native = flag.Bool("n", false, "load xdp program in native mode")
 var multi = flag.Bool("m", false, "multi-nic mode")
-
 var nolabel = flag.Bool("N", false, "don't add 'name' label to prometheus metrics")
 
-func main() {
+const RLIMIT_MEMLOCK = 8
 
-	start := time.Now()
+func ulimit(resource int) {
+	var rLimit syscall.Rlimit
+	if err := syscall.Getrlimit(resource, &rLimit); err != nil {
+		log.Fatal("Error Getting Rlimit ", err)
+	}
+	rLimit.Max = 0xffffffffffffffff
+	rLimit.Cur = 0xffffffffffffffff
+	if err := syscall.Setrlimit(resource, &rLimit); err != nil {
+		log.Fatal("Error Setting Rlimit ", err)
+	}
+}
+
+func main() {
 
 	flag.Parse()
 	args := flag.Args()
 
-	ulimit()
-
 	if *sock != "" {
-		//signal.Ignore(syscall.SIGQUIT, syscall.SIGINT)
-		//signal.Ignore(syscall.SIGHUP)
 		signal.Ignore(syscall.SIGUSR2, syscall.SIGQUIT)
 		vc5.NetnsServer(*sock)
 		return
 	}
 
+	ulimit(RLIMIT_MEMLOCK)
+
 	file := args[0]
-	myip := args[1]
+	addr := args[1]
 	peth := args[2:]
-
-	ip := net.ParseIP(myip)
-
-	if ip == nil {
-		log.Fatal("IP is nil")
-	}
 
 	conf, err := vc5.LoadConf(file)
 
@@ -141,16 +136,6 @@ func main() {
 		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
 	}
 
-	mynic := *bond
-
-	if mynic == "" {
-		mynic = peth[0]
-	}
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	hc, err := vc5.Load(conf)
 
 	if err != nil {
@@ -165,6 +150,19 @@ func main() {
 
 	logger = &Logger{Level: uint8(*level)}
 
+	pool := peers.Pool{
+		Address:     addr,
+		ASN:         conf.RHI.AS_Number,
+		HoldTime:    conf.RHI.Hold_Time,
+		Communities: conf.RHI.Communities(),
+		Peers:       conf.RHI.Peers,
+		Listen:      conf.RHI.Listen,
+	}
+
+	if !pool.Open() {
+		log.Fatal("BGP peer initialisation failed")
+	}
+
 	lb := &vc5.LoadBalancer{
 		ReadinessLevel:  uint8(*dfcn),
 		KillSwitch:      *kill,
@@ -177,20 +175,15 @@ func main() {
 		Logger:          logger,
 	}
 
-	//err = lb.Start(mynet.IP, hc)
-	err = lb.Start(myip, hc)
+	err = lb.Start(addr, hc)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//pool := NewBGPPool(mynet.IP, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers)
-	pool := NewBGPPool(ip, conf.RHI.AS_Number, conf.RHI.Hold_Time, conf.RHI.Communities(), conf.RHI.Peers, conf.RHI.Listen)
-
 	sig := make(chan os.Signal)
-	//signal.Notify(sig, os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
 	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGQUIT)
-	//signal.Notify(sig)  // alll
+	//signal.Notify(sig) // all the signals!
 
 	go func() {
 		for {
@@ -207,16 +200,11 @@ func main() {
 				if err != nil {
 					log.Println(err)
 				} else {
-
-					h, err := hc.Reload(conf)
-
-					if err != nil {
+					if h, err := hc.Reload(conf); err != nil {
 						log.Println(err)
 					} else {
-
-						pool.Peer(conf.RHI.Peers)
-
 						hc = h
+						pool.Peer(conf.RHI.Peers)
 						lb.Update(hc)
 					}
 				}
@@ -225,10 +213,10 @@ func main() {
 	}()
 
 	var stats *Stats
+	start := time.Now()
 
 	go func() {
 		var t time.Time
-		start := time.Now()
 
 		for {
 			s := getStats(lb)
@@ -242,8 +230,11 @@ func main() {
 		}
 	}()
 
+	var timestamp time.Time
+	var mutex sync.Mutex
+	prefixes := []byte("{}")
+
 	static := http.FS(STATIC)
-	handler := http.FileServer(static)
 	var fs http.FileSystem
 
 	if *root != "" {
@@ -264,26 +255,37 @@ func main() {
 			}
 		}
 
-		switch r.URL.Path {
-		case "/defcon1":
-			defcon(w, r, lb, 1)
-			return
-		case "/defcon2":
-			defcon(w, r, lb, 2)
-			return
-		case "/defcon3":
-			defcon(w, r, lb, 3)
-			return
-		case "/defcon4":
-			defcon(w, r, lb, 4)
-			return
-		case "/defcon5":
-			defcon(w, r, lb, 5)
+		if defcon(w, r, lb) {
 			return
 		}
 
 		r.URL.Path = "static/" + r.URL.Path // there must be a way to avoid this, surely ...
-		handler.ServeHTTP(w, r)
+		http.FileServer(static).ServeHTTP(w, r)
+	})
+
+	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
+
+		mutex.Lock()
+		defer mutex.Unlock()
+		now := time.Now()
+
+		if now.Sub(timestamp) > (time.Second * 50) {
+			fmt.Println("RENDERING")
+			p := lb.Prefixes()
+			j, err := json.Marshal(p)
+
+			if err != nil {
+				prefixes = []byte("{}")
+			} else {
+				prefixes = j
+			}
+
+			timestamp = now
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(prefixes)
 	})
 
 	http.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
@@ -297,15 +299,12 @@ func main() {
 
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		j, err := json.MarshalIndent(hc, "", "  ")
-
-		if err != nil {
+		if j, err := json.MarshalIndent(hc, "", "  "); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write(j)
 		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write(j)
 	})
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
@@ -315,35 +314,30 @@ func main() {
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write(j)
 		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write(j)
 	})
 
 	http.HandleFunc("/stats.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		j, _ := json.MarshalIndent(stats, "", "  ")
-
-		if err != nil {
+		if j, _ := json.MarshalIndent(stats, "", "  "); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write(j)
 		}
-
-		w.WriteHeader(http.StatusOK)
-		w.Write(j)
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if stats == nil {
 			w.WriteHeader(http.StatusInternalServerError)
-			return
+		} else {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusOK)
+			w.Write(prometheus(stats, start))
 		}
-
-		w.Header().Set("Content-Type", "text/plain")
-		w.WriteHeader(http.StatusOK)
-		w.Write(prometheus(stats, start))
 	})
 
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
@@ -375,7 +369,28 @@ func main() {
 	log.Fatal(server.Serve(s))
 }
 
-func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer, d uint8) {
+func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer) (ret bool) {
+
+	var d uint8
+
+	switch r.URL.Path {
+	case "/defcon1":
+		d = 1
+	case "/defcon2":
+		d = 2
+	case "/defcon3":
+		d = 3
+	case "/defcon4":
+		d = 4
+	case "/defcon5":
+		d = 5
+	}
+
+	if d == 0 {
+		return
+	}
+
+	ret = true
 
 	switch *auth {
 	case "":
@@ -394,18 +409,14 @@ func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer, d uint
 
 	lb.DEFCON(d)
 	w.WriteHeader(http.StatusOK)
+	return
 }
 
 func getStats(lb *vc5.LoadBalancer) *Stats {
 
 	now := time.Now()
-
 	status := lb.Status()
 	global, counters := lb.Stats()
-
-	//j, _ := json.MarshalIndent(cf, "", "  ")
-	//fmt.Println(string(j))
-
 	stats := Stats{
 		Octets:  global.Octets,
 		Packets: global.Packets,
@@ -470,6 +481,231 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 	return &stats
 }
 
+/**********************************************************************/
+// Render stats structures into Prometheus metrics
+/**********************************************************************/
+
+func prometheus(g *Stats, start time.Time) []byte {
+
+	uptime := time.Now().Sub(start) / time.Second
+
+	//# HELP haproxy_backend_status Current status of the service (frontend: 0=STOP, 1=UP, 2=FULL - backend: 0=DOWN, 1=UP - server: 0=DOWN, 1=UP, 2=MAINT, 3=DRAIN, 4=NOLB).
+
+	m := []string{
+
+		// TYPE
+
+		`# TYPE vc5_uptime counter`,
+		"# TYPE vc5_defcon gauge",
+		"# TYPE vc5_latency gauge",
+		`# TYPE vc5_sessions gauge`,
+		"# TYPE vc5_session_total counter",
+		"# TYPE vc5_rx_packets counter",
+		"# TYPE vc5_rx_octets counter",
+
+		`# TYPE vc5_vip_status gauge`,
+		`# TYPE vc5_vip_status_duration gauge`,
+
+		`# TYPE vc5_service_sessions gauge`,
+		`# TYPE vc5_service_sessions_total counter`,
+		`# TYPE vc5_service_rx_packets counter`,
+		`# TYPE vc5_service_rx_octets counter`,
+		`# TYPE vc5_service_status gauge`,
+		`# TYPE vc5_service_status_duration gauge`,
+		`# TYPE vc5_service_reserves_used gauge`,
+
+		`# TYPE vc5_backend_sessions gauge`,
+		`# TYPE vc5_backend_sessions_total counter`,
+		`# TYPE vc5_backend_rx_packets counter`,
+		`# TYPE vc5_backend_rx_octets counter`,
+		`# TYPE vc5_backend_status gauge`,
+		`# TYPE vc5_backend_status_duration gauge`,
+
+		// HELP
+
+		`# HELP vc5_uptime Uptime in seconds`,
+		"# HELP vc5_defcon Readiness level",
+		"# HELP vc5_latency Average packet processing latency in nanoseconds",
+		`# HELP vc5_sessions Estimated number of current active sessions`,
+		"# HELP vc5_session_total Total number of new sessions written to state tracking table",
+		"# HELP vc5_rx_packets Total number of incoming packets",
+		"# HELP vc5_rx_octets Total number incoming bytes",
+
+		`# HELP vc5_vip_status gauge`,
+		`# HELP vc5_vip_status_duration gauge`,
+
+		`# HELP vc5_service_sessions gauge`,
+		`# HELP vc5_service_sessions_total counter`,
+		`# HELP vc5_service_rx_packets counter`,
+		`# HELP vc5_service_rx_octets counter`,
+		`# HELP vc5_service_status gauge`,
+		`# HELP vc5_service_status_duration gauge`,
+		`# HELP vc5_service_reserves_used gauge`,
+
+		`# HELP vc5_backend_sessions gauge`,
+		`# HELP vc5_backend_sessions_total counter`,
+		`# HELP vc5_backend_rx_packets counter`,
+		`# HELP vc5_backend_rx_octets counter`,
+		`# HELP vc5_backend_status gauge`,
+		`# HELP vc5_backend_status_duration gauge`,
+	}
+
+	b2u8 := func(v bool) uint8 {
+		if v {
+			return 1
+		}
+		return 0
+	}
+
+	updown := func(v bool) string {
+		if v {
+			return "up"
+		}
+		return "down"
+	}
+
+	m = append(m, fmt.Sprintf(`vc5_uptime %d`, uptime))
+	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
+	m = append(m, fmt.Sprintf("vc5_latency %d", g.Latency))
+	m = append(m, fmt.Sprintf(`vc5_sessions %d`, g.Concurrent))
+	m = append(m, fmt.Sprintf("vc5_session_total %d", g.Flows))
+	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Packets))
+	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Octets))
+
+	for i, v := range g.When {
+		m = append(m, fmt.Sprintf(`vc5_vip_status{vip="%s"} %d`, i, b2u8(g.RHI[i])))
+		m = append(m, fmt.Sprintf(`vc5_vip_status_duration{vip="%s",status="%s"} %d`, i, updown(g.RHI[i]), v))
+	}
+
+	for vip, services := range g.VIPs {
+
+		for l4, v := range services {
+			labels := fmt.Sprintf(`service="%s"`, vip.String()+":"+l4.String())
+
+			if !*nolabel && v.Name != "" {
+				labels += fmt.Sprintf(`,name="%s"`, v.Name)
+			}
+
+			reserve := int(v.Servers) - int(v.Minimum) // eg. 3 reserve servers
+			reserve_used := int(v.Servers) - int(v.Healthy)
+
+			var reserve_used_percent = reserve_used * 100
+
+			if reserve > 0 {
+				reserve_used_percent = (100 * int(reserve_used)) / int(reserve)
+			}
+
+			m = append(m, fmt.Sprintf(`vc5_service_sessions{%s} %d`, labels, v.Concurrent))
+			m = append(m, fmt.Sprintf(`vc5_service_sessions_total{%s} %d`, labels, v.Flows))
+			m = append(m, fmt.Sprintf(`vc5_service_rx_packets{%s} %d`, labels, v.Packets))
+			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{%s} %d`, labels, v.Octets))
+			m = append(m, fmt.Sprintf(`vc5_service_status{%s} %d`, labels, b2u8(v.Up)))
+			m = append(m, fmt.Sprintf(`vc5_service_status_duration{%s,status="%s"} %d`, labels, updown(v.Up), v.When))
+			m = append(m, fmt.Sprintf(`vc5_service_reserve_used{%s} %d`, labels, reserve_used_percent))
+
+			for b, v := range v.Reals {
+				l := labels + fmt.Sprintf(`,backend="%s"`, b)
+				m = append(m, fmt.Sprintf(`vc5_backend_sessions{%s} %d`, l, v.Concurrent))
+				m = append(m, fmt.Sprintf(`vc5_backend_sessions_total{%s} %d`, l, v.Flows))
+				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{%s} %d`, l, v.Packets))
+				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{%s} %d`, l, v.Octets))
+				m = append(m, fmt.Sprintf(`vc5_backend_status{%s} %d`, l, b2u8(v.Up)))
+				m = append(m, fmt.Sprintf(`vc5_backend_status_duration{%s,status="%s"} %d`, l, updown(v.Up), v.When))
+			}
+		}
+	}
+
+	return []byte(strings.Join(m, "\n") + "\n")
+}
+
+/**********************************************************************/
+// Simple logging setup
+/**********************************************************************/
+
+type line struct {
+	Time     time.Time
+	Ms       int64
+	Level    uint8
+	Facility string
+	Entry    []interface{}
+	Text     string
+}
+
+type Logger struct {
+	mu      sync.Mutex
+	history []line
+	Level   uint8
+}
+
+func (l *Logger) Log(level uint8, facility string, entry ...interface{}) {
+	var a []interface{}
+	a = append(a, level)
+	a = append(a, facility)
+	a = append(a, entry...)
+
+	if level <= l.Level {
+		log.Println(a...)
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	ms := int64(time.Now().UnixNano() / int64(time.Millisecond))
+	text := fmt.Sprintln(a...)
+
+	if level < LOG_DEBUG {
+		l.history = append(l.history, line{Ms: ms, Time: time.Now(), Level: level, Facility: facility, Entry: entry, Text: text})
+	}
+
+	for len(l.history) > 10000 {
+		l.history = l.history[1:]
+	}
+}
+
+func (l *Logger) Dump() []line {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	hl := len(l.history)
+	h := make([]line, hl)
+
+	for n, v := range l.history {
+		h[(hl-1)-n] = v
+	}
+
+	return h
+}
+
+func (l *Logger) Since(t int64) []line {
+	for i, v := range l.Dump() {
+		if v.Ms > t {
+			return l.history[i:]
+		}
+	}
+	return []line{}
+}
+
+func (l *Logger) EMERG(f string, e ...interface{})   { l.Log(LOG_EMERG, f, e...) }
+func (l *Logger) ALERT(f string, e ...interface{})   { l.Log(LOG_ALERT, f, e...) }
+func (l *Logger) CRIT(f string, e ...interface{})    { l.Log(LOG_CRIT, f, e...) }
+func (l *Logger) ERR(f string, e ...interface{})     { l.Log(LOG_ERR, f, e...) }
+func (l *Logger) WARNING(f string, e ...interface{}) { l.Log(LOG_WARNING, f, e...) }
+func (l *Logger) NOTICE(f string, e ...interface{})  { l.Log(LOG_NOTICE, f, e...) }
+func (l *Logger) INFO(f string, e ...interface{})    { l.Log(LOG_INFO, f, e...) }
+func (l *Logger) DEBUG(f string, e ...interface{})   { l.Log(LOG_DEBUG, f, e...) }
+
+const (
+	LOG_EMERG   = 0 /* system is unusable */
+	LOG_ALERT   = 1 /* action must be taken immediately */
+	LOG_CRIT    = 2 /* critical conditions */
+	LOG_ERR     = 3 /* error conditions */
+	LOG_WARNING = 4 /* warning conditions */
+	LOG_NOTICE  = 5 /* normal but significant condition */
+	LOG_INFO    = 6 /* informational */
+	LOG_DEBUG   = 7 /* debug-level messages */
+)
+
+/**********************************************************************/
+// JSON schema for web interface updates
 /**********************************************************************/
 
 type Stats struct {
@@ -574,385 +810,3 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 
 	return n
 }
-
-/**********************************************************************/
-
-func ulimit() {
-	var rLimit syscall.Rlimit
-	RLIMIT_MEMLOCK := 8
-	if err := syscall.Getrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
-		log.Fatal("Error Getting Rlimit ", err)
-	}
-	rLimit.Max = 0xffffffffffffffff
-	rLimit.Cur = 0xffffffffffffffff
-	if err := syscall.Setrlimit(RLIMIT_MEMLOCK, &rLimit); err != nil {
-		log.Fatal("Error Setting Rlimit ", err)
-	}
-}
-
-/**********************************************************************/
-func prometheus(g *Stats, start time.Time) []byte {
-
-	uptime := time.Now().Sub(start) / time.Second
-
-	//# HELP haproxy_backend_status Current status of the service (frontend: 0=STOP, 1=UP, 2=FULL - backend: 0=DOWN, 1=UP - server: 0=DOWN, 1=UP, 2=MAINT, 3=DRAIN, 4=NOLB).
-
-	m := []string{
-
-		// TYPE
-
-		`# TYPE vc5_uptime counter`,
-		"# TYPE vc5_defcon gauge",
-		"# TYPE vc5_latency gauge",
-		`# TYPE vc5_sessions gauge`,
-		"# TYPE vc5_session_total counter",
-		"# TYPE vc5_rx_packets counter",
-		"# TYPE vc5_rx_octets counter",
-
-		`# TYPE vc5_vip_status gauge`,
-		`# TYPE vc5_vip_status_duration gauge`,
-
-		`# TYPE vc5_service_sessions gauge`,
-		`# TYPE vc5_service_sessions_total counter`,
-		`# TYPE vc5_service_rx_packets counter`,
-		`# TYPE vc5_service_rx_octets counter`,
-		`# TYPE vc5_service_status gauge`,
-		`# TYPE vc5_service_status_duration gauge`,
-		`# TYPE vc5_service_reserves_used gauge`,
-
-		`# TYPE vc5_backend_sessions gauge`,
-		`# TYPE vc5_backend_sessions_total counter`,
-		`# TYPE vc5_backend_rx_packets counter`,
-		`# TYPE vc5_backend_rx_octets counter`,
-		`# TYPE vc5_backend_status gauge`,
-		`# TYPE vc5_backend_status_duration gauge`,
-
-		// HELP
-
-		`# HELP vc5_uptime Uptime in seconds`,
-		"# HELP vc5_defcon Readiness level",
-		"# HELP vc5_latency Average packet processing latency in nanoseconds",
-		`# HELP vc5_sessions Estimated number of current active sessions`,
-		"# HELP vc5_session_total Total number of new sessions written to state tracking table",
-		"# HELP vc5_rx_packets Total number of incoming packets",
-		"# HELP vc5_rx_octets Total number incoming bytes",
-
-		`# HELP vc5_vip_status gauge`,
-		`# HELP vc5_vip_status_duration gauge`,
-
-		`# HELP vc5_service_sessions gauge`,
-		`# HELP vc5_service_sessions_total counter`,
-		`# HELP vc5_service_rx_packets counter`,
-		`# HELP vc5_service_rx_octets counter`,
-		`# HELP vc5_service_status gauge`,
-		`# HELP vc5_service_status_duration gauge`,
-		`# HELP vc5_service_reserves_used gauge`,
-
-		`# HELP vc5_backend_sessions gauge`,
-		`# HELP vc5_backend_sessions_total counter`,
-		`# HELP vc5_backend_rx_packets counter`,
-		`# HELP vc5_backend_rx_octets counter`,
-		`# HELP vc5_backend_status gauge`,
-		`# HELP vc5_backend_status_duration gauge`,
-	}
-
-	b2u8 := func(v bool) uint8 {
-		if v {
-			return 1
-		}
-		return 0
-	}
-
-	updown := func(v bool) string {
-		if v {
-			return "up"
-		}
-		return "down"
-	}
-
-	//m = append(m, fmt.Sprintf("vc5_packets_per_second %d", g.PacketsPS))
-
-	m = append(m, fmt.Sprintf(`vc5_uptime %d`, uptime))
-	m = append(m, fmt.Sprintf("vc5_defcon %d", g.DEFCON))
-	m = append(m, fmt.Sprintf("vc5_latency %d", g.Latency))
-	m = append(m, fmt.Sprintf(`vc5_sessions %d`, g.Concurrent))
-	m = append(m, fmt.Sprintf("vc5_session_total %d", g.Flows))
-	m = append(m, fmt.Sprintf("vc5_rx_packets %d", g.Packets))
-	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Octets))
-
-	for i, v := range g.When {
-		m = append(m, fmt.Sprintf(`vc5_vip_status{vip="%s"} %d`, i, b2u8(g.RHI[i])))
-		m = append(m, fmt.Sprintf(`vc5_vip_status_duration{vip="%s",status="%s"} %d`, i, updown(g.RHI[i]), v))
-	}
-
-	for vip, services := range g.VIPs {
-
-		for l4, v := range services {
-			labels := fmt.Sprintf(`service="%s"`, vip.String()+":"+l4.String())
-
-			if !*nolabel && v.Name != "" {
-				labels += fmt.Sprintf(`,name="%s"`, v.Name)
-			}
-
-			reserve := int(v.Servers) - int(v.Minimum) // eg. 3 reserve servers
-			reserve_used := int(v.Servers) - int(v.Healthy)
-
-			var reserve_used_percent = reserve_used * 100
-
-			if reserve > 0 {
-				reserve_used_percent = (100 * int(reserve_used)) / int(reserve)
-			}
-
-			m = append(m, fmt.Sprintf(`vc5_service_sessions{%s} %d`, labels, v.Concurrent))
-			m = append(m, fmt.Sprintf(`vc5_service_sessions_total{%s} %d`, labels, v.Flows))
-			m = append(m, fmt.Sprintf(`vc5_service_rx_packets{%s} %d`, labels, v.Packets))
-			m = append(m, fmt.Sprintf(`vc5_service_rx_octets{%s} %d`, labels, v.Octets))
-			m = append(m, fmt.Sprintf(`vc5_service_status{%s} %d`, labels, b2u8(v.Up)))
-			m = append(m, fmt.Sprintf(`vc5_service_status_duration{%s,status="%s"} %d`, labels, updown(v.Up), v.When))
-			m = append(m, fmt.Sprintf(`vc5_service_reserve_used{%s} %d`, labels, reserve_used_percent))
-
-			for b, v := range v.Reals {
-				l := labels + fmt.Sprintf(`,backend="%s"`, b)
-				m = append(m, fmt.Sprintf(`vc5_backend_sessions{%s} %d`, l, v.Concurrent))
-				m = append(m, fmt.Sprintf(`vc5_backend_sessions_total{%s} %d`, l, v.Flows))
-				m = append(m, fmt.Sprintf(`vc5_backend_rx_packets{%s} %d`, l, v.Packets))
-				m = append(m, fmt.Sprintf(`vc5_backend_rx_octets{%s} %d`, l, v.Octets))
-				m = append(m, fmt.Sprintf(`vc5_backend_status{%s} %d`, l, b2u8(v.Up)))
-				m = append(m, fmt.Sprintf(`vc5_backend_status_duration{%s,status="%s"} %d`, l, updown(v.Up), v.When))
-			}
-		}
-	}
-
-	return []byte(strings.Join(m, "\n") + "\n")
-}
-
-/**********************************************************************/
-
-type BGPPool struct {
-	nlri chan map[IP4]bool
-	peer chan []string
-	wait chan bool
-}
-
-func NewBGPPool(ip net.IP, asn uint16, hold uint16, communities []uint32, peer []string, listen bool) *BGPPool {
-	var rid IP4
-
-	if listen {
-		go func() {
-			for {
-				bgpListen()
-				time.Sleep(60 * time.Second)
-			}
-		}()
-	}
-
-	foo := ip.To4()
-
-	if foo == nil {
-		log.Fatal("oops")
-	}
-
-	copy(rid[:], foo[:])
-
-	b := &BGPPool{nlri: make(chan map[IP4]bool), peer: make(chan []string), wait: make(chan bool)}
-	go b.manage(rid, asn, hold, communities)
-	b.peer <- peer
-	close(b.wait)
-	return b
-}
-
-func (b *BGPPool) NLRI(n map[IP4]bool) {
-	b.nlri <- n
-}
-
-func (b *BGPPool) Peer(p []string) {
-	b.peer <- p
-}
-
-func diff(a, b map[IP4]bool) bool {
-	for k, v := range a {
-		if x, ok := b[k]; !ok || x != v {
-			return true
-		}
-	}
-	for k, v := range b {
-		if x, ok := a[k]; !ok || x != v {
-			return true
-		}
-	}
-	return false
-}
-
-func bgpListen() {
-	l, err := net.Listen("tcp", ":179")
-	if err != nil {
-		//logs.NOTICE("BGP4 listen failed", err)
-		return
-	}
-
-	//logs.WARNING("Listening:", l)
-
-	defer l.Close()
-
-	for {
-		conn, err := l.Accept()
-
-		if err != nil {
-			//logs.INFO("BGP4 connection failed", err)
-		} else {
-			go func(c net.Conn) {
-				//logs.WARNING("Accepted conn:", c)
-				defer c.Close()
-				time.Sleep(time.Minute)
-				//logs.WARNING("Quitting", c)
-			}(conn)
-		}
-	}
-}
-
-func (b *BGPPool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32) {
-
-	nlri := map[IP4]bool{}
-	peer := map[string]*bgp4.Peer{}
-
-	for {
-		select {
-		case n := <-b.nlri:
-
-			if !diff(n, nlri) {
-				break
-			}
-
-			//fmt.Println("*******", n, peer)
-
-			for k, v := range peer {
-				for ip, up := range n {
-					fmt.Println("NLRI", ip, up, "to", k)
-					logger.NOTICE("peers", "NLRI", ip, up, "to", k)
-					v.NLRI(bgp4.IP4(ip), up)
-				}
-			}
-
-			nlri = n
-
-		case p := <-b.peer:
-			//fmt.Println("************************************************** PEER", p)
-
-			m := map[string]*bgp4.Peer{}
-
-			for _, s := range p {
-
-				if v, ok := peer[s]; ok {
-					m[s] = v
-					delete(peer, s)
-				} else {
-					h := hold
-					if h == 0 {
-						h = 4
-					}
-
-					v = bgp4.Session(s, rid, rid, asn, h, communities, b.wait, nil)
-					m[s] = v
-					//for k, v := range peer {
-					for ip, up := range nlri {
-						//fmt.Println("peers", "NLRI", ip, up, "to", s)
-						logger.NOTICE("peers", "NLRI", ip, up, "to", s)
-						v.NLRI(bgp4.IP4(ip), up)
-					}
-					//}
-				}
-			}
-
-			for k, v := range peer {
-				logger.NOTICE("peers", "close", k, v)
-				v.Close()
-			}
-
-			peer = m
-		}
-	}
-}
-
-/**********************************************************************/
-
-type line struct {
-	Time     time.Time
-	Ms       int64
-	Level    uint8
-	Facility string
-	Entry    []interface{}
-	Text     string
-}
-
-type Logger struct {
-	mu      sync.Mutex
-	history []line
-	Level   uint8
-}
-
-func (l *Logger) Log(level uint8, facility string, entry ...interface{}) {
-	var a []interface{}
-	a = append(a, level)
-	a = append(a, facility)
-	a = append(a, entry...)
-
-	if level <= l.Level {
-		log.Println(a...)
-	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	ms := int64(time.Now().UnixNano() / int64(time.Millisecond))
-	text := fmt.Sprintln(a...)
-
-	if level < LOG_DEBUG {
-		l.history = append(l.history, line{Ms: ms, Time: time.Now(), Level: level, Facility: facility, Entry: entry, Text: text})
-	}
-
-	for len(l.history) > 10000 {
-		l.history = l.history[1:]
-	}
-}
-
-func (l *Logger) Dump() []line {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	hl := len(l.history)
-	h := make([]line, hl)
-
-	for n, v := range l.history {
-		h[(hl-1)-n] = v
-	}
-
-	return h
-}
-
-func (l *Logger) Since(t int64) []line {
-	for i, v := range l.Dump() {
-		if v.Ms > t {
-			return l.history[i:]
-		}
-	}
-	return []line{}
-}
-
-func (l *Logger) EMERG(f string, e ...interface{})   { l.Log(LOG_EMERG, f, e...) }
-func (l *Logger) ALERT(f string, e ...interface{})   { l.Log(LOG_ALERT, f, e...) }
-func (l *Logger) CRIT(f string, e ...interface{})    { l.Log(LOG_CRIT, f, e...) }
-func (l *Logger) ERR(f string, e ...interface{})     { l.Log(LOG_ERR, f, e...) }
-func (l *Logger) WARNING(f string, e ...interface{}) { l.Log(LOG_WARNING, f, e...) }
-func (l *Logger) NOTICE(f string, e ...interface{})  { l.Log(LOG_NOTICE, f, e...) }
-func (l *Logger) INFO(f string, e ...interface{})    { l.Log(LOG_INFO, f, e...) }
-func (l *Logger) DEBUG(f string, e ...interface{})   { l.Log(LOG_DEBUG, f, e...) }
-
-const (
-	LOG_EMERG   = 0 /* system is unusable */
-	LOG_ALERT   = 1 /* action must be taken immediately */
-	LOG_CRIT    = 2 /* critical conditions */
-	LOG_ERR     = 3 /* error conditions */
-	LOG_WARNING = 4 /* warning conditions */
-	LOG_NOTICE  = 5 /* normal but significant condition */
-	LOG_INFO    = 6 /* informational */
-	LOG_DEBUG   = 7 /* debug-level messages */
-)

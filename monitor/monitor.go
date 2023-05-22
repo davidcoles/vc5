@@ -446,6 +446,11 @@ func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real,
 		nat = real.NAT
 	}
 
+	// When:
+	// * adding a new vip, all checks should start in down state to prevent traffic being sent to the LB
+	// * adding a new service to an existing vip, service should start in "up" state to prevent vip being withdrawn (chaos)
+	// * adding a new real to an existing service, host checks should start in "down" state to prevent hash being changed
+
 	if c.new_vip {
 		probe.Passed = false // new vip - start everything in down state to avoid uneccessary vip advert
 	} else if c.new_svc {
