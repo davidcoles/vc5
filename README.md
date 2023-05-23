@@ -3,11 +3,8 @@
 A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load
 balancer (L4LB) for Linux using XDP/eBPF.
 
-This is very much a proof of concept at this stage - most everything
-is incomplete and poorly defined!
-
 If you think that this may be useful and have any
-questions/suggestions, feel free to contact me at vc5lb@proton.me
+questions/suggestions, feel free to contact me at vc5lb@proton.me or raise a GitHub issue.
 
 ## Homepage
 
@@ -15,24 +12,33 @@ The code is hosted at GitHub, https://github.com/davidcoles/vc5
 
 Clone with `git clone https://github.com/davidcoles/vc5.git`
 
-## vc5ng
+See below for build instructions.
 
-NB: A new execuatble `vc5ng` has been added. The code for this is
-largely separate. This overcomes many of the restrictions with the
-original code and so will now replace it going forward. Some of the
-documentation and examples may not have been updated so please bear
-this in mind. If you have issues that you cannot resolve please
-contact me at the address above.
+## Goals
+
+* Simple deployment with a single binary
+* Stable beckend selection with Maglev hashing algorithm
+* Route health injection handled automatically, no need to run other software such as ExaBGP
+* Minimally invasive - does not require any modification of iptables rules on server
+* No modification of backend servers beyond adding the VIP to a loopback device
+* Health-checks run against the VIP on backend servers - not their real addresses
+* HTTP/HTTPS, full TCP handshake, half-open SYN probe and UDP DNS healthchecks supported
+* As close as possible to line-rate 10Gbps performance
+* In-kernel code execution (with XDP/eBGP) - native mode drivers bypass sk_buff allocation
+* DDoS mitigation with fast early drop rules (filtering at /20 granularity - in progress)
+* Multiple VLAN support (also multiple NICs for developement/lower bandwith applications)
+* Bonded network device support to provide high-availibility with LAG/MLAG
 
 ## About
 
 VC5 is a network load balancer designed to work as replacement for
 legacy hardware appliances. It allows a service with a Virtual IP
-address (VIP) to be distributed to a set of real servers. Real servers
-might run the service themselves or act as proxies for another
+address (VIP) to be distributed over a set of real servers. Real
+servers might run the service themselves or act as proxies for another
 layer of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
-offload). The VIP needs to be configured on a loopback device on real
-server, eg.: `ip a add 192.168.101.1/32 dev lo`
+offload). The only requirement being that the VIP needs to be
+configured on a loopback device on real server, eg.: `ip a add
+192.168.101.1/32 dev lo`
 
 One server with a 10Gbit/s network interface should be capable of
 supporting an HTTP service with 100Gbit/s egress bandwidth due to the
