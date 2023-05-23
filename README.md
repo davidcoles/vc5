@@ -59,6 +59,11 @@ required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
 dpaa2, qede). A full list is availble at [The XDP Project's driver
 support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
 
+A good summary of the concepts in use are discussed in [Patrick
+Shuff's "Building a Billion User Load Balancer"
+talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
+Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
+
 A basic web console and Prometheus metrics server is included: ![Console screenshot](docs/console.jpg)
 
 A sample utility to render traffic from /20 prefixes going through the
@@ -70,11 +75,6 @@ usually active and to generate a table of which /20s to early drop
 traffic from in the case of a DoS/DDoS (particularly spoofed source
 addresses). The drop table is not implemented yet, but will be added
 soon.
-
-A good summary of the concepts in use are discussed in [Patrick
-Shuff's "Building a Billion User Load Balancer"
-talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
-Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
 
 ## Quickstart
 
