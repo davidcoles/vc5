@@ -17,17 +17,19 @@ See below for build instructions.
 ## Goals
 
 * Simple deployment with a single binary
-* Stable beckend selection with Maglev hashing algorithm
-* Route health injection handled automatically, no need to run other software such as ExaBGP
-* Minimally invasive - does not require any modification of iptables rules on server
+* Stable backend selection with Maglev hashing algorithm
+* Route health injection handled automatically; no need to run other software such as ExaBGP
+* Minimally invasive; does not require any modification of iptables rules on server
 * No modification of backend servers beyond adding the VIP to a loopback device
-* Health-checks run against the VIP on backend servers - not their real addresses
+* Health-checks run against the VIP on backend servers, not their real addresses
 * HTTP/HTTPS, full TCP handshake, half-open SYN probe and UDP DNS healthchecks supported
 * As close as possible to line-rate 10Gbps performance
-* In-kernel code execution (with XDP/eBGP) - native mode drivers bypass sk_buff allocation
-* DDoS mitigation with fast early drop rules (filtering at /20 granularity - in progress)
-* Multiple VLAN support (also multiple NICs for developement/lower bandwith applications)
+* In-kernel code execution with XDP/eBGP - native mode drivers bypass sk_buff allocation
+* (D)DoS mitigation with fast early drop rules (filtering at /20 granularity - in progress)
+* Multiple VLAN support (also multiple NICs for developement/lower bandwidth applications)
 * Bonded network device support to provide high-availibility with LAG/MLAG
+* Observability via a web console and Prometheus metrics
+* Simple API to enable embedding into your own project
 
 ## About
 
@@ -41,10 +43,10 @@ configured on a loopback device on real server, eg.: `ip a add
 192.168.101.1/32 dev lo`
 
 One server with a 10Gbit/s network interface should be capable of
-supporting an HTTP service with 100Gbit/s egress bandwidth due to the
-asymmetric nature of most internet traffic. For smaller services a
-modest virtual machine or two will likely handle a service generating
-a few Gbit/s of traffic.
+supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
+to the asymmetric nature of most internet traffic. For smaller
+services a modest virtual machine or two will likely handle a service
+generating a few Gbit/s of traffic.
 
 If one instance is not sufficient then more servers may be added to
 horizontally scale capacity (and provide redundancy) using your
@@ -53,7 +55,7 @@ trunking is supported (see [examples/](examples/) directory).
 
 No kernel modules or complex setups are required, although for best
 performance a network card driver with XDP native mode support is
-needed (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
+required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
 dpaa2, qede). A full list is availble at [The XDP Project's driver
 support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
 
