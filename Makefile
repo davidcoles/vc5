@@ -55,8 +55,9 @@ distclean: clean
 	mkdir libbpf
 
 tests:
-	cd maglev/ && go test -v
-	cd kernel/ && go test -v
+	cd kernel/        && go test -v
+	cd kernel/maglev/ && go test -v
+
 wc:
 	find bgp4 cmd/vc5ng.go config kernel lb maglev monitor types -name \*.go | xargs wc
 	wc kernel/bpf/*.c
