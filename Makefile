@@ -16,8 +16,8 @@ bin:  $(BIN)
 cmd/vc5.yaml:
 	cp docs/config.yaml $@
 
-cmd/vc5.json: tools/config.pl cmd/vc5.yaml
-	tools/config.pl cmd/vc5.yaml >$@
+cmd/vc5.json: cmd/config.pl cmd/vc5.yaml
+	cmd/config.pl cmd/vc5.yaml >$@
 
 cmd/vc5ng: cmd/vc5ng.go $(OBJ)
 	go build -o $@ $<
