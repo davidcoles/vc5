@@ -16,14 +16,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package peers
+package bgp4
 
 import (
 	"fmt"
 	"net"
 	"time"
-
-	"github.com/davidcoles/vc5/bgp4"
+	//"github.com/davidcoles/vc5/bgp4"
 	"github.com/davidcoles/vc5/types"
 )
 
@@ -134,7 +133,7 @@ func bgpListen() {
 func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32) {
 
 	nlri := map[IP4]bool{}
-	peer := map[string]*bgp4.Peer{}
+	peer := map[string]*Peer{}
 
 	for {
 		select {
@@ -150,7 +149,7 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 				for ip, up := range n {
 					fmt.Println("NLRI", ip, up, "to", k)
 					//logger.NOTICE("peers", "NLRI", ip, up, "to", k)
-					v.NLRI(bgp4.IP4(ip), up)
+					v.NLRI(IP4(ip), up)
 				}
 			}
 
@@ -159,7 +158,7 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 		case p := <-b.peer:
 			//fmt.Println("************************************************** PEER", p)
 
-			m := map[string]*bgp4.Peer{}
+			m := map[string]*Peer{}
 
 			for _, s := range p {
 
@@ -172,13 +171,13 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 						h = 4
 					}
 
-					v = bgp4.Session(s, rid, rid, asn, h, communities, b.wait, nil)
+					v = Session(s, rid, rid, asn, h, communities, b.wait, nil)
 					m[s] = v
 					//for k, v := range peer {
 					for ip, up := range nlri {
 						//fmt.Println("peers", "NLRI", ip, up, "to", s)
 						//logger.NOTICE("peers", "NLRI", ip, up, "to", s)
-						v.NLRI(bgp4.IP4(ip), up)
+						v.NLRI(IP4(ip), up)
 					}
 					//}
 				}

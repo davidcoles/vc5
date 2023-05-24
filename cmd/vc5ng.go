@@ -48,7 +48,7 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5"
-	"github.com/davidcoles/vc5/peers"
+	"github.com/davidcoles/vc5/bgp4"
 )
 
 var logger *Logger
@@ -150,7 +150,7 @@ func main() {
 
 	logger = &Logger{Level: uint8(*level)}
 
-	pool := peers.Pool{
+	pool := bgp4.Pool{
 		Address:     addr,
 		ASN:         conf.RHI.AS_Number,
 		HoldTime:    conf.RHI.Hold_Time,

@@ -27,11 +27,11 @@ import (
 	//"time"
 )
 
-type IP4 [4]byte
+//type IP4 [4]byte
 
-func (i IP4) String() string {
-	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
-}
+//func (i IP4) String() string {
+//	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
+//}
 
 const IDLE = 0
 const CONNECT = 1
