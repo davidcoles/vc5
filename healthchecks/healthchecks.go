@@ -25,7 +25,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/davidcoles/vc5/config2"
+	"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/types"
 )
 
@@ -34,8 +34,8 @@ type MAC = types.MAC
 type NET = types.NET
 type L4 = types.L4
 type Protocol = types.Protocol
-type Checks = config2.Checks
-type Check = config2.Check
+type Checks = config.Checks
+type Check = config.Check
 
 type Metadata struct {
 	Name        string `json:",omitempty"`
@@ -106,18 +106,18 @@ type Healthchecks struct {
 	VLAN    map[uint16]string
 }
 
-func Load(c *config2.Conf) (*Healthchecks, error) {
+func Load(c *config.Config) (*Healthchecks, error) {
 	return _ConfHealthchecks(c, nil)
 }
 
-func (h *Healthchecks) Reload(c *config2.Conf) (*Healthchecks, error) {
+func (h *Healthchecks) Reload(c *config.Config) (*Healthchecks, error) {
 	return _ConfHealthchecks(c, h)
 }
 
 func (h *Healthchecks) VLANs() map[uint16]string { return h.VLAN }
 func (h *Healthchecks) VID(r IP4) uint16         { return h._VID[r] }
 
-func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error) {
+func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, error) {
 
 	var hc Healthchecks
 
@@ -133,9 +133,8 @@ func _ConfHealthchecks(c *config2.Conf, old *Healthchecks) (*Healthchecks, error
 
 			reals := map[IP4]Real{}
 
-			for rip, z := range y.RIPs {
-				real := Real{RIP: rip, Checks: z.Checks()}
-				reals[rip] = real
+			for rip, checks := range y.RIPs {
+				reals[rip] = Real{RIP: rip, Checks: checks}
 			}
 
 			v.Services[l4] = Service{

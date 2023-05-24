@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davidcoles/vc5/config2"
+	"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
@@ -30,8 +30,8 @@ type NET = types.NET
 type Target = kernel.Target
 type Status = monitor.Report
 
-func LoadConf(file string) (*config2.Conf, error) {
-	return config2.Load(file)
+func LoadConf(file string) (*config.Config, error) {
+	return config.Load(file)
 }
 
 func NetnsServer(sock string) {
@@ -296,25 +296,6 @@ ip r replace ` + cbs + `/16 via ` + ip2 + `
 	}
 }
 
-/**********************************************************************/
-/*
-func (lb *LoadBalancer) LoadConf(file string, mynet NET) (*healthchecks.Healthchecks, error) {
-	conf, err := config2.Load(file)
-
-	if err != nil {
-		return nil, err
-	}
-
-	//j, _ := json.MarshalIndent(conf, "", "  ")
-	//if false {
-	//	fmt.Println(string(j))
-	//	return
-	//}
-
-	return healthchecks.Load(mynet, conf)
-}
-*/
-
-func (lb *LoadBalancer) Load(conf *config2.Conf) (*healthchecks.Healthchecks, error) {
+func (lb *LoadBalancer) Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
 	return healthchecks.Load(conf)
 }

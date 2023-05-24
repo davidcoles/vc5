@@ -154,7 +154,7 @@ func main() {
 		Address:     addr,
 		ASN:         conf.RHI.AS_Number,
 		HoldTime:    conf.RHI.Hold_Time,
-		Communities: conf.RHI.Communities(),
+		Communities: conf.RHI.Community(),
 		Peers:       conf.RHI.Peers,
 		Listen:      conf.RHI.Listen,
 	}
@@ -270,7 +270,6 @@ func main() {
 		now := time.Now()
 
 		if now.Sub(timestamp) > (time.Second * 50) {
-			fmt.Println("RENDERING")
 			p := lb.Prefixes()
 			j, err := json.Marshal(p)
 
@@ -294,6 +293,16 @@ func main() {
 
 		for _, l := range logger.Dump() {
 			w.Write([]byte(fmt.Sprintln(l)))
+		}
+	})
+
+	http.HandleFunc("/conf.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if j, err := json.MarshalIndent(conf, "", "  "); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+			w.Write(j)
 		}
 	})
 
