@@ -301,8 +301,8 @@ func (s *Serv) Close() {
 func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 	var status Service
-	var fallback *Real
-	reals := map[IP4]*Real{}
+	var fallback *_Real
+	reals := map[IP4]*_Real{}
 
 	update := func(service *Service, fin bool) {
 		if service != nil {
@@ -416,23 +416,23 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 	}
 }
 
-type Real struct {
+type _Real struct {
 	f func(*healthchecks.Real, bool) Probe
 }
 
-func StartReal(real healthchecks.Real, c context, local bool) *Real {
-	return &Real{f: rip(real, c, local)}
+func StartReal(real healthchecks.Real, c context, local bool) *_Real {
+	return &_Real{f: rip(real, c, local)}
 }
 
-func (r *Real) Close() {
+func (r *_Real) Close() {
 	r.f(nil, true)
 }
 
-func (r *Real) Reconfigure(real healthchecks.Real) {
+func (r *_Real) Reconfigure(real healthchecks.Real) {
 	r.f(&real, false)
 }
 
-func (r *Real) Status() Probe {
+func (r *_Real) Status() Probe {
 	return r.f(nil, false)
 }
 

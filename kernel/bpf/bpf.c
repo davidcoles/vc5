@@ -107,15 +107,8 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct flow);
     __type(value, struct state);
-    __uint(max_entries, 1048576);
+    __uint(max_entries, MAX_FLOWS);
 } flow_state SEC(".maps");
-
-//struct {
-//    __uint(type, BPF_MAP_TYPE_PERCPU_HASH);
-//    __type(key, struct flow);
-//    __type(value, struct state);
-//    __uint(max_entries, MAX_FLOWS_PERCPU);
-//} flow_state_percpu SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
