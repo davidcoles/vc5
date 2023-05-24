@@ -32,9 +32,8 @@ type IP4 = types.IP4
 type MAC = types.MAC
 type L4 = types.L4
 
-type Checks = types.Checks
-type Check = types.Check
-
+type Checks = healthchecks.Checks
+type Check = healthchecks.Check
 type Metadata = healthchecks.Metadata
 type Healthchecks = healthchecks.Healthchecks
 type Service = healthchecks.Service
@@ -567,31 +566,31 @@ func probes(nat IP4, socket string, checks Checks) (bool, string) {
 		return false, "Internal error - NAT address is nil"
 	}
 
-	for _, c := range checks.Https {
+	for _, c := range checks.HTTPS {
 		if ok, msg := netns.Probe(socket, nat, "https", c); !ok {
 			return false, "HTTPS probe failed: " + msg
 		}
 	}
 
-	for _, c := range checks.Http {
+	for _, c := range checks.HTTP {
 		if ok, msg := netns.Probe(socket, nat, "http", c); !ok {
 			return false, "HTTP probe failed: " + msg
 		}
 	}
 
-	for _, c := range checks.Tcp {
+	for _, c := range checks.TCP {
 		if ok, msg := netns.Probe(socket, nat, "tcp", c); !ok {
 			return false, "TCP probe failed: " + msg
 		}
 	}
 
-	for _, c := range checks.Syn {
+	for _, c := range checks.SYN {
 		if ok, msg := netns.Probe(socket, nat, "syn", c); !ok {
 			return false, "SYN probe failed: " + msg
 		}
 	}
 
-	for _, c := range checks.Dns {
+	for _, c := range checks.DNS {
 		if ok, msg := netns.Probe(socket, nat, "dns", c); !ok {
 			return false, "DNS probe failed: " + msg
 		}

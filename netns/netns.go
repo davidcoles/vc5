@@ -34,15 +34,18 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/types"
 )
+
+type Check = healthchecks.Check
 
 var client *http.Client
 
 type probe struct {
 	IP     types.IP4
 	Scheme string
-	Check  types.Check
+	Check  Check
 }
 
 type response struct {
@@ -85,7 +88,7 @@ func Spawn(netns string, args ...string) {
 	}
 }
 
-func Probe(path string, ip types.IP4, scheme string, check types.Check) (bool, string) {
+func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string) {
 
 	if client == nil {
 		client = &http.Client{

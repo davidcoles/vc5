@@ -17,21 +17,6 @@ func htons(p uint16) [2]byte {
 	return hl
 }
 
-type Check struct {
-	Path   string `json:"path"`
-	Port   uint16 `json:"port"'`
-	Expect uint32 `json:"expect"`
-	Host   string `json:"host"`
-}
-
-type Checks struct {
-	Http  []Check `json:"http,omitempty"`
-	Https []Check `json:"https,omitempty"`
-	Tcp   []Check `json:"tcp,omitempty"`
-	Syn   []Check `json:"syn,omitempty"`
-	Dns   []Check `json:"dns,omitempty"`
-}
-
 type NIC struct {
 	Name  string
 	IP    net.IP
