@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5/healthchecks"
-	"github.com/davidcoles/vc5/netns"
+	"github.com/davidcoles/vc5/monitor/netns"
 	"github.com/davidcoles/vc5/types"
 )
 
