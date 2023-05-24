@@ -24,8 +24,8 @@ import (
 	"net"
 	"time"
 
+	"github.com/davidcoles/vc5/kernel/xdp"
 	"github.com/davidcoles/vc5/types"
-	"github.com/davidcoles/vc5/xdp"
 )
 
 type NAT struct {
