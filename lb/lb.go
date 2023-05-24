@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5/config"
-	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
+	"github.com/davidcoles/vc5/monitor/healthchecks"
 	"github.com/davidcoles/vc5/monitor/netns"
 	"github.com/davidcoles/vc5/types"
 )
@@ -29,6 +29,14 @@ type L4 = types.L4
 type NET = types.NET
 type Target = kernel.Target
 type Status = monitor.Report
+
+func Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
+	return healthchecks.Load(conf)
+}
+
+func (lb *LoadBalancer) LoadConf(file string) (*config.Config, error) {
+	return config.Load(file)
+}
 
 func LoadConf(file string) (*config.Config, error) {
 	return config.Load(file)

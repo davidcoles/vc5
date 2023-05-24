@@ -28,10 +28,10 @@ import (
 	"sort"
 	"unsafe"
 
-	"github.com/davidcoles/vc5/healthchecks"
 	"github.com/davidcoles/vc5/kernel/xdp"
 	"github.com/davidcoles/vc5/maglev"
 	"github.com/davidcoles/vc5/monitor"
+	"github.com/davidcoles/vc5/monitor/healthchecks"
 	"github.com/davidcoles/vc5/types"
 )
 
