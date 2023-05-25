@@ -33,40 +33,42 @@ import (
 //	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
 //}
 
-const IDLE = 0
-const CONNECT = 1
-const ACTIVE = 2
-const OPEN_SENT = 3
-const OPEN_CONFIRM = 4
-const ESTABLISHED = 5
+const (
+	IDLE         = 0
+	CONNECT      = 1
+	ACTIVE       = 2
+	OPEN_SENT    = 3
+	OPEN_CONFIRM = 4
+	ESTABLISHED  = 5
 
-const M_OPEN = 1
-const M_UPDATE = 2
-const M_NOTIFICATION = 3
-const M_KEEPALIVE = 4
+	M_OPEN         = 1
+	M_UPDATE       = 2
+	M_NOTIFICATION = 3
+	M_KEEPALIVE    = 4
 
-const IGP = 0
-const EGP = 1
+	IGP = 0
+	EGP = 1
 
-const ORIGIN = 1
-const AS_PATH = 2
-const NEXT_HOP = 3
-const LOCAL_PREF = 5
-const COMMUNITIES = 8
+	ORIGIN      = 1
+	AS_PATH     = 2
+	NEXT_HOP    = 3
+	LOCAL_PREF  = 5
+	COMMUNITIES = 8
 
-const AS_SET = 1
-const AS_SEQUENCE = 2
+	AS_SET      = 1
+	AS_SEQUENCE = 2
 
-const HOLD_TIMER_EXPIRED = 4
-const CEASE = 6
+	HOLD_TIMER_EXPIRED = 4
+	CEASE              = 6
 
-const ADMINISTRATIVE_SHUTDOWN = 2
-const ADMINISTRATIVE_RESET = 4
+	ADMINISTRATIVE_SHUTDOWN = 2
+	ADMINISTRATIVE_RESET    = 4
 
-const WTCR = 64  // (Well-known, Transitive, Complete, Regular length)
-const WTCE = 80  // (Well-known, Transitive, Complete, Extended length)
-const ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)
-const OTCR = 192 // (Optional, Transitive, Complete, Regular length)
+	WTCR = 64  // (Well-known, Transitive, Complete, Regular length)
+	WTCE = 80  // (Well-known, Transitive, Complete, Extended length)
+	ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)
+	OTCR = 192 // (Optional, Transitive, Complete, Regular length)
+)
 
 // Optional/Well-known, Non-transitive/Transitive Complete/Partial Regular/Extended-length
 // 128 64 32 16 8 4 2 1
