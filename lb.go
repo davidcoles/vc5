@@ -49,9 +49,9 @@ type LoadBalancer struct {
 
 	balancer *kernel.Balancer
 	maps     *kernel.Maps
+	netns    *kernel.NetNS
 	report   monitor.Report
 	mutex    sync.Mutex
-	netns    kernel.NetNS
 
 	update chan *healthchecks.Healthchecks
 }
@@ -86,19 +86,17 @@ func (lb *LoadBalancer) Update(hc *healthchecks.Healthchecks) {
 
 func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) error {
 
-	ipaddr := net.ParseIP(address)
+	ip := net.ParseIP(address)
 
-	if ipaddr == nil {
+	if ip == nil {
 		return errors.New("Invalid IP address")
 	}
 
-	ip4 := ipaddr.To4()
+	ip = ip.To4()
 
-	if ip4 == nil {
+	if ip == nil {
 		return errors.New("Not an IPv4 address")
 	}
-
-	ip := IP4{ip4[0], ip4[1], ip4[2], ip4[3]}
 
 	l := lb.Logger
 
@@ -106,7 +104,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		l = &types.NilLogger{}
 	}
 
-	ns := kernel.NetNS{}
+	ns := &kernel.NetNS{}
 	err := ns.Init()
 
 	if err != nil {
@@ -148,7 +146,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		copy(bondmac[:], iface.HardwareAddr[:])
 	}
 
-	lb.maps, err = kernel.Open(native, ns.A, ns.B, peth...)
+	lb.maps, err = kernel.Open(native, ns.IfA, ns.IfB, peth...)
 
 	if err != nil {
 		return err
@@ -172,7 +170,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 
 	nat := &kernel.NAT{
 		Maps:          lb.maps,
-		DefaultIP:     ip,
+		DefaultIP:     IP4{ip[0], ip[1], ip[2], ip[3]},
 		PhysicalMAC:   bondmac,
 		PhysicalIndex: bondidx,
 		NetNS:         ns,

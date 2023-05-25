@@ -32,12 +32,11 @@ type NAT struct {
 	C      chan *Healthchecks
 	Logger types.Logger
 	Maps   *maps
+	NetNS  *NetNS
 
 	DefaultIP     IP4
 	PhysicalMAC   MAC
 	PhysicalIndex int
-
-	NetNS NetNS
 
 	in    chan *Healthchecks
 	pings map[IP4]chan bool
@@ -61,7 +60,7 @@ func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 
 	go n.nat(h, natMap, icmp)
 
-	return copyHealthchecks(n.NetNS.IPA(), h, natMap, arp()), nil // fill in MACs + NAT addresses
+	return copyHealthchecks(n.NetNS.IpA, h, natMap, arp()), nil // fill in MACs + NAT addresses
 }
 
 func (n *NAT) Close() {
@@ -101,11 +100,11 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 	physip := n.DefaultIP
 
-	vc5aip := n.NetNS.IPA()
-	vc5bip := n.NetNS.IPB()
+	vc5aip := n.NetNS.IpA
+	vc5bip := n.NetNS.IpB
 
-	vc5amac := n.NetNS.MacA
-	vc5bmac := n.NetNS.MacB
+	vc5amac := n.NetNS.HwA
+	vc5bmac := n.NetNS.HwB
 
 	vethif := uint32(n.NetNS.Index)
 
