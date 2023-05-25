@@ -141,7 +141,6 @@ func (g *bpf_global) add(a bpf_global) {
 	g.rx_octets += a.rx_octets
 	g.perf_packets += a.perf_packets
 	g.perf_timens += a.perf_timens
-	//g.defcon = a.defcon
 	g.new_flows += a.new_flows
 }
 
@@ -149,8 +148,6 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	var m maps
 	m.m = make(map[string]int)
 	m.defcon = 5
-
-	//x, err := xdp.LoadBpfFile_(BPF_O, "incoming", "outgoing", native, vetha, vethb, eth...)
 
 	x, err := xdp.LoadBpfProgram(BPF_O)
 
@@ -202,11 +199,6 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	if m.m["settings"], err = find_map(x, "settings", 4, 16); err != nil {
 		return nil, err
 	}
-
-	//if m.m["redirect_map_hash"], err = find_map(x, "redirect_map_hash", 4, 4); err != nil {
-	//	return nil, err
-	//}
-
 	if m.m["redirect_map"], err = find_map(x, "redirect_map", 4, 4); err != nil {
 		return nil, err
 	}
@@ -236,10 +228,8 @@ func (m *maps) globals() int         { return m.m["globals"] }
 func (m *maps) settings() int        { return m.m["settings"] }
 func (m *maps) nat() int             { return m.m["nat"] }
 func (m *maps) prefix_counters() int { return m.m["prefix_counters"] }
-
-//func (m *maps) redirect_map_hash() int { return m.m["redirect_map_hash"] }
-func (m *maps) redirect_map() int { return m.m["redirect_map"] }
-func (m *maps) redirect_mac() int { return m.m["redirect_mac"] }
+func (m *maps) redirect_map() int    { return m.m["redirect_map"] }
+func (m *maps) redirect_mac() int    { return m.m["redirect_mac"] }
 
 const PREFIXES = 1048576
 

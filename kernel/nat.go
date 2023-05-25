@@ -99,12 +99,10 @@ func (n *natval) String() string {
 func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 	physip := n.DefaultIP
-
 	vc5aip := n.NetNS.IpA
 	vc5bip := n.NetNS.IpB
-
-	vc5amac := n.NetNS.HwA
-	vc5bmac := n.NetNS.HwB
+	vc5ahw := n.NetNS.HwA
+	vc5bhw := n.NetNS.HwB
 
 	vethif := uint32(n.NetNS.Index)
 
@@ -134,10 +132,10 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 			rip := vr[1]
 			nat := natAddress(idx, vc5bip)
 
-			physmac := n.PhysicalMAC
+			physhw := n.PhysicalMAC
 			physif := uint32(n.PhysicalIndex)
 
-			realmac, _ := macs[rip]
+			realhw, _ := macs[rip]
 
 			var vlanid uint16
 			vlanip := physip
@@ -152,28 +150,28 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 			n.Logger.DEBUG("nat", "vip/rip/vlanid/vlanip", vip, rip, vlanid, vlanip)
 
 			if vlanid != 0 {
-				physmac = ifmacs[vlanid]
+				physhw = ifmacs[vlanid]
 				physif = uint32(redirect[vlanid])
 			}
 
 			// outgoing probes
-			key := natkey{src_ip: vc5bip, src_mac: vc5bmac, dst_ip: nat, dst_mac: vc5amac}
-			val := natval{src_ip: vlanip, src_mac: physmac, dst_ip: vip, dst_mac: realmac, ifindex: physif, vlan: vlanid}
+			key := natkey{src_ip: vc5bip, src_mac: vc5bhw, dst_ip: nat, dst_mac: vc5ahw}
+			val := natval{src_ip: vlanip, src_mac: physhw, dst_ip: vip, dst_mac: realhw, ifindex: physif, vlan: vlanid}
 			n.Logger.DEBUG("nat", "Outgoing map", key.String(), val.String())
 
 			table[key] = true
 
 			xdp.BpfMapUpdateElem(n.maps.nat(), uP(&key), uP(&val), xdp.BPF_ANY)
 
-			if realmac.IsNil() {
+			if realhw.IsNil() {
 				// write the out map for hosts with no arp to catch (and drop) on the way out, but don't put return map in
-				n.Logger.DEBUG("nat", "VIP/RIP has no ARP entry", vip, rip, realmac)
+				n.Logger.DEBUG("nat", "VIP/RIP has no ARP entry", vip, rip, realhw)
 				continue
 			}
 
 			// returning probes
-			key = natkey{src_ip: vip, src_mac: realmac, dst_ip: vlanip, dst_mac: physmac}
-			val = natval{src_ip: nat, src_mac: vc5amac, dst_ip: vc5bip, dst_mac: vc5bmac, ifindex: vethif}
+			key = natkey{src_ip: vip, src_mac: realhw, dst_ip: vlanip, dst_mac: physhw}
+			val = natval{src_ip: nat, src_mac: vc5ahw, dst_ip: vc5bip, dst_mac: vc5bhw, ifindex: vethif}
 			n.Logger.DEBUG("nat", "Returning map", key.String(), val.String())
 
 			table[key] = true
