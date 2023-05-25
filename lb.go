@@ -1,11 +1,11 @@
-package lb
+package vc5
 
 import (
 	//"fmt"
 	"errors"
 	"log"
 	"net"
-	"os/exec"
+	//"os/exec"
 	"sync"
 	"time"
 
@@ -61,6 +61,7 @@ type LoadBalancer struct {
 	maps     *kernel.Maps
 	report   monitor.Report
 	mutex    sync.Mutex
+	netns    kernel.NetNS
 
 	update chan *healthchecks.Healthchecks
 }
@@ -86,19 +87,19 @@ func (lb *LoadBalancer) DEFCON(d uint8) uint8 {
 
 func (lb *LoadBalancer) Close() {
 	close(lb.update)
-	clean(VC5A, NAMESPACE)
+	lb.netns.Close()
+	//clean(VC5A, NAMESPACE)
 }
 
 func (lb *LoadBalancer) Update(hc *healthchecks.Healthchecks) {
 	lb.update <- hc
 }
 
-func (lb *LoadBalancer) Start(ipaddr_ string, hc *healthchecks.Healthchecks) error {
+func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) error {
 
-	ipaddr := net.ParseIP(ipaddr_)
+	ipaddr := net.ParseIP(address)
 
 	if ipaddr == nil {
-		//log.Fatal("IP is nil")
 		return errors.New("Invalid IP address")
 	}
 
@@ -116,11 +117,20 @@ func (lb *LoadBalancer) Start(ipaddr_ string, hc *healthchecks.Healthchecks) err
 		l = &types.NilLogger{}
 	}
 
+	ns := kernel.NetNS{}
+	err := ns.Init()
+
+	if err != nil {
+		return err
+	}
+
+	lb.netns = ns
+
 	var cleanup bool = true
 
 	defer func() {
 		if cleanup {
-			clean(VC5A, NAMESPACE)
+			ns.Close()
 		}
 	}()
 
@@ -129,9 +139,6 @@ func (lb *LoadBalancer) Start(ipaddr_ string, hc *healthchecks.Healthchecks) err
 	native := lb.Native
 	args := lb.NetnsCommand
 	sock := lb.Socket
-
-	var vc5amac [6]byte
-	var vc5bmac [6]byte
 
 	var bondidx int
 	var bondmac [6]byte
@@ -152,37 +159,25 @@ func (lb *LoadBalancer) Start(ipaddr_ string, hc *healthchecks.Healthchecks) err
 		copy(bondmac[:], iface.HardwareAddr[:])
 	}
 
-	setup1(VC5A, VC5B)
-
-	iface, err := net.InterfaceByName(VC5A)
-	if err != nil {
-		return err
-	}
-	copy(vc5amac[:], iface.HardwareAddr[:])
-
-	vc5aidx := iface.Index
-
-	iface, err = net.InterfaceByName(VC5B)
-	if err != nil {
-		return err
-	}
-	copy(vc5bmac[:], iface.HardwareAddr[:])
-
-	lb.maps, err = kernel.Open(native, VC5A, VC5B, peth...)
+	lb.maps, err = kernel.Open(native, ns.A, ns.B, peth...)
 
 	if err != nil {
 		return err
 	}
+
+	err = ns.Open()
+
+	if err != nil {
+		return err
+	}
+
+	cleanup = false
 
 	lb.maps.MODE(lb.MultiNIC)
 
 	if lb.ReadinessLevel != 0 {
 		lb.DEFCON(lb.ReadinessLevel)
 	}
-
-	cleanup = false
-
-	setup2(NAMESPACE, VC5A, VC5B, vc5aip, vc5bip)
 
 	go netns.Spawn(NAMESPACE, args...)
 
@@ -193,12 +188,13 @@ func (lb *LoadBalancer) Start(ipaddr_ string, hc *healthchecks.Healthchecks) err
 		PhysicalMAC:   bondmac,
 		PhysicalIndex: bondidx,
 
-		VC5aIf: vc5aidx,
-		VC5aIP: vc5aip,
-		VC5bIP: vc5bip,
+		//VC5aIf:  ns.Index,
+		//VC5aIP:  ns.IPA(),
+		//VC5bIP:  ns.IPB(),
+		//VC5aMAC: ns.MacA,
+		//VC5bMAC: ns.MacB,
 
-		VC5aMAC: vc5amac,
-		VC5bMAC: vc5bmac,
+		NetNS: ns,
 
 		Logger: l,
 	}
@@ -261,6 +257,52 @@ func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balanc
 }
 
 /**********************************************************************/
+/*
+type NetNS struct {
+	Range      [2]byte
+	A, B       string
+	MacA, MacB [6]byte
+	Index      int
+	NS         string
+}
+
+func (n *NetNS) Init() error {
+	if n.Range[0] == 0 {
+		n.Range[0] = 10
+		n.Range[1] = 255
+	}
+
+	n.NS = NAMESPACE
+	n.A = "vc5a"
+	n.B = "vc5b"
+
+	setup1(n.A, n.B)
+
+	iface, err := net.InterfaceByName(n.A)
+	if err != nil {
+		return err
+	}
+	copy(n.MacA[:], iface.HardwareAddr[:])
+
+	n.Index = iface.Index
+
+	iface, err = net.InterfaceByName(n.B)
+	if err != nil {
+		return err
+	}
+	copy(n.MacB[:], iface.HardwareAddr[:])
+
+	return nil
+}
+
+func (n *NetNS) Open() error {
+	setup2(n.NS, n.A, n.B, n.IPA(), n.IPB())
+	return nil
+}
+
+func (n *NetNS) Close()   { clean(n.A, n.NS) }
+func (n *NetNS) IPA() IP4 { return IP4{n.Range[0], n.Range[1], 255, 253} }
+func (n *NetNS) IPB() IP4 { return IP4{n.Range[0], n.Range[1], 255, 254} }
 
 func clean(if1, ns string) {
 	script1 := `
@@ -303,6 +345,7 @@ ip r replace ` + cbs + `/16 via ` + ip2 + `
 		log.Fatal(err)
 	}
 }
+*/
 
 func (lb *LoadBalancer) Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
 	return healthchecks.Load(conf)

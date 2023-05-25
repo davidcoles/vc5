@@ -47,8 +47,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/davidcoles/vc5"
 	"github.com/davidcoles/vc5/bgp4"
-	"github.com/davidcoles/vc5/lb"
 )
 
 var logger *Logger
@@ -56,9 +56,9 @@ var logger *Logger
 //go:embed static/*
 var STATIC embed.FS
 
-type IP4 = lb.IP4
-type L4 = lb.L4
-type Target = lb.Target
+type IP4 = vc5.IP4
+type L4 = vc5.L4
+type Target = vc5.Target
 
 var level = flag.Uint("l", LOG_ERR, "debug level level")
 var kill = flag.Uint("k", 0, "killswitch engage - automatic shutoff after k minutes")
@@ -93,7 +93,7 @@ func main() {
 
 	if *sock != "" {
 		signal.Ignore(syscall.SIGUSR2, syscall.SIGQUIT)
-		lb.NetnsServer(*sock)
+		vc5.NetnsServer(*sock)
 		return
 	}
 
@@ -103,7 +103,7 @@ func main() {
 	addr := args[1]
 	peth := args[2:]
 
-	conf, err := lb.LoadConf(file)
+	conf, err := vc5.LoadConf(file)
 
 	if err != nil {
 		log.Fatal(err)
@@ -136,7 +136,7 @@ func main() {
 		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" rx off; ethtool -K "+v+" txvlan off;").Output()
 	}
 
-	hc, err := lb.Load(conf)
+	hc, err := vc5.Load(conf)
 
 	if err != nil {
 		log.Fatal(err)
@@ -163,7 +163,7 @@ func main() {
 		log.Fatal("BGP peer initialisation failed")
 	}
 
-	lb := &lb.LoadBalancer{
+	lb := &vc5.LoadBalancer{
 		ReadinessLevel:  uint8(*dfcn),
 		KillSwitch:      *kill,
 		Native:          *native,
@@ -378,7 +378,7 @@ func main() {
 	log.Fatal(server.Serve(s))
 }
 
-func defcon(w http.ResponseWriter, r *http.Request, lb *lb.LoadBalancer) (ret bool) {
+func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer) (ret bool) {
 
 	var d uint8
 
@@ -421,7 +421,7 @@ func defcon(w http.ResponseWriter, r *http.Request, lb *lb.LoadBalancer) (ret bo
 	return
 }
 
-func getStats(lb *lb.LoadBalancer) *Stats {
+func getStats(lb *vc5.LoadBalancer) *Stats {
 
 	now := time.Now()
 	status := lb.Status()
