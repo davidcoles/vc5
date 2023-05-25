@@ -55,8 +55,6 @@ type response struct {
 
 func Spawn(netns string, args ...string) {
 	for {
-		//fmt.Println(args[0], args[1], args[2])
-
 		cmd := exec.Command("ip", append([]string{"netns", "exec", netns}, args...)...)
 		_, _ = cmd.StdinPipe()
 		stderr, _ := cmd.StderrPipe()

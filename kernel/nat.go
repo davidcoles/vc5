@@ -37,12 +37,6 @@ type NAT struct {
 	PhysicalMAC   MAC
 	PhysicalIndex int
 
-	//VC5aIf int
-	//VC5aIP IP4
-	//VC5bIP IP4
-	//VC5aMAC MAC
-	//VC5bMAC MAC
-
 	NetNS NetNS
 
 	in    chan *Healthchecks
@@ -67,7 +61,6 @@ func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 
 	go n.nat(h, natMap, icmp)
 
-	//return copyHealthchecks(n.VC5aIP, h, natMap, arp()), nil // fill in MACs + NAT addresses
 	return copyHealthchecks(n.NetNS.IPA(), h, natMap, arp()), nil // fill in MACs + NAT addresses
 }
 
@@ -108,11 +101,11 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 	physip := n.DefaultIP
 
-	vc5aip := n.NetNS.IPA() //n.VC5aIP
-	vc5bip := n.NetNS.IPB() //n.VC5bIP
+	vc5aip := n.NetNS.IPA()
+	vc5bip := n.NetNS.IPB()
 
-	vc5amac := n.NetNS.MacA //n.VC5aMAC
-	vc5bmac := n.NetNS.MacB //n.VC5bMAC
+	vc5amac := n.NetNS.MacA
+	vc5bmac := n.NetNS.MacB
 
 	vethif := uint32(n.NetNS.Index)
 
