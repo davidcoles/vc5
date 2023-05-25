@@ -195,7 +195,7 @@ func main() {
 				log.Println("RELOAD")
 				time.Sleep(1 * time.Second)
 
-				conf, err := lb.LoadConf(file)
+				conf, err := vc5.LoadConf(file)
 
 				if err != nil {
 					log.Println(err)

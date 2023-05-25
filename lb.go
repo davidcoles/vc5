@@ -19,20 +19,13 @@ type IP4 = types.IP4
 type L4 = types.L4
 type Target = kernel.Target
 
-//type Status = monitor.Report
-
-//func (lb *LoadBalancer) Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
-//	return healthchecks.Load(conf)
-//}
-
+// Generate a Healthchecks object from a Config
 func Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
 	return healthchecks.Load(conf)
 }
 
-func (lb *LoadBalancer) LoadConf(file string) (*config.Config, error) {
-	return config.Load(file)
-}
-
+// Unmarshal a Config object from a JSON file. An internal
+// LoadBalancer Healthchecks object can be generated from this
 func LoadConf(file string) (*config.Config, error) {
 	return config.Load(file)
 }
@@ -111,7 +104,7 @@ func (lb *LoadBalancer) Prefixes() [1048576]uint64 {
 }
 
 // Returns a map of active service statistics. A counter is returned
-// for each Each unique four-tuple of virtual IP, backend IP, layer
+// for each four-tuple of virtual IP, backend IP, layer
 // four protocol and port number (Target).
 func (lb *LoadBalancer) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
 	return lb.balancer.Global(), lb.balancer.Stats()
