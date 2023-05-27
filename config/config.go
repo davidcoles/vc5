@@ -30,8 +30,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-
-	"github.com/davidcoles/vc5/types"
+	//"github.com/davidcoles/vc5/types"
 )
 
 // Describes a Layer 4 or Layer 7 health check
@@ -70,7 +69,7 @@ type Service struct {
 	Need uint16 `json:"need,omitempty"`
 
 	// The set of backend server addresses and corresponding healthchecks which comprise this service
-	RIPs map[types.IP4]Checks `json:"rips,omitempty"`
+	RIPs map[string]Checks `json:"rips,omitempty"`
 
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
 	Sticky bool `json:"sticky,omitempty"`
@@ -121,7 +120,7 @@ func (r *RHI) Community() []uint32 {
 type Config struct {
 	// Two level dictionary of virual IP addresses and Layer 4
 	// protocol/port number of services provided by the balancer
-	VIPs map[types.IP4]map[types.L4]Service `json:"vips,omitempty"`
+	VIPs map[string]map[string]Service `json:"vips,omitempty"`
 
 	// VLAN ID to subnet mappings
 	VLANs map[uint16]string `json:"vlans,omitempty"`

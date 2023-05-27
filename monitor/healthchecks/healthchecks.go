@@ -125,15 +125,30 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 
 	hc.VLAN = c.VLANs
 
-	for vip, x := range c.VIPs {
+	for _vip, x := range c.VIPs {
+		var vip IP4
+		err := vip.UnmarshalText([]byte(_vip))
+		if err != nil {
+			return nil, err
+		}
 
 		v := Virtual{Services: map[L4]Service{}}
 
-		for l4, y := range x {
+		for _l4, y := range x {
+			var l4 L4
+			err := l4.UnmarshalText([]byte(_l4))
+			if err != nil {
+				return nil, err
+			}
 
 			reals := map[IP4]Real{}
 
-			for rip, checks := range y.RIPs {
+			for _rip, checks := range y.RIPs {
+				var rip IP4
+				err := rip.UnmarshalText([]byte(_rip))
+				if err != nil {
+					return nil, err
+				}
 				reals[rip] = Real{RIP: rip, Checks: checks}
 			}
 
