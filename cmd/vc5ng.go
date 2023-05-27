@@ -433,13 +433,13 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 		Latency: global.Latency,
 		DEFCON:  global.DEFCON,
 		VIPs:    map[IP4]map[L4]Service{},
-		RHI:     map[IP4]bool{},
+		RHI:     map[string]bool{},
 		When:    map[IP4]int64{},
 	}
 
 	for vip, v := range status.Virtual {
 		stats.VIPs[vip] = map[L4]Service{}
-		stats.RHI[vip] = v.Healthy
+		stats.RHI[vip.String()] = v.Healthy
 		stats.When[vip] = int64(now.Sub(v.Change) / time.Second)
 		for l4, s := range v.Services {
 			reals := map[IP4]Real{}
@@ -582,8 +582,8 @@ func prometheus(g *Stats, start time.Time) []byte {
 	m = append(m, fmt.Sprintf("vc5_rx_octets %d", g.Octets))
 
 	for i, v := range g.When {
-		m = append(m, fmt.Sprintf(`vc5_vip_status{vip="%s"} %d`, i, b2u8(g.RHI[i])))
-		m = append(m, fmt.Sprintf(`vc5_vip_status_duration{vip="%s",status="%s"} %d`, i, updown(g.RHI[i]), v))
+		m = append(m, fmt.Sprintf(`vc5_vip_status{vip="%s"} %d`, i, b2u8(g.RHI[i.String()])))
+		m = append(m, fmt.Sprintf(`vc5_vip_status_duration{vip="%s",status="%s"} %d`, i, updown(g.RHI[i.String()]), v))
 	}
 
 	for vip, services := range g.VIPs {
@@ -727,7 +727,7 @@ type Stats struct {
 	Concurrent uint64                 `json:"concurrent"`
 	Latency    uint64                 `json:"latency"`
 	DEFCON     uint8                  `json:"defcon"`
-	RHI        map[IP4]bool           `json:"rhi"`
+	RHI        map[string]bool        `json:"rhi"`
 	When       map[IP4]int64          `json:"when"`
 	VIPs       map[IP4]map[L4]Service `json:"vips"`
 }

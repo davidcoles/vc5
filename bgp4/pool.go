@@ -81,8 +81,18 @@ func (p *Pool) Open() bool {
 	return true
 }
 
-func (b *Pool) NLRI(n map[IP4]bool) {
-	b.nlri <- n
+//func (b *Pool) NLRI(n map[IP4]bool) {
+func (b *Pool) NLRI(n map[string]bool) {
+	m := map[IP4]bool{}
+
+	for k, v := range n {
+		var ip types.IP4
+		if ip.UnmarshalText([]byte(k)) == nil {
+			m[ip] = v
+		}
+	}
+
+	b.nlri <- m
 }
 
 func (b *Pool) Peer(p []string) {
