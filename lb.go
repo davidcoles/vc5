@@ -229,7 +229,9 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		lb.DEFCON(lb.ReadinessLevel)
 	}
 
-	go netns.Spawn(ns.NS, args...)
+	if len(args) > 0 {
+		go netns.Spawn(ns.NS, args...)
+	}
 
 	nat := &kernel.NAT{
 		Maps:          lb.maps,

@@ -88,6 +88,10 @@ func Spawn(netns string, args ...string) {
 
 func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string) {
 
+	if path == "" {
+		return false, "No socket given"
+	}
+
 	if client == nil {
 		client = &http.Client{
 			Transport: &http.Transport{
