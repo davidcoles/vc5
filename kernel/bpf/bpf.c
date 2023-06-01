@@ -104,7 +104,7 @@ struct state {
 };
 
 struct {
-    __uint(type, BPF_MAP_TYPE_HASH);
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, struct flow);
     __type(value, struct state);
     __uint(max_entries, MAX_FLOWS);
