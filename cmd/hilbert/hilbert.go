@@ -38,6 +38,8 @@ func main() {
 	grad1 := colorgrad.Reds()
 	grad2 := colorgrad.Plasma()
 
+	imap, imaps := imgmap()
+
 	var old [PREFIXES]uint64
 
 	go func() {
@@ -101,8 +103,10 @@ func main() {
   <body style="background-color:black;color:white;">
     <table>
     <tr>
-      <td style="vertical-align: top;"><img src="data:image/png;base64,%s"></td>
-      <td style="vertical-align: top;"><img src="data:image/png;base64,%s">
+      <map name="imap">%s</map>
+      <map name="imaps">%s</map>
+      <td style="vertical-align: top;"><img src="data:image/png;base64,%s" usemap="#imap"></td>
+      <td style="vertical-align: top;"><img src="data:image/png;base64,%s" usemap="#imaps">
       <div>⚠️Enlarged tile may be rotated compared to map⚠️</div>
       </td>
   </body>
@@ -116,13 +120,21 @@ func main() {
 			n, _ = strconv.Atoi(r.URL.Path[1:])
 		}
 
+		if n > 255 {
+			n = 0
+		}
+
+		if n == 0 {
+			n = MAX
+		}
+
 		png := PNGS[n]
 
 		if PNG != nil && png != nil {
 			b641 := base64.StdEncoding.EncodeToString(*PNG)
 			b642 := base64.StdEncoding.EncodeToString(*png)
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(fmt.Sprintf(html, b641, b642)))
+			w.Write([]byte(fmt.Sprintf(html, imap, imaps[n], b641, b642)))
 		}
 	})
 
@@ -247,6 +259,37 @@ func render(cur [PREFIXES]uint64, max uint64, grad colorgrad.Gradient) *[]byte {
 	b, _ := ioutil.ReadAll(&buff)
 
 	return &b
+}
+
+func imgmap() (string, [256]string) {
+
+	imap := ""
+	var imaps [256]string
+
+	s, _ := hilbert.NewHilbert(64)
+	for n := 0; n < 256; n++ {
+		x, y, _ := s.Map(n)
+		x *= 64
+		y *= 64
+		imap += fmt.Sprintf(`<area shape="rect" coords="%d,%d,%d,%d" alt="%d" href="%d" title="%d">`, x, y, x+64, y+64, n, n, n)
+
+		tmp := ""
+		for m := 0; m < 4096; m++ {
+			x, y, _ := s.Map(m)
+			x *= 8
+			y *= 8
+			mm := uint32(m) << 4
+			b := mm >> 8
+			c := mm & 0xff
+			p := fmt.Sprintf("%d.%d.%d.0", n, b, c)
+			h := "https://www.whois.com/whois/" + p
+			tmp += fmt.Sprintf(`<area shape="rect" coords="%d,%d,%d,%d" alt="%s" title="%s" href="%s" target="_blank">`, x, y, x+8, y+8, p, p, h)
+			fmt.Println(n)
+		}
+		imaps[n] = tmp
+	}
+
+	return imap, imaps
 }
 
 func render2(slash8 uint8, cur [PREFIXES]uint64, max uint64, grad colorgrad.Gradient) *[]byte {

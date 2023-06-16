@@ -2,7 +2,6 @@ package vc5
 
 import (
 	"errors"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -58,6 +57,12 @@ type LoadBalancer struct {
 	// use tagged VLANs wherever possible.
 	MultiNIC bool
 
+	// When true, the shared flow map will be used to check for
+	// untracked flows which may hae migrated from other server in a
+	// cluster. This mitigates agains flows being dropped because the
+	// pool of beackend servers has changed since the flow began.
+	Distributed bool
+
 	// UNIX domain socket to use for initiating backend
 	// healthchecks. The healtchecks are sources from a virtual
 	// interface in a seperate network namespace - this socket is used
@@ -91,6 +96,13 @@ type LoadBalancer struct {
 	update   chan *healthchecks.Healthchecks
 }
 
+// Submit an array of bool elements, each corresponding to a /20 IPv4
+// prefix. A true value will cause packets with a source address
+// withing the prefix to be dropped.
+func (lb *LoadBalancer) BlockList(list [1048576]bool) {
+	lb.balancer.BlockList(list)
+}
+
 // Returns an array of packet counters. Each counter is the total
 // number of packets received from sequential /20 subnets (4096 IP
 // addresses per subnet); element 0 corresponds to 0.0.0.0/20, element
@@ -101,6 +113,19 @@ type LoadBalancer struct {
 // called.
 func (lb *LoadBalancer) Prefixes() [1048576]uint64 {
 	return lb.maps.ReadPrefixCounters()
+}
+
+// Poll the flow queue for state records which can be shared with
+// other nodes in a cluster to preserve connections when failing over
+// between nodes.
+func (lb *LoadBalancer) FlowQueue() []byte {
+	return lb.balancer.FlowQueue()
+}
+
+// Write state records retrieved from a node's flow queue into the
+// kernel.
+func (lb *LoadBalancer) StoreFlow(fs []byte) {
+	lb.balancer.StoreFlow(fs)
 }
 
 // Returns a map of active service statistics. A counter is returned
@@ -224,6 +249,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 	cleanup = false
 
 	lb.maps.MODE(lb.MultiNIC)
+	lb.maps.Distributed(lb.Distributed)
 
 	if lb.ReadinessLevel != 0 {
 		lb.DEFCON(lb.ReadinessLevel)
@@ -231,6 +257,11 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 
 	if len(args) > 0 {
 		go netns.Spawn(ns.NS, args...)
+	}
+
+	if lb.Native {
+		l.NOTICE("lb", "Waiting for NIC to quiesce")
+		time.Sleep(15 * time.Second)
 	}
 
 	nat := &kernel.NAT{
@@ -275,7 +306,7 @@ func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balanc
 	go func() {
 		defer balancer.Close()
 		for h := range monitor.C {
-			log.Println("MONITOR update")
+			lb.Logger.INFO("LoadBalancer", "Monitor update")
 			lb.mutex.Lock()
 			lb.report = *(h.DeepCopy())
 			lb.mutex.Unlock()
@@ -286,14 +317,14 @@ func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balanc
 	go func() {
 		defer monitor.Close()
 		for h := range nat.C {
-			log.Println("NAT update")
+			lb.Logger.INFO("LoadBalancer", "NAT update")
 			monitor.Update(h)
 		}
 	}()
 
 	defer nat.Close()
 	for h := range lb.update {
-		log.Println("CONF update")
+		lb.Logger.INFO("LoadBalancer", "Config update")
 		nat.Configure(h)
 	}
 }

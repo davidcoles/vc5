@@ -19,7 +19,7 @@
 package bgp4
 
 import (
-	"fmt"
+	//"fmt"
 	"net"
 	"time"
 	//"github.com/davidcoles/vc5/bgp4"
@@ -50,7 +50,7 @@ func (p *Pool) Open() bool {
 		go func() {
 			for {
 				bgpListen()
-				time.Sleep(60 * time.Second)
+				time.Sleep(30 * time.Second)
 			}
 		}()
 	}
@@ -77,12 +77,18 @@ func (p *Pool) Open() bool {
 
 	go p.manage(rid, p.ASN, p.HoldTime, p.Communities)
 	p.peer <- p.Peers
-	close(p.wait)
 	return true
 }
 
+func (p *Pool) Start() {
+	if p.wait != nil {
+		close(p.wait)
+		p.wait = nil
+	}
+}
+
 //func (b *Pool) NLRI(n map[IP4]bool) {
-func (b *Pool) NLRI(n map[string]bool) {
+func (p *Pool) NLRI(n map[string]bool) {
 	m := map[IP4]bool{}
 
 	for k, v := range n {
@@ -92,7 +98,7 @@ func (b *Pool) NLRI(n map[string]bool) {
 		}
 	}
 
-	b.nlri <- m
+	p.nlri <- m
 }
 
 func (b *Pool) Peer(p []string) {
@@ -155,9 +161,9 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 
 			//fmt.Println("*******", n, peer)
 
-			for k, v := range peer {
+			for _, v := range peer {
 				for ip, up := range n {
-					fmt.Println("NLRI", ip, up, "to", k)
+					//fmt.Println("NLRI", ip, up, "to", k)
 					//logger.NOTICE("peers", "NLRI", ip, up, "to", k)
 					v.NLRI(IP4(ip), up)
 				}

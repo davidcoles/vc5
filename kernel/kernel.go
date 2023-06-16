@@ -53,9 +53,10 @@ type Service = healthchecks.Service
 
 type maps = Maps
 type Maps struct {
-	m      map[string]int
-	defcon uint8
-	multi  bool
+	m map[string]int
+	//defcon  uint8
+	//multi   bool
+	setting bpf_setting
 }
 
 type bpf_real struct {
@@ -81,14 +82,15 @@ type bpf_counter struct {
 }
 
 type bpf_setting struct {
-	heartbeat uint64
-	defcon    uint8 // 3 bit
-	era       uint8 // 1 bit
-	multi     uint8 // 1 bit
+	heartbeat   uint32
+	defcon      uint8 // 3 bit
+	era         uint8 // 1 bit
+	multi       uint8 // 1 bit
+	distributed uint8 // 1 bit
 	// [0:0][0:0][0][0:0:0]
 }
 
-var SETTINGS bpf_setting = bpf_setting{defcon: 5}
+//var SETTINGS bpf_setting = bpf_setting{defcon: 5, distributed: 1}
 
 type bpf_global struct {
 	rx_packets     uint64
@@ -99,6 +101,8 @@ type bpf_global struct {
 	settings_timer uint64
 	new_flows      uint64
 	dropped        uint64
+	qfailed        uint64
+	blocked        uint64
 }
 
 type bpf_service struct {
@@ -142,12 +146,16 @@ func (g *bpf_global) add(a bpf_global) {
 	g.perf_packets += a.perf_packets
 	g.perf_timens += a.perf_timens
 	g.new_flows += a.new_flows
+	g.qfailed += a.qfailed
 }
+
+const flow_s = 12
+const state_s = 20
 
 func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	var m maps
 	m.m = make(map[string]int)
-	m.defcon = 5
+	m.setting.defcon = 5
 
 	x, err := xdp.LoadBpfProgram(BPF_O)
 
@@ -172,6 +180,18 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		}
 	}
 
+	// stats // reflect.TypeOf( i ).Size()
+	//if m.m["globals"], err = find_map(x, "globals", 4, 80); err != nil {
+	var global_ bpf_global
+	var vrpp_ bpf_vrpp
+	var counter_ bpf_counter
+	var active_ bpf_active
+
+	global_s := int(unsafe.Sizeof(global_))
+	vrpp_s := int(unsafe.Sizeof(vrpp_))
+	counter_s := int(unsafe.Sizeof(counter_))
+	active_s := int(unsafe.Sizeof(active_))
+
 	// balancer
 	if m.m["service_backend"], err = find_map(x, "service_backend", 8, (256*16)+8192); err != nil {
 		return nil, err
@@ -182,21 +202,20 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
-	// stats
-	if m.m["globals"], err = find_map(x, "globals", 4, 64); err != nil {
+	if m.m["globals"], err = find_map(x, "globals", 4, global_s); err != nil {
 		return nil, err
 	}
 
-	if m.m["vrpp_counter"], err = find_map(x, "vrpp_counter", 12, 32); err != nil {
+	if m.m["vrpp_counter"], err = find_map(x, "vrpp_counter", vrpp_s, counter_s); err != nil {
 		return nil, err
 	}
 
-	if m.m["vrpp_concurrent"], err = find_map(x, "vrpp_concurrent", 12, 16); err != nil {
+	if m.m["vrpp_concurrent"], err = find_map(x, "vrpp_concurrent", vrpp_s, active_s); err != nil {
 		return nil, err
 	}
 
 	// control
-	if m.m["settings"], err = find_map(x, "settings", 4, 16); err != nil {
+	if m.m["settings"], err = find_map(x, "settings", 4, 8); err != nil {
 		return nil, err
 	}
 	if m.m["redirect_map"], err = find_map(x, "redirect_map", 4, 4); err != nil {
@@ -211,11 +230,16 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
-	var zero uint32
-	s := bpf_setting{defcon: m.defcon, era: 0}
+	if m.m["flow_queue"], err = find_map(x, "flow_queue", 0, flow_s+state_s); err != nil {
+		return nil, err
+	}
 
-	if xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&s), xdp.BPF_ANY) != 0 {
-		return nil, errors.New("Failed to load settings")
+	if m.m["flow_shared"], err = find_map(x, "flow_shared", flow_s, state_s); err != nil {
+		return nil, err
+	}
+
+	if m.write_settings() != 0 {
+		return nil, errors.New("Failed to write settings")
 	}
 
 	return &m, nil
@@ -230,6 +254,8 @@ func (m *maps) nat() int             { return m.m["nat"] }
 func (m *maps) prefix_counters() int { return m.m["prefix_counters"] }
 func (m *maps) redirect_map() int    { return m.m["redirect_map"] }
 func (m *maps) redirect_mac() int    { return m.m["redirect_mac"] }
+func (m *maps) flow_queue() int      { return m.m["flow_queue"] }
+func (m *maps) flow_shared() int     { return m.m["flow_shared"] }
 
 const PREFIXES = 1048576
 
@@ -265,6 +291,25 @@ func (m *maps) update_service_backend(key *bpf_service, b *bpf_backend, flag uin
 	}
 
 	return xdp.BpfMapUpdateElem(m.service_backend(), uP(key), uP(&(all[0])), flag)
+}
+
+func (m *maps) update_drop_map(drop [PREFIXES / 64]uint64) int {
+
+	var key uint32
+	val := make([]uint64, xdp.BpfNumPossibleCpus())
+
+	for i, v := range drop {
+
+		key = uint32(i)
+
+		for n, _ := range val {
+			val[n] = v
+		}
+
+		xdp.BpfMapUpdateElem(m.service_backend(), uP(&key), uP(&(val[0])), xdp.BPF_ANY)
+	}
+
+	return 0
 }
 
 func (m *maps) update_vrpp_counter(v *bpf_vrpp, c *bpf_counter, flag uint64) int {
@@ -339,44 +384,53 @@ func (m *maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int 
 	return ret
 }
 
-func (m *maps) write_settings() {
+func (m *maps) write_settings() int {
 	var zero uint32
-	SETTINGS.heartbeat = 0
-	SETTINGS.defcon = m.defcon
+	m.setting.heartbeat = 0
 
-	if m.multi {
-		SETTINGS.multi = 1
-	} else {
-		SETTINGS.multi = 0
+	//s := m.setting
+	//return xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&(s)), xdp.BPF_ANY)
+
+	all := make([]bpf_setting, xdp.BpfNumPossibleCpus())
+
+	for n, _ := range all {
+		all[n] = m.setting
 	}
 
-	xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&SETTINGS), xdp.BPF_ANY)
+	return xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&(all[0])), xdp.BPF_ANY)
 }
 
 func (m *maps) MODE(mode bool) {
 	if mode {
-		m.multi = true
-		SETTINGS.multi = 1
+		m.setting.multi = 1
 	} else {
-		m.multi = false
-		SETTINGS.multi = 0
+		m.setting.multi = 0
+	}
+
+	m.write_settings()
+}
+
+func (m *maps) Distributed(d bool) {
+	if d {
+		m.setting.distributed = 1
+	} else {
+		m.setting.distributed = 0
 	}
 
 	m.write_settings()
 }
 
 func (m *maps) ERA(era uint8) {
-	SETTINGS.era = era
+	m.setting.era = era
 	m.write_settings()
 }
 
 func (m *maps) DEFCON(d uint8) uint8 {
 	if d <= 5 {
-		m.defcon = d
-		SETTINGS.defcon = m.defcon
+		m.setting.defcon = d
+		m.write_settings()
 	}
-	m.write_settings()
-	return m.defcon
+	return m.setting.defcon
 }
 
 func (m *maps) lookup_globals(g *bpf_global) int {
@@ -533,4 +587,138 @@ func maglev8192(m map[[4]byte]uint8) (r [8192]uint8, b bool) {
 	}
 
 	return r, true
+}
+
+func twoexpx(x int) uint64 {
+	switch x {
+	case 0:
+		return 0x0000000000000001
+	case 1:
+		return 0x0000000000000002
+	case 2:
+		return 0x0000000000000004
+	case 3:
+		return 0x0000000000000008
+	case 4:
+		return 0x0000000000000010
+	case 5:
+		return 0x0000000000000020
+	case 6:
+		return 0x0000000000000040
+	case 7:
+		return 0x0000000000000080
+	case 8:
+		return 0x0000000000000100
+	case 9:
+		return 0x0000000000000200
+	case 10:
+		return 0x0000000000000400
+	case 11:
+		return 0x0000000000000800
+	case 12:
+		return 0x0000000000001000
+	case 13:
+		return 0x0000000000002000
+	case 14:
+		return 0x0000000000004000
+	case 15:
+		return 0x0000000000008000
+	case 16:
+		return 0x0000000000010000
+	case 17:
+		return 0x0000000000020000
+	case 18:
+		return 0x0000000000040000
+	case 19:
+		return 0x0000000000080000
+	case 20:
+		return 0x0000000000100000
+	case 21:
+		return 0x0000000000200000
+	case 22:
+		return 0x0000000000400000
+	case 23:
+		return 0x0000000000800000
+	case 24:
+		return 0x0000000001000000
+	case 25:
+		return 0x0000000002000000
+	case 26:
+		return 0x0000000004000000
+	case 27:
+		return 0x0000000008000000
+	case 28:
+		return 0x0000000010000000
+	case 29:
+		return 0x0000000020000000
+	case 30:
+		return 0x0000000040000000
+	case 31:
+		return 0x0000000080000000
+	case 32:
+		return 0x0000000100000000
+	case 33:
+		return 0x0000000200000000
+	case 34:
+		return 0x0000000400000000
+	case 35:
+		return 0x0000000800000000
+	case 36:
+		return 0x0000001000000000
+	case 37:
+		return 0x0000002000000000
+	case 38:
+		return 0x0000004000000000
+	case 39:
+		return 0x0000008000000000
+	case 40:
+		return 0x0000010000000000
+	case 41:
+		return 0x0000020000000000
+	case 42:
+		return 0x0000040000000000
+	case 43:
+		return 0x0000080000000000
+	case 44:
+		return 0x0000100000000000
+	case 45:
+		return 0x0000200000000000
+	case 46:
+		return 0x0000400000000000
+	case 47:
+		return 0x0000800000000000
+	case 48:
+		return 0x0001000000000000
+	case 49:
+		return 0x0002000000000000
+	case 50:
+		return 0x0004000000000000
+	case 51:
+		return 0x0008000000000000
+	case 52:
+		return 0x0010000000000000
+	case 53:
+		return 0x0020000000000000
+	case 54:
+		return 0x0040000000000000
+	case 55:
+		return 0x0080000000000000
+	case 56:
+		return 0x0100000000000000
+	case 57:
+		return 0x0200000000000000
+	case 58:
+		return 0x0400000000000000
+	case 59:
+		return 0x0800000000000000
+	case 60:
+		return 0x1000000000000000
+	case 61:
+		return 0x2000000000000000
+	case 62:
+		return 0x4000000000000000
+	case 63:
+		return 0x8000000000000000
+	}
+	return 0
 }

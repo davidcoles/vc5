@@ -4,6 +4,7 @@
 #include <linux/if_link.h> /* depend on kernel-headers installed */
 #include <net/if.h>
 
+#include <time.h>
 #include <errno.h>
 #include <stdlib.h>
 
@@ -313,4 +314,15 @@ int check_map_fd_info(int map_fd, int ks, int vs) {
     }
     
     return 0;
+}
+
+__u64 ktime_get() {
+    struct timespec tp;
+
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+
+    if(tp.tv_sec < 0)
+	return 0;
+	    
+    return (__u64) tp.tv_sec;
 }

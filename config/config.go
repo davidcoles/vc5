@@ -101,16 +101,16 @@ type RHI struct {
 	// A list of community attributes to announce along with VIPs in
 	// network layer reachability information updates. represented as
 	// <asn>:<value pairs>, eg.: "100:80", "65000:1234"
-	Communities []community `json:"communities,omitempty"`
+	Communities_ []community `json:"communities,omitempty"`
 
 	// Listen for incoming connections on port 179
 	Listen bool `json:"listen,omitempty"`
 }
 
 // Returns a list of uint32 values representing configured BGP community attributes
-func (r *RHI) Community() []uint32 {
+func (r *RHI) Communities() []uint32 {
 	var c []uint32
-	for _, v := range r.Communities {
+	for _, v := range r.Communities_ {
 		c = append(c, uint32(v))
 	}
 	return c
@@ -134,6 +134,9 @@ type Config struct {
 
 	// Address to listen on for HTTP console/metrics server
 	Webserver string `json:"webserver,omitempty"`
+
+	// Address to listen on for multicast session announcements
+	Multicast string `json:"multicast,omitempty"`
 }
 
 // Reads the load-balancer configuration from a JSON file. Returns a

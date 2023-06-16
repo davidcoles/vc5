@@ -129,7 +129,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer os.Remove(temp.Name())
+	socket := temp.Name()
+	defer os.Remove(socket)
 
 	for _, v := range peth {
 		exec.Command("/bin/sh", "-c", "ethtool -K "+v+" tx off; ethtool -K "+v+" rxvlan off;").Output()
@@ -154,7 +155,7 @@ func main() {
 		Address:     addr,
 		ASN:         conf.RHI.AS_Number,
 		HoldTime:    conf.RHI.Hold_Time,
-		Communities: conf.RHI.Community(),
+		Communities: conf.RHI.Communities(),
 		Peers:       conf.RHI.Peers,
 		Listen:      conf.RHI.Listen,
 	}
@@ -168,11 +169,12 @@ func main() {
 		KillSwitch:      *kill,
 		Native:          *native,
 		MultiNIC:        *multi,
-		Socket:          temp.Name(),
-		NetnsCommand:    []string{os.Args[0], "-s", temp.Name()},
+		Socket:          socket,
+		NetnsCommand:    []string{os.Args[0], "-s", socket},
 		Interfaces:      peth,
 		EgressInterface: *bond,
 		Logger:          logger,
+		Distributed:     conf.Multicast != "",
 	}
 
 	err = lb.Start(addr, hc)
@@ -180,6 +182,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	go func() {
+		time.Sleep(time.Duration(conf.Learn) * time.Second)
+		pool.Start()
+	}()
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGQUIT)
@@ -230,6 +237,11 @@ func main() {
 		}
 	}()
 
+	if conf.Multicast != "" {
+		go multicast_send(lb, conf.Multicast)
+		go multicast_recv(lb, conf.Multicast)
+	}
+
 	var timestamp time.Time
 	var mutex sync.Mutex
 	prefixes := []byte("{}")
@@ -261,6 +273,33 @@ func main() {
 
 		r.URL.Path = "static/" + r.URL.Path // there must be a way to avoid this, surely ...
 		http.FileServer(static).ServeHTTP(w, r)
+	})
+
+	http.HandleFunc("/clear", func(w http.ResponseWriter, r *http.Request) {
+		lb.BlockList([1048576]bool{})
+	})
+
+	http.HandleFunc("/block", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		b, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+
+		var list [1048576]bool // contiguous list of /20s - "true" indicates block
+
+		err = json.Unmarshal(b, &list)
+
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+
+		lb.BlockList(list)
 	})
 
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
@@ -818,4 +857,80 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 	}
 
 	return n
+}
+
+/**********************************************************************/
+
+const maxDatagramSize = 1500
+
+func multicast_send(lb *vc5.LoadBalancer, address string) {
+
+	addr, err := net.ResolveUDPAddr("udp", address)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn, err := net.DialUDP("udp", nil, addr)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn.SetWriteBuffer(maxDatagramSize * 100)
+
+	ticker := time.NewTicker(time.Millisecond * 10)
+
+	var buff [maxDatagramSize]byte
+
+	for {
+		select {
+		case <-ticker.C:
+			n := 0
+
+		read_queue:
+			f := lb.FlowQueue()
+			if len(f) > 0 {
+				buff[n] = uint8(len(f))
+
+				copy(buff[n+1:], f[:])
+				n += 1 + len(f)
+				if n < maxDatagramSize-100 {
+					goto read_queue
+				}
+			}
+
+			if n > 0 {
+				conn.Write(buff[:n])
+			}
+		}
+	}
+}
+
+func multicast_recv(lb *vc5.LoadBalancer, address string) {
+	udp, err := net.ResolveUDPAddr("udp", address)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn, err := net.ListenMulticastUDP("udp", nil, udp)
+
+	conn.SetReadBuffer(maxDatagramSize * 1000)
+
+	buff := make([]byte, maxDatagramSize)
+
+	for {
+		nread, _, err := conn.ReadFromUDP(buff)
+		if err == nil {
+			for n := 0; n+1 < nread; {
+				l := int(buff[n])
+				o := n + 1
+				n = o + l
+				if l > 0 && n <= nread {
+					lb.StoreFlow(buff[o:n])
+				}
+			}
+		}
+	}
 }

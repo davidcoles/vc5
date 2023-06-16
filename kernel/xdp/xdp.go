@@ -29,8 +29,6 @@ import "C"
 import (
 	"errors"
 	"io/ioutil"
-	//"time"
-	//"net"
 	"os"
 	"unsafe"
 )
@@ -213,6 +211,10 @@ func BpfMapLookupElem(i int, k, v unsafe.Pointer) int {
 
 func BpfNumPossibleCpus() int {
 	return int(C.libbpf_num_possible_cpus())
+}
+
+func KtimeGet() uint64 {
+	return uint64(C.ktime_get())
 }
 
 func XDPTest(bindata []byte, program string, native bool, nic string, p2, n2 string) (*XDP, error) {

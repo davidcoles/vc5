@@ -98,25 +98,23 @@ func (n *natval) String() string {
 
 func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
-	physip := n.DefaultIP
-	vc5aip := n.NetNS.IpA
-	vc5bip := n.NetNS.IpB
-	vc5ahw := n.NetNS.HwA
-	vc5bhw := n.NetNS.HwB
-
-	vethif := uint32(n.NetNS.Index)
-
-	ticker := time.NewTicker(5 * time.Second) // fire quickly first time
+	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	defer close(n.C)
 	defer icmp.Close()
 
 	prev := map[natkey]bool{}
-	redirect := map[uint16]int{}
+
+	physip := n.DefaultIP
+	vc5aip := n.NetNS.IpA
+	vc5bip := n.NetNS.IpB
+	vc5ahw := n.NetNS.HwA
+	vc5bhw := n.NetNS.HwB
+	vethif := uint32(n.NetNS.Index)
 
 	vlans, redirect, ifmacs := resolveVLANs(h.VLANs(), n.Logger)
-	n.ping(h.RIPs(), icmp)  // start/stop pings
-	time.Sleep(time.Second) // give ARP a second to resolve
+	n.ping(h.RIPs(), icmp)      // start/stop pings
+	time.Sleep(3 * time.Second) // give ARP a few seconds to resolve
 
 	for {
 		macs := arp() // update from ARP cache
@@ -192,7 +190,6 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 		var ok bool
 		select {
 		case <-ticker.C:
-			ticker.Reset(time.Minute)
 		case h, ok = <-n.in:
 			if !ok {
 				return

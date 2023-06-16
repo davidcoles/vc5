@@ -36,7 +36,7 @@ func (s *ICMPs) Close() {
 	close(s.submit)
 }
 
-func echoRequest() []byte {
+func (s *ICMPs) echoRequest() []byte {
 
 	var csum uint32
 	wb := make([]byte, 8)
@@ -66,7 +66,7 @@ func (s *ICMPs) probe(socket net.PacketConn) {
 	for target := range s.submit {
 		go func() {
 			socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
-			socket.WriteTo(echoRequest(), &net.IPAddr{IP: net.ParseIP(target)})
+			socket.WriteTo(s.echoRequest(), &net.IPAddr{IP: net.ParseIP(target)})
 		}()
 	}
 }
