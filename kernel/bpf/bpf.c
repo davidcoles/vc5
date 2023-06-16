@@ -636,7 +636,7 @@ static __always_inline int new_flow(struct context *context, __be16 src, __be16 
     struct ethhdr *eth = context->ethhdr;
     struct vlan_hdr *tag = context->vlan_hdr;
     struct iphdr *ipv4 = context->iphdr;
-    struct tcphdr *tcp = context->tcphdr;
+    //struct tcphdr *tcp = context->tcphdr;
     struct global *global = context->global;
     
     struct real real_s;
