@@ -679,13 +679,7 @@ static __always_inline int new_flow(struct context *context, __be16 src, __be16 
 	}
 	
 	if(ipv4->protocol == IPPROTO_TCP) { // maybe don't store initial SYN?
-	    if(tcp && tcp->syn) {
-		// deleting existing record on every syn seems to be very expensive
-		//struct flow flow = { .src = ipv4->saddr, .dst = ipv4->daddr, .sport = src, .dport = dst };
-		//bpf_map_delete_elem(&flow_state, &flow);
-	    } else {
-		if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
-	    }
+	    if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
 	    if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, dst, real->rip, octets, DEFCON >= DEFCON4);
 	}
 
