@@ -44,6 +44,7 @@ type Counter struct {
 	Packets     uint64
 	Flows       uint64
 	Concurrent  uint64
+	Blocked     uint64
 	Latency     uint64 // global only
 	QueueFailed uint64 // global only
 	DEFCON      uint8  // global only
@@ -106,15 +107,7 @@ func (b *Balancer) StoreFlow(fs []byte) {
 	flow := uP(&fs[0])
 	state := uP(&fs[flow_s])
 	time := (*uint32)(state)
-
-	//fmt.Println("WAS:", *time)
-
 	*time = uint32(xdp.KtimeGet()) // set first 4 bytes of state to the local kernel time
-
-	//fmt.Println("NOW:", *time)
-
-	//fmt.Println(fs[:flow_s], fs[flow_s:])
-
 	xdp.BpfMapUpdateElem(b.maps.flow_shared(), flow, state, xdp.BPF_ANY)
 }
 
@@ -134,11 +127,13 @@ func (b *Balancer) BlockList(list [PREFIXES]bool) {
 		var val uint64
 		for m := 0; m < 64; m++ {
 			if list[(n*64)+m] {
-				val |= twoexpx(m)
+				fmt.Printf("%d\n", m)
+				val |= pow(m)
 			}
 		}
 
 		table[n] = val
+
 		if val != 0 {
 			fmt.Printf("%016x %d\n", val, n)
 		}
@@ -149,15 +144,8 @@ func (b *Balancer) BlockList(list [PREFIXES]bool) {
 }
 
 func (b *Balancer) Global() Counter {
-	var g bpf_global
-	b.maps.lookup_globals(&g)
-
-	var latency uint64 = 500 // 500ns target value
-	if g.perf_packets > 0 {
-		latency = g.perf_timens / g.perf_packets
-	}
-
-	return Counter{Octets: g.rx_octets, Packets: g.rx_packets, Flows: g.new_flows, QueueFailed: g.qfailed, Latency: latency, DEFCON: b.maps.setting.defcon}
+	g := b.maps.lookup_globals()
+	return Counter{Octets: g.rx_octets, Packets: g.rx_packets, Flows: g.new_flows, QueueFailed: g.qfailed, Latency: g.latency(), DEFCON: b.maps.setting.defcon, Blocked: g.blocked}
 }
 
 func (b *Balancer) balancer() {

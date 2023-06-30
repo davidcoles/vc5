@@ -53,9 +53,7 @@ type Service = healthchecks.Service
 
 type maps = Maps
 type Maps struct {
-	m map[string]int
-	//defcon  uint8
-	//multi   bool
+	m       map[string]int
 	setting bpf_setting
 }
 
@@ -105,6 +103,25 @@ type bpf_global struct {
 	blocked        uint64
 }
 
+func (g *bpf_global) add(a bpf_global) {
+	g.rx_packets += a.rx_packets
+	g.rx_octets += a.rx_octets
+	g.perf_packets += a.perf_packets
+	g.perf_timens += a.perf_timens
+	g.new_flows += a.new_flows
+	g.qfailed += a.qfailed
+	g.dropped += a.dropped
+	g.blocked += a.blocked
+}
+
+func (g *bpf_global) latency() uint64 {
+	var latency uint64 = 500 // 500ns target value
+	if g.perf_packets > 0 {
+		latency = g.perf_timens / g.perf_packets
+	}
+	return latency
+}
+
 type bpf_service struct {
 	vip      [4]byte
 	port     [2]byte
@@ -138,15 +155,6 @@ func (c *bpf_counter) add(a bpf_counter) {
 	c.octets += a.octets
 	c.packets += a.packets
 	c.flows += a.flows
-}
-
-func (g *bpf_global) add(a bpf_global) {
-	g.rx_packets += a.rx_packets
-	g.rx_octets += a.rx_octets
-	g.perf_packets += a.perf_packets
-	g.perf_timens += a.perf_timens
-	g.new_flows += a.new_flows
-	g.qfailed += a.qfailed
 }
 
 const flow_s = 12
@@ -230,6 +238,10 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
+	if m.m["prefix_drop"], err = find_map(x, "prefix_drop", 4, 8); err != nil {
+		return nil, err
+	}
+
 	if m.m["flow_queue"], err = find_map(x, "flow_queue", 0, flow_s+state_s); err != nil {
 		return nil, err
 	}
@@ -252,6 +264,7 @@ func (m *maps) globals() int         { return m.m["globals"] }
 func (m *maps) settings() int        { return m.m["settings"] }
 func (m *maps) nat() int             { return m.m["nat"] }
 func (m *maps) prefix_counters() int { return m.m["prefix_counters"] }
+func (m *maps) prefix_drop() int     { return m.m["prefix_drop"] }
 func (m *maps) redirect_map() int    { return m.m["redirect_map"] }
 func (m *maps) redirect_mac() int    { return m.m["redirect_mac"] }
 func (m *maps) flow_queue() int      { return m.m["flow_queue"] }
@@ -306,7 +319,7 @@ func (m *maps) update_drop_map(drop [PREFIXES / 64]uint64) int {
 			val[n] = v
 		}
 
-		xdp.BpfMapUpdateElem(m.service_backend(), uP(&key), uP(&(val[0])), xdp.BPF_ANY)
+		xdp.BpfMapUpdateElem(m.prefix_drop(), uP(&key), uP(&(val[0])), xdp.BPF_ANY)
 	}
 
 	return 0
@@ -388,9 +401,6 @@ func (m *maps) write_settings() int {
 	var zero uint32
 	m.setting.heartbeat = 0
 
-	//s := m.setting
-	//return xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&(s)), xdp.BPF_ANY)
-
 	all := make([]bpf_setting, xdp.BpfNumPossibleCpus())
 
 	for n, _ := range all {
@@ -433,22 +443,20 @@ func (m *maps) DEFCON(d uint8) uint8 {
 	return m.setting.defcon
 }
 
-func (m *maps) lookup_globals(g *bpf_global) int {
+func (m *maps) lookup_globals() bpf_global { //(g *bpf_global) int {
 
 	all := make([]bpf_global, xdp.BpfNumPossibleCpus())
 	var zero uint32
 
-	ret := xdp.BpfMapLookupElem(m.globals(), uP(&zero), uP(&(all[0])))
+	xdp.BpfMapLookupElem(m.globals(), uP(&zero), uP(&(all[0])))
 
-	var x bpf_global
+	var g bpf_global
 
 	for _, v := range all {
-		x.add(v)
+		g.add(v)
 	}
 
-	*g = x
-
-	return ret
+	return g
 }
 
 func natAddress(n uint16, ip IP4) IP4 {
@@ -589,7 +597,7 @@ func maglev8192(m map[[4]byte]uint8) (r [8192]uint8, b bool) {
 	return r, true
 }
 
-func twoexpx(x int) uint64 {
+func pow(x int) uint64 {
 	switch x {
 	case 0:
 		return 0x0000000000000001

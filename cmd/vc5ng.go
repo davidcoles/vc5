@@ -73,6 +73,7 @@ var multi = flag.Bool("m", false, "multi-nic mode")
 var nolabel = flag.Bool("N", false, "don't add 'name' label to prometheus metrics")
 
 const RLIMIT_MEMLOCK = 8
+const PREFIXES = 1048576
 
 func ulimit(resource int) {
 	var rLimit syscall.Rlimit
@@ -276,7 +277,7 @@ func main() {
 	})
 
 	http.HandleFunc("/clear", func(w http.ResponseWriter, r *http.Request) {
-		lb.BlockList([1048576]bool{})
+		lb.BlockList([PREFIXES]bool{})
 	})
 
 	http.HandleFunc("/block", func(w http.ResponseWriter, r *http.Request) {
@@ -290,7 +291,7 @@ func main() {
 			return
 		}
 
-		var list [1048576]bool // contiguous list of /20s - "true" indicates block
+		var list [PREFIXES]bool // contiguous list of /20s - "true" indicates block
 
 		err = json.Unmarshal(b, &list)
 
@@ -471,6 +472,7 @@ func getStats(lb *vc5.LoadBalancer) *Stats {
 		Flows:   global.Flows,
 		Latency: global.Latency,
 		DEFCON:  global.DEFCON,
+		Blocked: global.Blocked,
 		VIPs:    map[IP4]map[L4]Service{},
 		RHI:     map[string]bool{},
 		When:    map[IP4]int64{},
@@ -763,6 +765,8 @@ type Stats struct {
 	PacketsPS  uint64                 `json:"packets_ps"`
 	Flows      uint64                 `json:"flows"`
 	FlowsPS    uint64                 `json:"flows_ps"`
+	Blocked    uint64                 `json:"blocked"`
+	BlockedPS  uint64                 `json:"blocked_ps"`
 	Concurrent uint64                 `json:"concurrent"`
 	Latency    uint64                 `json:"latency"`
 	DEFCON     uint8                  `json:"defcon"`
@@ -833,6 +837,7 @@ func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
 		n.OctetsPS = (uint64(time.Second) * (n.Octets - o.Octets)) / uint64(dur)
 		n.PacketsPS = (uint64(time.Second) * (n.Packets - o.Packets)) / uint64(dur)
 		n.FlowsPS = (uint64(time.Second) * (n.Flows - o.Flows)) / uint64(dur)
+		n.BlockedPS = (uint64(time.Second) * (n.Blocked - o.Blocked)) / uint64(dur)
 
 		for v, _ := range n.VIPs {
 			if _, ok := o.VIPs[v]; ok {

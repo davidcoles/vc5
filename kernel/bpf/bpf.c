@@ -496,7 +496,6 @@ static __always_inline int bounce_packet(struct context *context, char *dst)
     struct ethhdr *eth = context->ethhdr;
     maccpy(eth->h_source, eth->h_dest);
     maccpy(eth->h_dest, dst);
-
     return XDP_TX;
 }
 
@@ -811,85 +810,92 @@ static __always_inline int returning_nat(struct context *context)
 
 
 // perl -e 'foreach(0..63) { printf "case %2d: return x & %016x;\n", $_, 2**$_ }'
-static __always_inline int drop_map(__u8 n, __u64 x) {
+static __always_inline __u64 pow(__u8 n) {
     switch(n) {
-    case  0: return x & 0x0000000000000001;
-    case  1: return x & 0x0000000000000002;
-    case  2: return x & 0x0000000000000004;
-    case  3: return x & 0x0000000000000008;
-    case  4: return x & 0x0000000000000010;
-    case  5: return x & 0x0000000000000020;
-    case  6: return x & 0x0000000000000040;
-    case  7: return x & 0x0000000000000080;
-    case  8: return x & 0x0000000000000100;
-    case  9: return x & 0x0000000000000200;
-    case 10: return x & 0x0000000000000400;
-    case 11: return x & 0x0000000000000800;
-    case 12: return x & 0x0000000000001000;
-    case 13: return x & 0x0000000000002000;
-    case 14: return x & 0x0000000000004000;
-    case 15: return x & 0x0000000000008000;
-    case 16: return x & 0x0000000000010000;
-    case 17: return x & 0x0000000000020000;
-    case 18: return x & 0x0000000000040000;
-    case 19: return x & 0x0000000000080000;
-    case 20: return x & 0x0000000000100000;
-    case 21: return x & 0x0000000000200000;
-    case 22: return x & 0x0000000000400000;
-    case 23: return x & 0x0000000000800000;
-    case 24: return x & 0x0000000001000000;
-    case 25: return x & 0x0000000002000000;
-    case 26: return x & 0x0000000004000000;
-    case 27: return x & 0x0000000008000000;
-    case 28: return x & 0x0000000010000000;
-    case 29: return x & 0x0000000020000000;
-    case 30: return x & 0x0000000040000000;
-    case 31: return x & 0x0000000080000000;
-    case 32: return x & 0x0000000100000000;
-    case 33: return x & 0x0000000200000000;
-    case 34: return x & 0x0000000400000000;
-    case 35: return x & 0x0000000800000000;
-    case 36: return x & 0x0000001000000000;
-    case 37: return x & 0x0000002000000000;
-    case 38: return x & 0x0000004000000000;
-    case 39: return x & 0x0000008000000000;
-    case 40: return x & 0x0000010000000000;
-    case 41: return x & 0x0000020000000000;
-    case 42: return x & 0x0000040000000000;
-    case 43: return x & 0x0000080000000000;
-    case 44: return x & 0x0000100000000000;
-    case 45: return x & 0x0000200000000000;
-    case 46: return x & 0x0000400000000000;
-    case 47: return x & 0x0000800000000000;
-    case 48: return x & 0x0001000000000000;
-    case 49: return x & 0x0002000000000000;
-    case 50: return x & 0x0004000000000000;
-    case 51: return x & 0x0008000000000000;
-    case 52: return x & 0x0010000000000000;
-    case 53: return x & 0x0020000000000000;
-    case 54: return x & 0x0040000000000000;
-    case 55: return x & 0x0080000000000000;
-    case 56: return x & 0x0100000000000000;
-    case 57: return x & 0x0200000000000000;
-    case 58: return x & 0x0400000000000000;
-    case 59: return x & 0x0800000000000000;
-    case 60: return x & 0x1000000000000000;
-    case 61: return x & 0x2000000000000000;
-    case 62: return x & 0x4000000000000000;
-    case 63: return x & 0x8000000000000000;
+    case  0: return 0x0000000000000001;
+    case  1: return 0x0000000000000002;
+    case  2: return 0x0000000000000004;
+    case  3: return 0x0000000000000008;
+    case  4: return 0x0000000000000010;
+    case  5: return 0x0000000000000020;
+    case  6: return 0x0000000000000040;
+    case  7: return 0x0000000000000080;
+    case  8: return 0x0000000000000100;
+    case  9: return 0x0000000000000200;
+    case 10: return 0x0000000000000400;
+    case 11: return 0x0000000000000800;
+    case 12: return 0x0000000000001000;
+    case 13: return 0x0000000000002000;
+    case 14: return 0x0000000000004000;
+    case 15: return 0x0000000000008000;
+    case 16: return 0x0000000000010000;
+    case 17: return 0x0000000000020000;
+    case 18: return 0x0000000000040000;
+    case 19: return 0x0000000000080000;
+    case 20: return 0x0000000000100000;
+    case 21: return 0x0000000000200000;
+    case 22: return 0x0000000000400000;
+    case 23: return 0x0000000000800000;
+    case 24: return 0x0000000001000000;
+    case 25: return 0x0000000002000000;
+    case 26: return 0x0000000004000000;
+    case 27: return 0x0000000008000000;
+    case 28: return 0x0000000010000000;
+    case 29: return 0x0000000020000000;
+    case 30: return 0x0000000040000000;
+    case 31: return 0x0000000080000000;
+    case 32: return 0x0000000100000000;
+    case 33: return 0x0000000200000000;
+    case 34: return 0x0000000400000000;
+    case 35: return 0x0000000800000000;
+    case 36: return 0x0000001000000000;
+    case 37: return 0x0000002000000000;
+    case 38: return 0x0000004000000000;
+    case 39: return 0x0000008000000000;
+    case 40: return 0x0000010000000000;
+    case 41: return 0x0000020000000000;
+    case 42: return 0x0000040000000000;
+    case 43: return 0x0000080000000000;
+    case 44: return 0x0000100000000000;
+    case 45: return 0x0000200000000000;
+    case 46: return 0x0000400000000000;
+    case 47: return 0x0000800000000000;
+    case 48: return 0x0001000000000000;
+    case 49: return 0x0002000000000000;
+    case 50: return 0x0004000000000000;
+    case 51: return 0x0008000000000000;
+    case 52: return 0x0010000000000000;
+    case 53: return 0x0020000000000000;
+    case 54: return 0x0040000000000000;
+    case 55: return 0x0080000000000000;
+    case 56: return 0x0100000000000000;
+    case 57: return 0x0200000000000000;
+    case 58: return 0x0400000000000000;
+    case 59: return 0x0800000000000000;
+    case 60: return 0x1000000000000000;
+    case 61: return 0x2000000000000000;
+    case 62: return 0x4000000000000000;
+    case 63: return 0x8000000000000000;
     }
     return 0;
 }
 
 static __always_inline int blocked(struct iphdr *ipv4) {
-    // don't drop if a 10.0.0.0/8,  192.168.0.0/16, 224.0.0.0/4
     __u32 source = bpf_ntohl(ipv4->saddr);
-    if((source & 0xff000000) != 0x0a000000 && (source & 0xffff0000) != 0xc0800000 && (source & 0xf0000000) != 0xe000000) {
-	__u32 s14 = source >> 18;
-	__u64 *drop = bpf_map_lookup_elem(&prefix_drop, &s14);
-	if(drop && drop_map((source >> 12) & 0x3f, *drop))
-	    return 1;
-    }
+    
+    if((source & 0xff000000) == 0x0a000000) return 0; // 10.0.0.0/8
+    if((source & 0xffff0000) == 0xc0800000) return 0; // 192.168.0.0/16
+    if((source & 0xf0000000) == 0xe0000000) return 0; // 224.0.0.0/4
+    
+    __u32 s14 = source >> 18;
+    __u64 *drop = bpf_map_lookup_elem(&prefix_drop, &s14);
+    
+    if(!drop)
+	return 0;
+    
+    if(*drop & pow((source >> 12) & 0x3f)) // 0x3f = 63
+	return 1;
+    
     return 0;
 }
 
@@ -981,15 +987,16 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	return XDP_DROP;
 
     /* IPv4 PACKET RECEIVED *********************************************************************/
+
     
-    if (blocked(ipv4)) {
+    //perf(&context, 0); // ~110ns to here
+	
+    if (blocked(ipv4)) { // + ~30ns
 	context.global->blocked++;
 	return perf(&context, XDP_DROP);
     }
     
-    //perf(&context, 0); // ~110ns to here
-
-    struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO);
+    struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO); // + ~20ns
     
     if(!setting)
 	return XDP_PASS;
@@ -1026,7 +1033,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 
     /**********************************************************************/   
         
-    //perf(&context, 0); // ~150ns to here
+    //perf(&context, 0); // ~15
     
     struct tcphdr *tcp = NULL;
     struct udphdr *udp = NULL;
@@ -1085,14 +1092,14 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	
 	if (outgoing)
 	    goto OUTGOING_PROBE;
-	
+
 	switch ((action = existing_tcp_flow(&context))) {
 	case CONTINUE: // Did not match an existing flow
 	    break;
 	default:
 	    return perf(&context, action);
 	}
-	
+
 	// Try to match a configured service
 	switch ((action = new_flow(&context, tcp->source, tcp->dest, octets))) {
 	case CONTINUE: // Did not match a service
