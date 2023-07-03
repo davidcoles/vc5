@@ -103,6 +103,10 @@ func (lb *LoadBalancer) BlockList(list [1048576]bool) {
 	lb.balancer.BlockList(list)
 }
 
+func (lb *LoadBalancer) NoBlockList() {
+	lb.balancer.NoBlockList()
+}
+
 // Returns an array of packet counters. Each counter is the total
 // number of packets received from sequential /20 subnets (4096 IP
 // addresses per subnet); element 0 corresponds to 0.0.0.0/20, element
@@ -248,7 +252,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 
 	cleanup = false
 
-	lb.maps.MODE(lb.MultiNIC)
+	lb.maps.MultiNIC(lb.MultiNIC)
 	lb.maps.Distributed(lb.Distributed)
 
 	if lb.ReadinessLevel != 0 {

@@ -18,6 +18,7 @@
 
 // trace-cmd clear; watch 'trace-cmd show | tail'
 
+#ifdef MAX_FLOWS
 #include <stdlib.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
@@ -39,11 +40,19 @@
 #include <bpf/bpf_helpers.h>
 #include <bpf/bpf_endian.h>
 
-#include "vlan.c"
-#include "helpers.c"
+#include "vlan.h"
+#include "helpers.h"
+#include "bpf.h"
 
-#define SECOND_NS  1000000000
-#define SECOND_NSl 1000000000l
+#define SECOND_NS 1000000000l
+
+#define DO_QUEUE(f) (((f)&F_SKIP_QUEUE)?0:1)
+#define DO_CONNS(f) (((f)&F_SKIP_CONNS)?0:1)
+#define DO_STATE(f) (((f)&F_SKIP_STATE)?0:1)
+#define DO_STATS(f) (((f)&F_SKIP_STATS)?0:1)
+
+#define MULTINIC(f) (((f)&F_MULTINIC)?1:0)
+#define BLOCKLIST(f) (((f)&F_BLOCKLIST)?1:0)
 
 static __always_inline void maccpy(unsigned char *dst, unsigned char *src) {
     __builtin_memcpy(dst, src, 6);
@@ -223,10 +232,10 @@ struct {
 
 struct setting {
     __u32 heartbeat;
-    __u8 defcon;
     __u8 era;
-    __u8 multi;
-    __u8 distributed;
+    __u8 features;
+    __u8 pad1;
+    __u8 pad2;
 };
 
 
@@ -244,9 +253,10 @@ struct context {
     __u64 start;
     __u64 start_s;    
     __u64 octets;
+    __u8 features;
 };
 
-#define DEFCON_(context) (context->setting.defcon)
+//#define DEFCON_(context) (context->setting.defcon)
 
 struct {
     //__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -298,28 +308,7 @@ struct {
 
 /**********************************************************************/
 
-#define DEFCON0 0 // LB disabled - XDP_PASS all traffic
-#define DEFCON1 1 // only global stats and stateless forwarding done
-#define DEFCON2 2 // per backend stats recorded
-#define DEFCON3 3 // flow state table consulted
-#define DEFCON4 4 // flow state table written to
-#define DEFCON5 5 // flows shared via flow_queue/flow_shared
-
 #define CONTINUE XDP_ABORTED
-
-const int ZERO = 0;
-__u8 DEFCON = DEFCON5;
-__u8 MULTINIC = 0;
-
-/*
-static __always_inline void write_perf(struct context *context) {
-    if(context->global) {
-	context->global->perf_timens += (bpf_ktime_get_ns() - context->start);
-	context->global->perf_packets++;
-	context->global = NULL; // we can only write this once
-    }
-}
-*/
 
 static __always_inline int find_real(struct iphdr *ipv4, __be16 src, __be16 dst, struct real *r) {
     struct service s;
@@ -361,7 +350,7 @@ static __always_inline int find_real(struct iphdr *ipv4, __be16 src, __be16 dst,
 
 static __always_inline void store_tcp_flow(struct iphdr *ipv4, __be16 src, __be16 dst, __be32 rip, __u8 *m, __u16 vid, struct global *global)
 {
-    __u64 time = bpf_ktime_get_ns() / SECOND_NSl;
+    __u64 time = bpf_ktime_get_ns() / SECOND_NS;
     struct flow flow = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = src, .dport = dst }; 
     struct state state = { .rip = rip, .vid = vid, .time = time, .mac = { m[0], m[1], m[2], m[3], m[4], m[5] }, .era = 0 };
     bpf_map_update_elem(&flow_state, &flow, &state, BPF_ANY);
@@ -537,7 +526,7 @@ static __always_inline int existing_tcp_flow(struct context *context)
     if(tcp->syn)
 	return CONTINUE;
     
-    if(DEFCON_(context) < DEFCON3)
+    if(!DO_STATE(context->features))
 	return CONTINUE;
     
     struct flow flow = {.src = ipv4->saddr, .dst = ipv4->daddr, .sport = tcp->source, .dport = tcp->dest };
@@ -545,10 +534,8 @@ static __always_inline int existing_tcp_flow(struct context *context)
     struct state s = {};
     
     if(!state || (state->time + 120) < start_s) {
-	if(!(context->setting.distributed))
-	    return CONTINUE;
 	
-	if(DEFCON < DEFCON5)
+	if(!DO_QUEUE(context->features))
 	    return CONTINUE;
 	
 	state = shared_tcp_flow(context, &flow, &s);
@@ -565,8 +552,7 @@ static __always_inline int existing_tcp_flow(struct context *context)
     if((state->time + 60) < start_s) {
 	state->time = start_s - ((start_ns >> 8) % 5); // vary distrbution of packets a little
 
-	// write to queue
-	if(context->setting.distributed && DEFCON == DEFCON5) {
+        if(DO_QUEUE(context->features)) {
 	    state->version = VERSION;
 	    struct flow_queue_entry fqe = {};
 	    memcpy((void *)&fqe, &flow, sizeof(struct flow));
@@ -598,7 +584,8 @@ static __always_inline int existing_tcp_flow(struct context *context)
     } else {
 	// traffic should be tagged (or multi-nic mode)
 	if(!tag) {
-	    if(!MULTINIC) goto drop_packet;
+	    //if(!MULTINIC) goto drop_packet;
+	    if(!MULTINIC(context->features)) goto drop_packet;
 	} else {
 	    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
 	}
@@ -609,7 +596,7 @@ static __always_inline int existing_tcp_flow(struct context *context)
     }
     
     /**********************************************************************/
-    be_tcp_concurrent(context, state);
+    if(DO_CONNS(context->features)) be_tcp_concurrent(context, state);
     /**********************************************************************/
     
     be_tcp_counter(ipv4->daddr, tcp->dest, state->rip, octets, 0);
@@ -617,8 +604,8 @@ static __always_inline int existing_tcp_flow(struct context *context)
     __u32 prefix = bpf_ntohl(ipv4->saddr) >> 12; // obtain /20
     __u64 *traffic = bpf_map_lookup_elem(&prefix_counters, &prefix);
     if(traffic) (*traffic)++;	
-    
-    if(MULTINIC)
+
+    if(MULTINIC(context->features))
 	return redirect_packet(context, state->mac, bpf_ntohs(state->vid));
     
     return bounce_packet(context, state->mac);
@@ -640,6 +627,8 @@ static __always_inline int new_flow(struct context *context, __be16 src, __be16 
     
     struct real real_s;
     struct real *real = &real_s;
+
+    __u8 f = context->features;
 
     switch(find_real(ipv4, src, dst, &real_s)) {
     case CONTINUE: //0: // no match - continue
@@ -670,7 +659,7 @@ static __always_inline int new_flow(struct context *context, __be16 src, __be16 
 	    if(tag != NULL) goto drop_packet;
 	} else {
 	    if(tag == NULL) {
-		if(!MULTINIC)
+		if(!MULTINIC(context->features))
 		    goto drop_packet;
 	    } else {
 		tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (real->vid & bpf_htons(0x0fff));
@@ -678,15 +667,15 @@ static __always_inline int new_flow(struct context *context, __be16 src, __be16 
 	}
 	
 	if(ipv4->protocol == IPPROTO_TCP) { // maybe don't store initial SYN?
-	    if(DEFCON >= DEFCON4) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
-	    if(DEFCON >= DEFCON2) be_tcp_counter(ipv4->daddr, dst, real->rip, octets, DEFCON >= DEFCON4);
+	    if(DO_STATE(f)) store_tcp_flow(ipv4, src, dst, real->rip, real->mac, real->vid, global);
+	    if(DO_STATS(f)) be_tcp_counter(ipv4->daddr, dst, real->rip, octets, DO_STATE(f));
 	}
 
 	__u32 prefix = bpf_ntohl(ipv4->saddr) >> 12; // obtain /20
 	__u64 *traffic = bpf_map_lookup_elem(&prefix_counters, &prefix);
 	if(traffic) (*traffic)++;	
 
-	if(MULTINIC)
+	if(MULTINIC(context->features))
 	    return redirect_packet(context, real->mac, bpf_ntohs(real->vid));
 	
 	return bounce_packet(context, real->mac);
@@ -912,12 +901,14 @@ static __always_inline int perf(struct context *context, int ret) {
 //SEC("xdp_main") int xdp_main_func(struct xdp_md *ctx)
 int xdp_main_func(struct xdp_md *ctx, int outgoing)
 {
+    __u64 start = bpf_ktime_get_ns();
+    __u64 start_s = start / SECOND_NS;
+
+    const int ZERO = 0;
+    
     // ctx->ingress_ifindex;
     void *data_end = (void *)(long)ctx->data_end;
     void *data     = (void *)(long)ctx->data;
-    
-    __u64 start = bpf_ktime_get_ns();
-    __u64 start_s = start / SECOND_NSl;
     __u64 octets = data_end - data;
     
     int action;
@@ -928,11 +919,11 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	return XDP_PASS;
     
     global->rx_packets++;
-    global->rx_octets += (data_end - data);
+    global->rx_octets += octets;
 
     // if 10s since last perf reset ...
-    if((global->perf_timer + (10l * SECOND_NS)) < start) {
-	global->perf_timer = start;
+    if((global->perf_timer + 10) < start_s) {
+	global->perf_timer = start_s;
 	if(global->perf_packets > 1) {
 	    global->perf_timens = (global->perf_timens / global->perf_packets) * 100;
 	    global->perf_packets = 100;
@@ -942,7 +933,25 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	}
     }
 
-    struct context context = { .xdp_md = ctx, .start = start, .start_s = start_s, octets = data_end - data, .data_end = data_end, .global = global };
+    struct context context = { .xdp_md = ctx, .start = start, .start_s = start_s, .octets = octets, .data_end = data_end, .global = global };
+
+
+    struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO); // + ~20ns
+    
+    if(!setting)
+	return XDP_PASS;
+    
+    context.setting = *setting;
+
+    __u64 hb = setting->heartbeat;	
+    if (hb == 0) {
+	setting->heartbeat = start_s + 60;
+    } else if(hb < start_s) {
+	return XDP_PASS;
+    }
+    
+    context.features = setting->features;
+
 
     /* PACKET DECODING BEGINS *********************************************************************/
     
@@ -991,46 +1000,12 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     
     //perf(&context, 0); // ~110ns to here
 	
-    if (blocked(ipv4)) { // + ~30ns
+    if (BLOCKLIST(context.features) && blocked(ipv4)) { // + ~30ns
 	context.global->blocked++;
 	return perf(&context, XDP_DROP);
     }
     
-    struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO); // + ~20ns
     
-    if(!setting)
-	return XDP_PASS;
-
-    context.setting = *setting;
-    
-    DEFCON = setting->defcon;
-    MULTINIC = setting->multi;
-    
-    switch(DEFCON) {
-    case DEFCON0:
-    case DEFCON1:	    
-    case DEFCON2:
-    case DEFCON3:
-    case DEFCON4:
-    case DEFCON5:
-	break;
-    default:
-	DEFCON = context.setting.defcon = DEFCON5;
-	break;
-    }
-    
-    // check for heartbeat from userland - disable LB functionality
-    __u64 hb = setting->heartbeat;	
-    if (hb == 0) {
-	setting->heartbeat = start_s + 60;
-    } else if(hb < start_s) {
-	return XDP_PASS;
-    }
-    
-    /* If LB is disabled then pass all traffic unmolested */
-    if (DEFCON == DEFCON0)
-	return XDP_PASS; 
-
     /**********************************************************************/   
         
     //perf(&context, 0); // ~15
@@ -1185,3 +1160,6 @@ char _license[] SEC("license") = "GPL";
  __u32 rx_queue_index;  // rxq->queue_index
  };
 */
+
+#endif
+

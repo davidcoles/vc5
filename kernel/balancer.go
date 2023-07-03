@@ -141,11 +141,20 @@ func (b *Balancer) BlockList(list [PREFIXES]bool) {
 	}
 
 	b.maps.update_drop_map(table)
+	b.maps.features.BLOCKLIST = true
+	b.maps.write_settings()
+}
+
+func (b *Balancer) NoBlockList() {
+	var table [PREFIXES / 64]uint64
+	b.maps.update_drop_map(table)
+	b.maps.features.BLOCKLIST = false
+	b.maps.write_settings()
 }
 
 func (b *Balancer) Global() Counter {
 	g := b.maps.lookup_globals()
-	return Counter{Octets: g.rx_octets, Packets: g.rx_packets, Flows: g.new_flows, QueueFailed: g.qfailed, Latency: g.latency(), DEFCON: b.maps.setting.defcon, Blocked: g.blocked}
+	return Counter{Octets: g.rx_octets, Packets: g.rx_packets, Flows: g.new_flows, QueueFailed: g.qfailed, Latency: g.latency(), DEFCON: b.maps.defcon, Blocked: g.blocked}
 }
 
 func (b *Balancer) balancer() {
@@ -267,7 +276,7 @@ func (b *Balancer) connections(done chan bool) {
 			era++
 			old := era%2 == 0
 
-			b.maps.ERA(era) // write back new setting to kernel
+			b.maps.Era(era) // write back new setting to kernel
 
 			// iterate over the selection reading counters at our leisure
 			for v, _ := range stats {

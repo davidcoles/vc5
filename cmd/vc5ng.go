@@ -277,7 +277,7 @@ func main() {
 	})
 
 	http.HandleFunc("/clear", func(w http.ResponseWriter, r *http.Request) {
-		lb.BlockList([PREFIXES]bool{})
+		lb.NoBlockList()
 	})
 
 	http.HandleFunc("/block", func(w http.ResponseWriter, r *http.Request) {

@@ -28,6 +28,7 @@ import (
 	"sort"
 	"unsafe"
 
+	"github.com/davidcoles/vc5/kernel/bpf"
 	"github.com/davidcoles/vc5/kernel/maglev"
 	"github.com/davidcoles/vc5/kernel/xdp"
 	"github.com/davidcoles/vc5/monitor"
@@ -53,8 +54,11 @@ type Service = healthchecks.Service
 
 type maps = Maps
 type Maps struct {
-	m       map[string]int
-	setting bpf_setting
+	m           map[string]int
+	setting     bpf_setting
+	features    bpf.Features
+	defcon      uint8
+	distributed bool
 }
 
 type bpf_real struct {
@@ -80,12 +84,11 @@ type bpf_counter struct {
 }
 
 type bpf_setting struct {
-	heartbeat   uint32
-	defcon      uint8 // 3 bit
-	era         uint8 // 1 bit
-	multi       uint8 // 1 bit
-	distributed uint8 // 1 bit
-	// [0:0][0:0][0][0:0:0]
+	heartbeat uint32
+	era       uint8
+	features  uint8
+	pad1      uint8
+	pad2      uint8
 }
 
 //var SETTINGS bpf_setting = bpf_setting{defcon: 5, distributed: 1}
@@ -163,7 +166,7 @@ const state_s = 20
 func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	var m maps
 	m.m = make(map[string]int)
-	m.setting.defcon = 5
+	m.defcon = 5
 
 	x, err := xdp.LoadBpfProgram(BPF_O)
 
@@ -397,9 +400,48 @@ func (m *maps) lookup_vrpp_concurrent(era bool, v *bpf_vrpp, a *bpf_active) int 
 	return ret
 }
 
+/*
+#define DEFCON0 0 // LB disabled - XDP_PASS all traffic
+#define DEFCON1 1 // only global stats and stateless forwarding done
+#define DEFCON2 2 // per backend stats recorded
+#define DEFCON3 3 // flow state table consulted
+#define DEFCON4 4 // flow state table written to
+#define DEFCON5 5 // flows shared via flow_queue/flow_shared
+*/
+
 func (m *maps) write_settings() int {
 	var zero uint32
 	m.setting.heartbeat = 0
+
+	switch m.defcon {
+	case 5:
+		m.features.SKIP_STATS = false
+		m.features.SKIP_STATE = false
+		m.features.SKIP_CONNS = false
+		m.features.SKIP_QUEUE = !m.distributed
+	case 4:
+		m.features.SKIP_STATS = false
+		m.features.SKIP_STATE = false
+		m.features.SKIP_CONNS = false
+		m.features.SKIP_QUEUE = true
+	case 3:
+		m.features.SKIP_STATS = false
+		m.features.SKIP_STATE = false
+		m.features.SKIP_CONNS = true
+		m.features.SKIP_QUEUE = true
+	case 2:
+		m.features.SKIP_STATS = false
+		m.features.SKIP_STATE = true
+		m.features.SKIP_CONNS = true
+		m.features.SKIP_QUEUE = true
+	case 1:
+		m.features.SKIP_STATS = true
+		m.features.SKIP_STATE = true
+		m.features.SKIP_CONNS = true
+		m.features.SKIP_QUEUE = true
+	}
+
+	m.setting.features = m.features.Render()
 
 	all := make([]bpf_setting, xdp.BpfNumPossibleCpus())
 
@@ -410,37 +452,30 @@ func (m *maps) write_settings() int {
 	return xdp.BpfMapUpdateElem(m.settings(), uP(&zero), uP(&(all[0])), xdp.BPF_ANY)
 }
 
-func (m *maps) MODE(mode bool) {
-	if mode {
-		m.setting.multi = 1
-	} else {
-		m.setting.multi = 0
-	}
-
+func (m *maps) MultiNIC(mode bool) {
+	m.features.MULTINIC = mode
 	m.write_settings()
 }
 
 func (m *maps) Distributed(d bool) {
-	if d {
-		m.setting.distributed = 1
-	} else {
-		m.setting.distributed = 0
-	}
-
+	m.distributed = d
 	m.write_settings()
 }
 
-func (m *maps) ERA(era uint8) {
+func (m *maps) Era(era uint8) {
 	m.setting.era = era
 	m.write_settings()
 }
 
 func (m *maps) DEFCON(d uint8) uint8 {
-	if d <= 5 {
-		m.setting.defcon = d
-		m.write_settings()
+	if d == 0 || d > 5 {
+		return m.defcon
 	}
-	return m.setting.defcon
+
+	m.defcon = d
+	m.write_settings()
+
+	return m.defcon
 }
 
 func (m *maps) lookup_globals() bpf_global { //(g *bpf_global) int {
