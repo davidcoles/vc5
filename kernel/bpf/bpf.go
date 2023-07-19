@@ -21,6 +21,13 @@ package bpf
 //#include "bpf.h"
 import "C"
 
+const (
+	F_STICKY   = C.F_STICKY
+	F_FALLBACK = C.F_FALLBACK
+	FLOW_S     = 12
+	STATE_S    = 20
+)
+
 type Features struct {
 	SKIP_STATS bool
 	SKIP_STATE bool

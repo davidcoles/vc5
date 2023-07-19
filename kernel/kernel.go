@@ -160,9 +160,6 @@ func (c *bpf_counter) add(a bpf_counter) {
 	c.flows += a.flows
 }
 
-const flow_s = 12
-const state_s = 20
-
 func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 	var m maps
 	m.m = make(map[string]int)
@@ -245,11 +242,11 @@ func Open(native bool, vetha, vethb string, eth ...string) (*Maps, error) {
 		return nil, err
 	}
 
-	if m.m["flow_queue"], err = find_map(x, "flow_queue", 0, flow_s+state_s); err != nil {
+	if m.m["flow_queue"], err = find_map(x, "flow_queue", 0, bpf.FLOW_S+bpf.STATE_S); err != nil {
 		return nil, err
 	}
 
-	if m.m["flow_shared"], err = find_map(x, "flow_shared", flow_s, state_s); err != nil {
+	if m.m["flow_share"], err = find_map(x, "flow_share", bpf.FLOW_S, bpf.STATE_S); err != nil {
 		return nil, err
 	}
 

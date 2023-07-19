@@ -7,10 +7,10 @@ export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 OBJ := kernel/bpf/bpf.o
 BIN := cmd/vc5ng
 
-MAX_FLOWS    ?= 10000000 # 10M
-SHARED_FLOWS ?= 1000000  # 1M
-PERCPU_FLOWS ?= 1000000  # 1M
-FLOW_QUEUE   ?= 10000
+FLOW_STATE_TYPE ?= BPF_MAP_TYPE_LRU_PERCPU_HASH
+FLOW_STATE_SIZE ?= 1000000  # 1M
+FLOW_SHARE_SIZE ?= 1000000  # 1M
+FLOW_QUEUE_SIZE ?= 10000
 
 all: clean cmd/vc5.json $(BIN) $(OBJ)
 
@@ -28,10 +28,10 @@ cmd/vc5ng: cmd/vc5ng.go $(OBJ)
 %.o: %.c bpf
 	clang -S \
 	    -target bpf \
-	    -D MAX_FLOWS=$(MAX_FLOWS) \
-	    -D SHARED_FLOWS=$(SHARED_FLOWS) \
-	    -D PERCPU_FLOWS=$(PERCPU_FLOWS) \
-	    -D FLOW_QUEUE=$(FLOW_QUEUE) \
+	    -D FLOW_STATE_TYPE=$(FLOW_STATE_TYPE) \
+	    -D FLOW_STATE_SIZE=$(FLOW_STATE_SIZE) \
+	    -D FLOW_SHARE_SIZE=$(FLOW_SHARE_SIZE) \
+	    -D FLOW_QUEUE_SIZE=$(FLOW_QUEUE_SIZE) \
 	    -D __BPF_TRACING__ \
 	    -I$(LIBBPF) \
 	    -Wall \

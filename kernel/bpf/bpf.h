@@ -6,3 +6,8 @@ enum {
       F_BLOCKLIST   = 0x10,
       F_MULTINIC    = 0x20,
 };
+
+enum {
+      F_STICKY     = 0x01,
+      F_FALLBACK   = 0x02,
+};

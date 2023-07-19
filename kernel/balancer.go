@@ -25,6 +25,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davidcoles/vc5/kernel/bpf"
 	"github.com/davidcoles/vc5/kernel/xdp"
 	"github.com/davidcoles/vc5/types"
 )
@@ -100,19 +101,19 @@ func (b *Balancer) Stats() map[Target]Counter {
 
 func (b *Balancer) StoreFlow(fs []byte) {
 
-	if len(fs) != flow_s+state_s {
+	if len(fs) != bpf.FLOW_S+bpf.STATE_S {
 		return
 	}
 
 	flow := uP(&fs[0])
-	state := uP(&fs[flow_s])
+	state := uP(&fs[bpf.FLOW_S])
 	time := (*uint32)(state)
 	*time = uint32(xdp.KtimeGet()) // set first 4 bytes of state to the local kernel time
 	xdp.BpfMapUpdateElem(b.maps.flow_shared(), flow, state, xdp.BPF_ANY)
 }
 
 func (b *Balancer) FlowQueue() []byte {
-	var entry [flow_s + state_s]byte
+	var entry [bpf.FLOW_S + bpf.STATE_S]byte
 
 	if xdp.BpfMapLookupAndDeleteElem(b.maps.flow_queue(), nil, uP(&entry)) != 0 {
 		return nil
@@ -127,17 +128,11 @@ func (b *Balancer) BlockList(list [PREFIXES]bool) {
 		var val uint64
 		for m := 0; m < 64; m++ {
 			if list[(n*64)+m] {
-				fmt.Printf("%d\n", m)
 				val |= pow(m)
 			}
 		}
 
 		table[n] = val
-
-		if val != 0 {
-			fmt.Printf("%016x %d\n", val, n)
-		}
-
 	}
 
 	b.maps.update_drop_map(table)
@@ -349,15 +344,15 @@ func update_backend(curr, prev *be_state, l types.Logger) bool {
 
 	var flag [4]byte
 
-	const F_STICKY = 0x01
-	const F_FALLBACK = 0x02
+	//const F_STICKY = 0x01
+	//const F_FALLBACK = 0x02
 
 	if curr.sticky {
-		flag[0] |= F_STICKY
+		flag[0] |= bpf.F_STICKY
 	}
 
 	if curr.fallback {
-		flag[0] |= F_FALLBACK
+		flag[0] |= bpf.F_FALLBACK
 	}
 
 	mapper := map[[4]byte]uint8{}

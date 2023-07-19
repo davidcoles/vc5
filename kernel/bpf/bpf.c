@@ -18,7 +18,7 @@
 
 // trace-cmd clear; watch 'trace-cmd show | tail'
 
-#ifdef MAX_FLOWS
+#ifdef __BPF__ // Skip all of this with CGO
 #include <stdlib.h>
 #include <linux/if_ether.h>
 #include <linux/if_packet.h>
@@ -54,7 +54,7 @@
 #define MULTINIC(f) (((f)&F_MULTINIC)?1:0)
 #define BLOCKLIST(f) (((f)&F_BLOCKLIST)?1:0)
 
-static __always_inline void maccpy(unsigned char *dst, unsigned char *src) {
+static  void maccpy(unsigned char *dst, unsigned char *src) {
     __builtin_memcpy(dst, src, 6);
 }
 
@@ -75,6 +75,7 @@ struct flow {
     __be16 sport;
     __be16 dport;
 };
+
 #define VERSION 1
 struct state {
     __u32 time;
@@ -87,28 +88,19 @@ struct state {
     __u8 version;    
 };
 
-#if PERCPU_FLOWS
 struct {
     __type(key, struct flow);
     __type(value, struct state);
-    __uint(type, BPF_MAP_TYPE_LRU_PERCPU_HASH);
-    __uint(max_entries, PERCPU_FLOWS);
+    __uint(type, FLOW_STATE_TYPE);
+    __uint(max_entries, FLOW_STATE_SIZE);
 } flow_state SEC(".maps");
-#else
-struct {
-    __type(key, struct flow);
-    __type(value, struct state);
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, MAX_FLOWS);
-} flow_state SEC(".maps");    
-#endif    
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __type(key, struct flow);
     __type(value, struct state);
-    __uint(max_entries, SHARED_FLOWS);
-} flow_shared SEC(".maps");
+    __uint(max_entries, FLOW_SHARE_SIZE);
+} flow_share SEC(".maps");
 
 struct flow_queue_entry {
     __u8 data[sizeof(struct flow) + sizeof(struct state)];
@@ -117,7 +109,7 @@ struct flow_queue_entry {
 struct {
     __uint(type, BPF_MAP_TYPE_QUEUE);
     __type(value, struct flow_queue_entry);
-    __uint(max_entries, FLOW_QUEUE);
+    __uint(max_entries, FLOW_QUEUE_SIZE);
 } flow_queue SEC(".maps");
 
 /**********************************************************************/
@@ -147,16 +139,13 @@ struct real {
     // [1] - if non-zeo then n/255 chance to send conn to ip/mac/vid in backend.real[0] (leastconns)
 };
 
-#define F_STICKY     0x01
-#define F_FALLBACK   0x02
-// remember to update kernel/balancer.go
 
 /**********************************************************************/
 
 struct service {
     __be32 vip;
     __be16 port;
-    __u8 protocol; // TCP=6 UDP=17 VIP-EXISTS?=255
+    __u8 protocol; // TCP=6 UDP=17
     __u8 pad;
 };
 
@@ -248,18 +237,16 @@ struct context {
     struct tcphdr *tcphdr;
     struct udphdr *udphdr;
     struct global *global;
-    struct setting setting;
     void * data_end;
     __u64 start;
     __u64 start_s;    
     __u64 octets;
     __u8 features;
+    __u8 era;
 };
 
-//#define DEFCON_(context) (context->setting.defcon)
 
 struct {
-    //__uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
     __type(key, unsigned int);
     __type(value, struct setting);
@@ -380,7 +367,7 @@ static __always_inline void be_tcp_concurrent(struct context *context, struct st
 {
     struct iphdr *ipv4 = context->iphdr;
     struct tcphdr *tcp = context->tcphdr;
-    __u8 era = context->setting.era;
+    __u8 era = context->era;
     
     if(!tcp)
 	return;
@@ -409,7 +396,6 @@ static __always_inline void be_tcp_concurrent(struct context *context, struct st
 	    concurrent = _be_tcp_concurrent(ipv4->daddr, tcp->dest, state->rip, era);
 	    if(concurrent) concurrent->current++;
 	    //if(concurrent) concurrent->total++;
-
 	    break;
 	}
     } else {
@@ -493,7 +479,7 @@ static __always_inline struct state *shared_tcp_flow(struct context *context, st
      __u64 start_s = context->start_s;
     __u64 start_ns = context->start;
     
-    struct state *s = bpf_map_lookup_elem(&flow_shared, flow);
+    struct state *s = bpf_map_lookup_elem(&flow_share, flow);
 
     if(!s || s->version != VERSION)
 	return NULL;
@@ -503,7 +489,7 @@ static __always_inline struct state *shared_tcp_flow(struct context *context, st
 
     *state = *s;
     
-    state->era = context->setting.era;
+    state->era = context->era;
     state->finrst = 0;
     state->time += (start_ns >> 8) % 10; // vary distribution of packets a little
 
@@ -544,7 +530,7 @@ static __always_inline int existing_tcp_flow(struct context *context)
 	    return CONTINUE;
 
 	// any updates to the struct pointed to by state won't get persisted after here, but will with next packet
-	state->era = context->setting.era; // saved struct won't trigger updates ...
+	state->era = context->era; // saved struct won't trigger updates ...
 	bpf_map_update_elem(&flow_state, &flow, state, BPF_ANY); // ...
 	state->era -= 1; // ... but this one will
     }
@@ -584,7 +570,6 @@ static __always_inline int existing_tcp_flow(struct context *context)
     } else {
 	// traffic should be tagged (or multi-nic mode)
 	if(!tag) {
-	    //if(!MULTINIC) goto drop_packet;
 	    if(!MULTINIC(context->features)) goto drop_packet;
 	} else {
 	    tag->h_vlan_TCI = (tag->h_vlan_TCI & bpf_htons(0xf000)) | (state->vid & bpf_htons(0x0fff));
@@ -873,8 +858,9 @@ static __always_inline int blocked(struct iphdr *ipv4) {
     __u32 source = bpf_ntohl(ipv4->saddr);
     
     if((source & 0xff000000) == 0x0a000000) return 0; // 10.0.0.0/8
+    if((source & 0xfff00000) == 0xac100000) return 0; // 172.16.0.0/12
     if((source & 0xffff0000) == 0xc0800000) return 0; // 192.168.0.0/16
-    if((source & 0xf0000000) == 0xe0000000) return 0; // 224.0.0.0/4
+    if((source & 0xe0000000) == 0xe0000000) return 0; // 224.0.0.0/4
     
     __u32 s14 = source >> 18;
     __u64 *drop = bpf_map_lookup_elem(&prefix_drop, &s14);
@@ -934,15 +920,12 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     }
 
     struct context context = { .xdp_md = ctx, .start = start, .start_s = start_s, .octets = octets, .data_end = data_end, .global = global };
-
-
+    
     struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO); // + ~20ns
     
     if(!setting)
 	return XDP_PASS;
     
-    context.setting = *setting;
-
     __u64 hb = setting->heartbeat;	
     if (hb == 0) {
 	setting->heartbeat = start_s + 60;
@@ -951,7 +934,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     }
     
     context.features = setting->features;
-
+    context.era = setting->era;
 
     /* PACKET DECODING BEGINS *********************************************************************/
     
@@ -999,17 +982,16 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 
     
     //perf(&context, 0); // ~110ns to here
-	
-    if (BLOCKLIST(context.features) && blocked(ipv4)) { // + ~30ns
-	context.global->blocked++;
-	return perf(&context, XDP_DROP);
-    }
     
+    if (BLOCKLIST(context.features)) {
+	if (blocked(ipv4)) { // + ~30ns
+	    if (context.global) context.global->blocked++;
+	    return perf(&context, XDP_DROP);
+	}
+    }
     
     /**********************************************************************/   
         
-    //perf(&context, 0); // ~15
-    
     struct tcphdr *tcp = NULL;
     struct udphdr *udp = NULL;
     struct icmphdr *icmp = NULL;
@@ -1161,5 +1143,4 @@ char _license[] SEC("license") = "GPL";
  };
 */
 
-#endif
-
+#endif //__BPF__
