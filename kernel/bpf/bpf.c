@@ -53,6 +53,7 @@
 
 #define MULTINIC(f) (((f)&F_MULTINIC)?1:0)
 #define BLOCKLIST(f) (((f)&F_BLOCKLIST)?1:0)
+#define DISABLED(f) (((f)&F_DISABLED)?1:0)
 
 static  void maccpy(unsigned char *dst, unsigned char *src) {
     __builtin_memcpy(dst, src, 6);
@@ -237,7 +238,7 @@ struct context {
     struct tcphdr *tcphdr;
     struct udphdr *udphdr;
     struct global *global;
-    void * data_end;
+    void *data_end;
     __u64 start;
     __u64 start_s;    
     __u64 octets;
@@ -456,7 +457,7 @@ static __always_inline int redirect_packet(struct context *context, char *dst, _
     struct ethhdr *eth = context->ethhdr;
     __u8 *mac = bpf_map_lookup_elem(&redirect_mac, &map_entry);
     
-    if(!mac || nulmac(mac)) {
+    if (!mac || nulmac(mac)) {
     	return XDP_DROP;
     }
 
@@ -476,7 +477,7 @@ static __always_inline int bounce_packet(struct context *context, char *dst)
 
 static __always_inline struct state *shared_tcp_flow(struct context *context, struct flow *flow, struct state *state)
 {
-     __u64 start_s = context->start_s;
+    __u64 start_s = context->start_s;
     __u64 start_ns = context->start;
     
     struct state *s = bpf_map_lookup_elem(&flow_share, flow);
@@ -901,14 +902,14 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     
     struct global *global = bpf_map_lookup_elem(&globals, &ZERO);
     
-    if(!global)
+    if (!global)
 	return XDP_PASS;
     
     global->rx_packets++;
     global->rx_octets += octets;
 
     // if 10s since last perf reset ...
-    if((global->perf_timer + 10) < start_s) {
+    if ((global->perf_timer + 10) < start_s) {
 	global->perf_timer = start_s;
 	if(global->perf_packets > 1) {
 	    global->perf_timens = (global->perf_timens / global->perf_packets) * 100;
@@ -923,13 +924,15 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     
     struct setting *setting = bpf_map_lookup_elem(&settings, &ZERO); // + ~20ns
     
-    if(!setting)
+    if (!setting || DISABLED(setting->features))
 	return XDP_PASS;
     
-    __u64 hb = setting->heartbeat;	
-    if (hb == 0) {
+    // writing to the settings entry from userland will reset the heartbeat field to zero
+    // if this does not happen for over 60s then we disable load balancer functionality
+    // this should address the case in which the userland processdies without cleaning up
+    if (setting->heartbeat == 0) {
 	setting->heartbeat = start_s + 60;
-    } else if(hb < start_s) {
+    } else if(setting->heartbeat < start_s) {
 	return XDP_PASS;
     }
     
@@ -996,7 +999,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
     struct udphdr *udp = NULL;
     struct icmphdr *icmp = NULL;
 
-    switch(ipv4->protocol) {
+    switch (ipv4->protocol) {
     
     case IPPROTO_ICMP:
 	icmp = context.icmphdr = data + nh_off;
@@ -1010,7 +1013,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	    goto OUTGOING_PROBE;
 	
 	// respond to pings to configured VIPs
-	if(configured_vip(ipv4, octets))
+	if (configured_vip(ipv4, octets))
 	    return handle_icmp(&context);
 	
 	break;
@@ -1034,7 +1037,7 @@ int xdp_main_func(struct xdp_md *ctx, int outgoing)
 	}
 	
 	/* drop any traffic to a configured vip not handled by a service */
-	if(configured_vip(ipv4, octets))
+	if (configured_vip(ipv4, octets))
 	    return XDP_DROP;
 
 	break;

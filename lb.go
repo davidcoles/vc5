@@ -297,6 +297,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		go func() {
 			for {
 				time.Sleep(time.Duration(lb.KillSwitch) * time.Minute)
+				lb.Logger.ALERT("LoadBalancer", "DISABLING")
 				lb.DEFCON(0)
 			}
 		}()

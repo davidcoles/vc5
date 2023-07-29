@@ -35,6 +35,7 @@ type Features struct {
 	SKIP_QUEUE bool
 	BLOCKLIST  bool
 	MULTINIC   bool
+	DISABLED   bool
 }
 
 func (f Features) Render() uint8 {
@@ -56,6 +57,9 @@ func (f Features) Render() uint8 {
 	}
 	if f.MULTINIC {
 		r |= C.F_MULTINIC
+	}
+	if f.DISABLED {
+		r |= C.F_DISABLED
 	}
 	return r
 }

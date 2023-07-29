@@ -410,6 +410,8 @@ func (m *maps) write_settings() int {
 	var zero uint32
 	m.setting.heartbeat = 0
 
+	m.features.DISABLED = false
+
 	switch m.defcon {
 	case 5:
 		m.features.SKIP_STATS = false
@@ -436,6 +438,8 @@ func (m *maps) write_settings() int {
 		m.features.SKIP_STATE = true
 		m.features.SKIP_CONNS = true
 		m.features.SKIP_QUEUE = true
+	case 0:
+		m.features.DISABLED = true
 	}
 
 	m.setting.features = m.features.Render()
@@ -465,7 +469,7 @@ func (m *maps) Era(era uint8) {
 }
 
 func (m *maps) DEFCON(d uint8) uint8 {
-	if d == 0 || d > 5 {
+	if d > 5 {
 		return m.defcon
 	}
 

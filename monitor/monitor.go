@@ -365,8 +365,9 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 		ret := status
 		ret.Healthy = false
+		ret.FallbackOn = false
 
-		// copy reals to new slice that we can modify
+		// copy reals to new map that we can modify
 		r := map[IP4]healthchecks.Real{}
 		for k, v := range ret.Reals {
 
@@ -382,19 +383,37 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 			r[k] = v
 		}
-		ret.Reals = r // write the slice to the returned object
+		ret.Reals = r // write the map to the returned object
 
 		if fallback != nil {
 			ret.FallbackProbe = fallback.Status()
 		}
 
+		// need to treat 0 differently in the case of fallback
+		//if healthy >= ret.Minimum {
+		//	ret.Healthy = true
+		//} else if fallback != nil {
+		//	if ret.FallbackProbe.Passed {
+		//		ret.Healthy = true
+		//		ret.FallbackOn = true
+		//	}
+		//}
+
+		// need to treat minimum == 0 differently in the case of fallback
 		if healthy >= ret.Minimum {
 			ret.Healthy = true
+
+			if healthy == 0 && fallback != nil && ret.FallbackProbe.Passed {
+				ret.FallbackOn = true
+			}
+
 		} else if fallback != nil {
+
 			if ret.FallbackProbe.Passed {
 				ret.Healthy = true
 				ret.FallbackOn = true
 			}
+
 		}
 
 		if ret.Healthy != was {
