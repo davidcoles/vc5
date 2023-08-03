@@ -167,7 +167,6 @@ func main() {
 
 	lb := &vc5.LoadBalancer{
 		ReadinessLevel:  uint8(*dfcn),
-		KillSwitch:      *kill,
 		Native:          *native,
 		MultiNIC:        *multi,
 		Socket:          socket,
@@ -188,6 +187,17 @@ func main() {
 		time.Sleep(time.Duration(conf.Learn) * time.Second)
 		pool.Start()
 	}()
+
+	if *kill > 0 {
+		// auto kill switch
+		go func() {
+			for {
+				time.Sleep(time.Duration(*kill) * time.Minute)
+				logger.ALERT("LoadBalancer", "DISABLING")
+				lb.DEFCON(0)
+			}
+		}()
+	}
 
 	sig := make(chan os.Signal)
 	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGQUIT)

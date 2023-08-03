@@ -45,10 +45,6 @@ type LoadBalancer struct {
 	// to normal operation if left at 0.
 	ReadinessLevel uint8
 
-	// Network safety feature to use during testing; number of minutes
-	// after which to disable the balance.r
-	KillSwitch uint
-
 	// Use native driver mode when attaching interfaces in XDP.
 	Native bool
 
@@ -291,17 +287,6 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 	lb.update = make(chan *healthchecks.Healthchecks)
 
 	go lb.background(nat, monitor, lb.balancer)
-
-	if lb.KillSwitch > 0 {
-		// temporary auto kill switch
-		go func() {
-			for {
-				time.Sleep(time.Duration(lb.KillSwitch) * time.Minute)
-				lb.Logger.ALERT("LoadBalancer", "DISABLING")
-				lb.DEFCON(0)
-			}
-		}()
-	}
 
 	return nil
 }
