@@ -24,12 +24,10 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5/monitor/healthchecks"
-	"github.com/davidcoles/vc5/monitor/netns"
 	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4
-type MAC = types.MAC
 type L4 = types.L4
 
 type Checks = healthchecks.Checks
@@ -42,7 +40,7 @@ type Virtual = healthchecks.Virtual
 type Report = healthchecks.Healthchecks
 
 type context struct {
-	sock    string // UNIX domain docket to communicate with netns NAT server
+	checker Checker
 	vip     IP4
 	l4      L4
 	log     types.Logger
@@ -58,6 +56,10 @@ func ud(b bool) string {
 	}
 
 	return "DOWN"
+}
+
+type Checker interface {
+	Check(IP4, IP4, IP4, string, Check) (bool, string)
 }
 
 func (m *Mon) manage(l types.Logger) {
@@ -98,9 +100,9 @@ type Mon struct {
 	notify chan bool
 }
 
-func Monitor(h *Healthchecks, sock string, l types.Logger) (*Mon, Healthchecks) {
+func Monitor(h *Healthchecks, checker Checker, l types.Logger) (*Mon, Healthchecks) {
 	m := &Mon{C: make(chan Healthchecks), in: make(chan *Healthchecks), notify: make(chan bool)}
-	m.fn = m.monitor(h, sock, l)
+	m.fn = m.monitor(h, checker, l)
 	r := m.fn(nil, false)
 	go m.manage(l)
 	return m, r
@@ -122,7 +124,7 @@ func (m *Mon) Close() {
 	m.fn(nil, true)
 }
 
-func (m *Mon) monitor(h *Healthchecks, sock string, l types.Logger) func(*Healthchecks, bool) Report {
+func (m *Mon) monitor(h *Healthchecks, checker Checker, l types.Logger) func(*Healthchecks, bool) Report {
 
 	var status Healthchecks
 
@@ -138,7 +140,7 @@ func (m *Mon) monitor(h *Healthchecks, sock string, l types.Logger) func(*Health
 				if v, ok := virts[vip]; ok {
 					v.Reconfigure(services)
 				} else {
-					virts[vip] = StartVirt(services, context{vip: vip, sock: sock, log: l, notify: m.notify})
+					virts[vip] = StartVirt(services, context{vip: vip, checker: checker, log: l, notify: m.notify})
 				}
 			}
 
@@ -479,7 +481,7 @@ func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real,
 
 	var mutex sync.Mutex
 
-	ch := checks(&probe, &mutex, nat, real.RIP, c.vip, c.l4, c.sock, real.Checks, c.log, c.notify)
+	ch := checks(&probe, &mutex, nat, real.RIP, c.vip, c.l4, c.checker, real.Checks, c.log, c.notify)
 
 	return func(ip *healthchecks.Real, fin bool) Probe {
 
@@ -527,7 +529,7 @@ func healthy(b [5]bool) bool {
 	return true
 }
 
-func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock string, checks Checks, l types.Logger, notify chan bool) chan Checks {
+func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker Checker, checks Checks, l types.Logger, notify chan bool) chan Checks {
 
 	ch := make(chan Checks, 1000)
 
@@ -546,7 +548,7 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock stri
 				now := time.Now()
 				//history = rotate(history, probes(nat, sock, checks))
 
-				ok, msg := probes(nat, sock, checks)
+				ok, msg := probes(vip, rip, nat, checker, checks)
 				history = rotate(history, ok)
 
 				mutex.Lock()
@@ -579,38 +581,38 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, sock stri
 	return ch
 }
 
-func probes(nat IP4, socket string, checks Checks) (bool, string) {
+func probes(vip, rip, nat IP4, checker Checker, checks Checks) (bool, string) {
 
-	if nat.IsNil() {
-		return false, "Internal error - NAT address is nil"
+	if checker == nil {
+		return false, "Internal error - Checker is nil"
 	}
 
 	for _, c := range checks.HTTPS {
-		if ok, msg := netns.Probe(socket, nat, "https", c); !ok {
+		if ok, msg := checker.Check(vip, rip, nat, "https", c); !ok {
 			return false, "HTTPS probe failed: " + msg
 		}
 	}
 
 	for _, c := range checks.HTTP {
-		if ok, msg := netns.Probe(socket, nat, "http", c); !ok {
+		if ok, msg := checker.Check(vip, rip, nat, "http", c); !ok {
 			return false, "HTTP probe failed: " + msg
 		}
 	}
 
 	for _, c := range checks.TCP {
-		if ok, msg := netns.Probe(socket, nat, "tcp", c); !ok {
+		if ok, msg := checker.Check(vip, rip, nat, "tcp", c); !ok {
 			return false, "TCP probe failed: " + msg
 		}
 	}
 
 	for _, c := range checks.SYN {
-		if ok, msg := netns.Probe(socket, nat, "syn", c); !ok {
+		if ok, msg := checker.Check(vip, rip, nat, "syn", c); !ok {
 			return false, "SYN probe failed: " + msg
 		}
 	}
 
 	for _, c := range checks.DNS {
-		if ok, msg := netns.Probe(socket, nat, "dns", c); !ok {
+		if ok, msg := checker.Check(vip, rip, nat, "dns", c); !ok {
 			return false, "DNS probe failed: " + msg
 		}
 	}

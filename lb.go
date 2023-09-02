@@ -1,3 +1,21 @@
+/*
+ * VC5 load balancer. Copyright (C) 2021-present David Coles
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 package vc5
 
 import (
@@ -279,7 +297,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		return err
 	}
 
-	monitor, report := monitor.Monitor(hc2, sock, l)
+	monitor, report := monitor.Monitor(hc2, &checker{socket: sock}, l)
 	lb.report = report
 
 	lb.balancer = lb.maps.Balancer(lb.report, l)
@@ -317,4 +335,11 @@ func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balanc
 		lb.Logger.INFO("LoadBalancer", "Config update")
 		nat.Configure(h)
 	}
+}
+
+type checker struct{ socket string }
+
+func (c *checker) Socket() string { return c.socket }
+func (c *checker) Check(vip IP4, rip IP4, nat IP4, t string, check healthchecks.Check) (bool, string) {
+	return netns.Probe(c.socket, nat, t, check)
 }
