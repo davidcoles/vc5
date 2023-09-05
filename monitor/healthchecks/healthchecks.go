@@ -54,7 +54,16 @@ type Real struct {
 	MAC    MAC
 	VID    uint16
 	Checks Checks
-	Probe  Probe
+	XProbe Probe
+	Port   uint16
+}
+
+func (r *Real) Probe() Probe {
+	return r.XProbe
+}
+
+func (r *Real) SetProbe(p Probe) {
+	r.XProbe = p
 }
 
 type Probe struct {
@@ -78,6 +87,94 @@ type Service struct {
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
 	Reals            map[IP4]Real `json:",omitempty"`
+}
+
+type Destination struct {
+	Address IP4
+	Port    uint16
+	Up      bool
+}
+
+func (s *Service) Destinations() []Destination {
+	var ret []Destination
+	for k, v := range s.Reals {
+		d := Destination{
+			Address: k,
+			Port:    v.Port,
+			Up:      v.Probe().Passed,
+		}
+		ret = append(ret, d)
+	}
+	return ret
+}
+
+type SVC struct {
+	VIP      IP4
+	Port     uint16
+	Protocol Protocol
+}
+
+func (s *SVC) L4() L4 {
+	return L4{Port: s.Port, Protocol: s.Protocol}
+}
+
+type Up struct {
+	Up   bool
+	Time time.Time
+}
+
+func (h *Healthchecks) Health() map[IP4]Up {
+	ret := map[IP4]Up{}
+
+	for vip, v := range h.Virtual {
+		ret[vip] = Up{Up: v.Healthy, Time: v.Change}
+	}
+
+	return ret
+}
+
+func (h *Healthchecks) Services() map[SVC]Service {
+	ret := map[SVC]Service{}
+
+	for vip, v := range h.Virtual {
+		for l4, s := range v.Services {
+			f := SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol}
+			ret[f] = s
+		}
+	}
+
+	return ret
+}
+
+func (s *Service) Reals_() map[IP4]Real {
+	ret := map[IP4]Real{}
+	for k, v := range s.Reals {
+		ret[k] = v
+	}
+	return ret
+}
+
+/*
+func (h *Healthchecks) SetReal(vip IP4, l4 L4, rip IP4, r Real) {
+	if _, ok := h.Virtual[vip]; ok {
+		if _, ok := h.Virtual[vip].Services[l4]; ok {
+			if _, ok := h.Virtual[vip].Services[l4].Reals[rip]; ok {
+				h.Virtual[vip].Services[l4].Reals[rip] = r
+			}
+		}
+	}
+}
+*/
+
+func (h *Healthchecks) SetReal(s SVC, rip IP4, r Real) {
+	l4 := L4{Port: s.Port, Protocol: s.Protocol}
+	if _, ok := h.Virtual[s.VIP]; ok {
+		if _, ok := h.Virtual[s.VIP].Services[l4]; ok {
+			if _, ok := h.Virtual[s.VIP].Services[l4].Reals[rip]; ok {
+				h.Virtual[s.VIP].Services[l4].Reals[rip] = r
+			}
+		}
+	}
 }
 
 type Virtual struct {
@@ -149,7 +246,7 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 				if err != nil {
 					return nil, err
 				}
-				reals[rip] = Real{RIP: rip, Checks: checks}
+				reals[rip] = Real{RIP: rip, Checks: checks, Port: l4.Port}
 			}
 
 			v.Services[l4] = Service{

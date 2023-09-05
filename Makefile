@@ -22,8 +22,8 @@ cmd/vc5.yaml:
 cmd/vc5.json: cmd/config.pl cmd/vc5.yaml
 	cmd/config.pl cmd/vc5.yaml >$@
 
-cmd/vc5ng: cmd/vc5ng.go $(OBJ)
-	go build -o $@ $<
+cmd/vc5ng: cmd/vc5ng.go cmd/stats.go $(OBJ)
+	go build -o $@ cmd/vc5ng.go cmd/stats.go
 
 %.o: %.c bpf
 	clang -S \

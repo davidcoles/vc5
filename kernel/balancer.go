@@ -189,13 +189,23 @@ func (b *Balancer) balancer() {
 			xdp.BpfMapUpdateElem(b.maps.redirect_map(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
 		}
 
-		for vip, virtual := range h.Virtual {
+		// for vip, virtual := range h.Virtual {
+		//     for l4, service := range virtual.Services {
+		// 			b.update_backend_service(vip, l4, service, state)
+		// 			b.create_counters(vip, l4, service.Reals_(), targets)
+		// 			services[l4Service{vip: vip, svc: l4}] = true // add to log of active services
+		// 		}
 
-			for l4, service := range virtual.Services {
-				b.update_backend_service(vip, l4, service, state)
-				b.create_counters(vip, l4, service.Reals, targets)
-				services[l4Service{vip: vip, svc: l4}] = true // add to log of active services
-			}
+		// 		b.maps.update_vrpp_counter(&bpf_vrpp{vip: vip}, &bpf_counter{}, xdp.BPF_NOEXIST) // ICMP responder
+		// 		vips[vip] = true
+		// 	}
+
+		for k, service := range h.Services() {
+			vip := k.VIP
+			l4 := k.L4()
+			b.update_backend_service(vip, l4, service, state)
+			b.create_counters(vip, l4, service.Reals_(), targets)
+			services[l4Service{vip: vip, svc: l4}] = true // add to log of active services
 
 			b.maps.update_vrpp_counter(&bpf_vrpp{vip: vip}, &bpf_counter{}, xdp.BPF_NOEXIST) // ICMP responder
 			vips[vip] = true
@@ -217,8 +227,8 @@ func (b *Balancer) update_backend_service(vip IP4, l4 L4, s Service, state map[l
 	l4service := l4Service{vip: vip, svc: l4}
 
 	bpf_reals := map[IP4]bpf_real{}
-	for ip, real := range s.Reals {
-		if real.Probe.Passed {
+	for ip, real := range s.Reals_() {
+		if real.Probe().Passed {
 			bpf_reals[ip] = bpf_real{rip: ip, mac: real.MAC, vid: htons(real.VID)}
 		}
 	}

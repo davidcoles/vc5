@@ -374,11 +374,14 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 		for k, v := range ret.Reals {
 
 			if real, ok := reals[k]; ok {
-				v.Probe = real.Status()
+				probe := real.Status()
 
-				if v.Probe.Passed {
+				v.SetProbe(probe)
+
+				if probe.Passed {
 					healthy++
 				}
+
 			} else {
 				panic("probe function does not exist " + k.String())
 			}

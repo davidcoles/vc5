@@ -19,21 +19,12 @@
 package vc5
 
 import (
-	//"errors"
-	//"net"
-	"crypto/tls"
-	"fmt"
-	"io/ioutil"
-	"net"
-	"net/http"
 	"sync"
-	"time"
 
 	//"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
-	//"github.com/davidcoles/vc5/monitor/netns"
 	"github.com/davidcoles/vc5/types"
 )
 
@@ -95,13 +86,16 @@ func (lb *BYOB) Update(hc *healthchecks.Healthchecks) {
 
 // If all of the backend servers are in VLANs specified in the
 // healthchecks configuration then address will not be used.
-func (lb *BYOB) Start(balancer Balancer, hc *healthchecks.Healthchecks) error {
+func (lb *BYOB) Start(ip string, hc *healthchecks.Healthchecks, balancer Balancer) error {
 
 	if lb.Logger == nil {
 		lb.Logger = &types.NilLogger{}
 	}
 
-	monitor, report := monitor.Monitor(hc, &checker2{}, lb.Logger)
+	probes := &monitor.Probes{}
+	probes.Start(ip)
+
+	monitor, report := monitor.Monitor(hc, probes, lb.Logger)
 	lb.report = report
 
 	lb.update = make(chan *healthchecks.Healthchecks)
@@ -119,21 +113,6 @@ type Balancer interface {
 	Configure(healthchecks.Healthchecks)
 	Stats(healthchecks.Healthchecks) map[kernel.Target]kernel.Counter
 	Close()
-}
-
-type checker2 struct {
-}
-
-func (c *checker2) Check(vip IP4, rip IP4, nat IP4, schema string, check healthchecks.Check) (bool, string) {
-	switch schema {
-
-	case "http":
-		return httpget(schema, rip.String(), check)
-	case "https":
-		return httpget(schema, rip.String(), check)
-	}
-
-	return false, "not implemented"
 }
 
 func (lb *BYOB) background(monitor *monitor.Mon, balancer Balancer) {
@@ -155,64 +134,4 @@ func (lb *BYOB) background(monitor *monitor.Mon, balancer Balancer) {
 		monitor.Update(h)
 	}
 
-}
-
-var client *http.Client
-
-func httpget(scheme, ip string, check healthchecks.Check) (bool, string) {
-
-	if client == nil {
-
-		transport := &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout: 2 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 1 * time.Second,
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		}
-
-		client = &http.Client{
-			Timeout:   time.Second * 3,
-			Transport: transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	}
-
-	defer client.CloseIdleConnections()
-
-	path := check.Path
-	if len(path) > 0 && path[0] == '/' {
-		path = path[1:]
-	}
-
-	port := check.Port
-	if port == 0 {
-		port = 80
-	}
-
-	url := fmt.Sprintf("%s://%s:%d/%s", scheme, ip, port, path)
-	req, err := http.NewRequest("GET", url, nil)
-	if check.Host != "" {
-		req.Host = check.Host
-	}
-
-	resp, err := client.Do(req)
-
-	if err != nil {
-		return false, err.Error()
-	}
-
-	defer resp.Body.Close()
-
-	ioutil.ReadAll(resp.Body)
-
-	exp := int(check.Expect)
-
-	if exp == 0 {
-		exp = 200
-	}
-
-	return resp.StatusCode == exp, resp.Status
 }

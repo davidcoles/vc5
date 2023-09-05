@@ -276,14 +276,26 @@ func copyHealthchecks(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4
 
 	new := h.DeepCopy()
 
-	for vip, v := range h.Virtual {
-		for l4, s := range v.Services {
-			for rip, r := range s.Reals {
-				n, _ := m[[2]IP4{vip, rip}]
-				r.NAT = natAddress(n, ip)
-				r.MAC = macs[rip]
-				new.Virtual[vip].Services[l4].Reals[rip] = r
-			}
+	// for vip, v := range h.Virtual {
+	// 	for l4, s := range v.Services {
+	// 		for rip, r := range s.Reals {
+	// 			n, _ := m[[2]IP4{vip, rip}]
+	// 			r.NAT = natAddress(n, ip)
+	// 			r.MAC = macs[rip]
+	// 			//new.Virtual[vip].Services[l4].Reals[rip] = r
+	// 			new.SetReal(vip, l4, rip, r)
+	// 		}
+	// 	}
+	// }
+
+	for k, s := range h.Services() {
+		for rip, r := range s.Reals {
+			n, _ := m[[2]IP4{k.VIP, rip}]
+			r.NAT = natAddress(n, ip)
+			r.MAC = macs[rip]
+			//new.Virtual[vip].Services[l4].Reals[rip] = r
+			//new.SetReal(k.VIP, L4{Port: k.Port, Protocol: k.Protocol}, rip, r)
+			new.SetReal(k, rip, r)
 		}
 	}
 
