@@ -49,7 +49,6 @@ type Protocol = types.Protocol
 type Healthchecks = healthchecks.Healthchecks
 type Report = monitor.Report
 type Real = healthchecks.Real
-type Backend = healthchecks.Backend
 type Service = healthchecks.Service
 
 type maps = Maps

@@ -43,56 +43,64 @@ func getStats(lb *LoadBalancer) *Stats {
 		When:    map[IP4]int64{},
 	}
 
-	for vip, v := range status.Virtual {
-		stats.VIPs[vip] = map[L4]Service{}
-		stats.RHI[vip.String()] = v.Healthy
-		stats.When[vip] = int64(now.Sub(v.Change) / time.Second)
-		for l4, s := range v.Services {
-			reals := map[IP4]Real{}
+	for k, v := range status.Health() {
+		stats.RHI[k.String()] = v.Up
+		stats.When[k] = int64(now.Sub(v.Time) / time.Second)
+	}
 
-			var servers uint8
-			var healthy uint8
+	for svc, s := range status.Services() {
+		vip := svc.VIP
+		l4 := svc.L4()
 
-			for rip, real := range s.Reals_() {
-				servers++
+		if _, ok := stats.VIPs[vip]; !ok {
+			stats.VIPs[vip] = map[L4]Service{}
+		}
 
-				probe := real.Probe()
+		reals := map[IP4]Real{}
 
-				if probe.Passed {
-					healthy++
-				}
+		var servers uint8
+		var healthy uint8
 
-				t := Target{VIP: vip, RIP: rip, Protocol: l4.Protocol.Number(), Port: l4.Port}
-				c := counters[t]
+		for rip, real := range s.Reals_() {
+			servers++
 
-				stats.Concurrent += c.Concurrent
+			probe := real.Probe()
 
-				reals[rip] = Real{
-					Up:         probe.Passed,
-					When:       int64(time.Now().Sub(probe.Time) / time.Second),
-					Message:    probe.Message,
-					Duration:   int64(probe.Duration / time.Millisecond),
-					Octets:     c.Octets,
-					Packets:    c.Packets,
-					Flows:      c.Flows,
-					Concurrent: c.Concurrent,
-					MAC:        real.MAC.String(),
-				}
+			if probe.Passed {
+				healthy++
 			}
-			stats.VIPs[vip][l4] = Service{
-				Reals:       reals,
-				Up:          s.Healthy,
-				When:        int64(now.Sub(s.Change) / time.Second),
-				Fallback:    s.Fallback,
-				FallbackOn:  s.FallbackOn,
-				FallbackUp:  s.FallbackProbe.Passed,
-				Name:        s.Metadata.Name,
-				Description: s.Metadata.Description,
-				Servers:     servers,
-				Healthy:     healthy,
-				Minimum:     uint8(s.Minimum),
+
+			t := Target{VIP: vip, RIP: rip, Protocol: l4.Protocol.Number(), Port: l4.Port}
+			c := counters[t]
+
+			stats.Concurrent += c.Concurrent
+
+			reals[rip] = Real{
+				Up:         probe.Passed,
+				When:       int64(time.Now().Sub(probe.Time) / time.Second),
+				Message:    probe.Message,
+				Duration:   int64(probe.Duration / time.Millisecond),
+				Octets:     c.Octets,
+				Packets:    c.Packets,
+				Flows:      c.Flows,
+				Concurrent: c.Concurrent,
+				MAC:        real.MAC.String(),
 			}
 		}
+		stats.VIPs[vip][l4] = Service{
+			Reals:       reals,
+			Up:          s.Healthy,
+			When:        int64(now.Sub(s.Change) / time.Second),
+			Fallback:    s.Fallback,
+			FallbackOn:  s.FallbackOn,
+			FallbackUp:  s.FallbackProbe.Passed,
+			Name:        s.Metadata.Name,
+			Description: s.Metadata.Description,
+			Servers:     servers,
+			Healthy:     healthy,
+			Minimum:     uint8(s.Minimum),
+		}
+		//}
 	}
 
 	return &stats

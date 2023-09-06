@@ -69,7 +69,8 @@ type Service struct {
 	Need uint16 `json:"need,omitempty"`
 
 	// The set of backend server addresses and corresponding healthchecks which comprise this service
-	RIPs map[string]Checks `json:"rips,omitempty"`
+	//RIPs map[string]Checks `json:"rips,omitempty"`
+	RIPs map[ipport]Checks `json:"rips,omitempty"`
 
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
 	Sticky bool `json:"sticky,omitempty"`
@@ -199,6 +200,85 @@ func (c *community) UnmarshalJSON(data []byte) error {
 	}
 
 	*c = community(uint32(asn)<<16 | uint32(val))
+
+	return nil
+}
+
+type ipport struct {
+	IP   string
+	Port uint16
+}
+
+func (i *ipport) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + fmt.Sprintf("%s:%d", i.IP, i.Port)), nil
+}
+
+func (i *ipport) UnmarshalJSON(data []byte) error {
+
+	l := len(data)
+
+	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+		return errors.New("Badly formed ip:port")
+	}
+
+	return i.UnmarshalText(data[1 : l-1])
+
+	/*
+		re := regexp.MustCompile(`^"(\d+\.\d+\.\d+\.\d+)(|:(\d+))"$`)
+
+		m := re.FindStringSubmatch(string(data))
+
+		if len(m) != 4 {
+			return errors.New("Badly formed ip:port")
+		}
+
+		fmt.Println(">>>>", m, *i)
+
+		i.IP = m[1]
+
+		if m[3] != "" {
+
+			port, err := strconv.Atoi(m[3])
+			if err != nil {
+				return err
+			}
+
+			if port < 0 || port > 65535 {
+				return errors.New("Badly formed ip:port")
+			}
+
+			i.Port = uint16(port)
+		}
+
+		return nil
+	*/
+}
+
+func (i *ipport) UnmarshalText(data []byte) error {
+
+	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 4 {
+		return errors.New("Badly formed ip:port")
+	}
+
+	i.IP = m[1]
+
+	if m[3] != "" {
+
+		port, err := strconv.Atoi(m[3])
+		if err != nil {
+			return err
+		}
+
+		if port < 0 || port > 65535 {
+			return errors.New("Badly formed ip:port")
+		}
+
+		i.Port = uint16(port)
+	}
 
 	return nil
 }

@@ -536,3 +536,75 @@ func (l *NilLogger) WARNING(f string, e ...interface{}) {}
 func (l *NilLogger) NOTICE(f string, e ...interface{})  {}
 func (l *NilLogger) INFO(f string, e ...interface{})    {}
 func (l *NilLogger) DEBUG(f string, e ...interface{})   {}
+
+type IPPort struct {
+	IP   IP4
+	Port uint16
+}
+
+func (i *IPPort) MarshalJSON() ([]byte, error) {
+	//return []byte(`"` + fmt.Sprintf("%s:%d", i.IP, i.Port) + `"`), nil
+	return []byte(fmt.Sprintf(`"%s:%d"`, i.IP, i.Port)), nil
+}
+
+func (i *IPPort) UnmarshalJSON(data []byte) error {
+
+	l := len(data)
+
+	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+		return errors.New("Badly formed ip:port")
+	}
+
+	return i.UnmarshalText(data[1 : l-1])
+}
+
+func (i IPPort) MarshalText() ([]byte, error) {
+	if i.Port != 0 {
+		return []byte(fmt.Sprintf("%s:%d", i.IP, i.Port)), nil
+	}
+
+	return []byte(i.IP.String()), nil
+}
+
+func (i *IPPort) String() string {
+	if i.Port != 0 {
+		return fmt.Sprintf("%s:%d", i.IP, i.Port)
+	}
+
+	return i.IP.String()
+}
+
+func (i *IPPort) UnmarshalText(data []byte) error {
+
+	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 4 {
+		return errors.New("Badly formed ip:port")
+	}
+
+	ip, ok := parseIP(string(m[1]))
+
+	if !ok {
+		return errors.New("Badly formed ip:port")
+	}
+
+	i.IP = ip
+
+	if m[3] != "" {
+
+		port, err := strconv.Atoi(m[3])
+		if err != nil {
+			return err
+		}
+
+		if port < 0 || port > 65535 {
+			return errors.New("Badly formed ip:port")
+		}
+
+		i.Port = uint16(port)
+	}
+
+	return nil
+}

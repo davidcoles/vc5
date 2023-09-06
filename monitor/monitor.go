@@ -29,6 +29,7 @@ import (
 
 type IP4 = types.IP4
 type L4 = types.L4
+type IPPort = types.IPPort
 
 type Checks = healthchecks.Checks
 type Check = healthchecks.Check
@@ -304,18 +305,21 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 	var status Service
 	var fallback *_Real
-	reals := map[IP4]*_Real{}
+
+	//reals := map[IP4]*_Real{}
+	reals := map[IPPort]*_Real{}
 
 	update := func(service *Service, fin bool) {
 		if service != nil {
 
 			status = *service
 
-			for real, r := range service.Reals {
-				if _, ok := reals[real]; ok {
-					reals[real].Reconfigure(r)
+			//for _, r := range service.Reals_() {
+			for _, r := range service.Reals__() {
+				if _, ok := reals[r.IPPort()]; ok {
+					reals[r.IPPort()].Reconfigure(r)
 				} else {
-					reals[real] = StartReal(r, c, false)
+					reals[r.IPPort()] = StartReal(r, c, false)
 				}
 			}
 
@@ -333,8 +337,10 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 				}
 			}
 
+			confreals := service.Reals___()
+
 			for real, fn := range reals {
-				if _, ok := service.Reals[real]; !ok {
+				if _, ok := confreals[real]; !ok {
 					fn.Close()
 					delete(reals, real)
 				}
@@ -370,25 +376,28 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 		ret.FallbackOn = false
 
 		// copy reals to new map that we can modify
-		r := map[IP4]healthchecks.Real{}
-		for k, v := range ret.Reals {
+		//r := map[IP4]healthchecks.Real{}
+		for _, r := range ret.Reals_() {
 
-			if real, ok := reals[k]; ok {
+			if real, ok := reals[r.IPPort()]; ok {
 				probe := real.Status()
 
-				v.SetProbe(probe)
+				r.SetProbe(probe)
 
 				if probe.Passed {
 					healthy++
 				}
 
+				ret.UpdateReal(r)
+
 			} else {
-				panic("probe function does not exist " + k.String())
+				panic("probe function does not exist " + r.RIP.String())
 			}
 
-			r[k] = v
+			//r[k] = v
 		}
-		ret.Reals = r // write the map to the returned object
+		//ret.Reals = r // write the map to the returned object
+		//ret.SetReals(r) // write the map to the returned object
 
 		if fallback != nil {
 			ret.FallbackProbe = fallback.Status()

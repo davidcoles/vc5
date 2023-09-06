@@ -20,8 +20,6 @@ package healthchecks
 
 import (
 	"encoding/json"
-	//"errors"
-	//"fmt"
 	"net"
 	"time"
 
@@ -34,6 +32,8 @@ type MAC = types.MAC
 type NET = types.NET
 type L4 = types.L4
 type Protocol = types.Protocol
+type IPPort = types.IPPort
+
 type Checks = config.Checks
 type Check = config.Check
 
@@ -43,19 +43,23 @@ type Metadata struct {
 }
 
 type Backend struct {
-	IP  IP4
-	VID uint16
-	Idx uint16
+	IP   IP4
+	Port uint16
 }
 
 type Real struct {
-	RIP    IP4 // get rid of this
+	RIP  IP4
+	Port uint16
+
 	NAT    IP4
 	MAC    MAC
 	VID    uint16
 	Checks Checks
 	XProbe Probe
-	Port   uint16
+}
+
+func (r *Real) IPPort() IPPort {
+	return IPPort{IP: r.RIP, Port: r.Port}
 }
 
 func (r *Real) Probe() Probe {
@@ -74,6 +78,10 @@ type Probe struct {
 }
 
 type Service struct {
+	VIP  IP4
+	Port uint16
+	UDP  bool
+
 	Metadata         Metadata
 	Minimum          uint16
 	Healthy          bool
@@ -86,7 +94,8 @@ type Service struct {
 	Leastconns       bool
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
-	Reals            map[IP4]Real `json:",omitempty"`
+	XXXReals         map[IP4]Real    `json:",omitempty"`
+	Backend          map[IPPort]Real `json:",omitempty"`
 }
 
 type Destination struct {
@@ -97,11 +106,11 @@ type Destination struct {
 
 func (s *Service) Destinations() []Destination {
 	var ret []Destination
-	for k, v := range s.Reals {
+	for _, r := range s.reals() {
 		d := Destination{
-			Address: k,
-			Port:    v.Port,
-			Up:      v.Probe().Passed,
+			Address: r.RIP,
+			Port:    r.Port,
+			Up:      r.Probe().Passed,
 		}
 		ret = append(ret, d)
 	}
@@ -139,7 +148,28 @@ func (h *Healthchecks) Services() map[SVC]Service {
 	for vip, v := range h.Virtual {
 		for l4, s := range v.Services {
 			f := SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol}
+
+			s.VIP = vip
+			s.Port = l4.Port
+			s.UDP = false
+
+			if l4.Protocol == types.UDP {
+				s.UDP = true
+			}
+
 			ret[f] = s
+		}
+	}
+
+	return ret
+}
+
+func (h *Healthchecks) Services_() []SVC {
+	var ret []SVC
+
+	for vip, v := range h.Virtual {
+		for l4, _ := range v.Services {
+			ret = append(ret, SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol})
 		}
 	}
 
@@ -148,34 +178,75 @@ func (h *Healthchecks) Services() map[SVC]Service {
 
 func (s *Service) Reals_() map[IP4]Real {
 	ret := map[IP4]Real{}
-	for k, v := range s.Reals {
-		ret[k] = v
+	//for _, r := range s.XReals {
+	for _, r := range s.reals() {
+		ret[r.RIP] = r
 	}
 	return ret
 }
 
+func (s *Service) Reals___() map[IPPort]Real {
+	ret := map[IPPort]Real{}
+	//for _, r := range s.XReals {
+	for _, r := range s.reals() {
+		ret[r.IPPort()] = r
+	}
+	return ret
+}
+
+func (s *Service) Reals__() []Real {
+	var ret []Real
+	//for _, r := range s.XReals {
+	for _, r := range s.reals() {
+		ret = append(ret, r)
+	}
+	return ret
+}
+
+func (h *Healthchecks) Reals(svc SVC) []Real {
+
+	var ret []Real
+
+	v, ok := h.Virtual[svc.VIP]
+
+	if !ok {
+		return ret
+	}
+
+	l4 := L4{Port: svc.Port, Protocol: svc.Protocol}
+
+	service, ok := v.Services[l4]
+
+	if !ok {
+		return ret
+	}
+
+	for k, v := range service.reals() {
+		v.RIP = k.IP
+		ret = append(ret, v)
+	}
+
+	return ret
+}
+
 /*
-func (h *Healthchecks) SetReal(vip IP4, l4 L4, rip IP4, r Real) {
-	if _, ok := h.Virtual[vip]; ok {
-		if _, ok := h.Virtual[vip].Services[l4]; ok {
-			if _, ok := h.Virtual[vip].Services[l4].Reals[rip]; ok {
-				h.Virtual[vip].Services[l4].Reals[rip] = r
+func (h *Healthchecks) SetReal(s SVC, rip IP4, r Real) {
+	l4 := L4{Port: s.Port, Protocol: s.Protocol}
+	if _, ok := h.Virtual[s.VIP]; ok {
+		if _, ok := h.Virtual[s.VIP].Services[l4]; ok {
+			if _, ok := h.Virtual[s.VIP].Services[l4].XReals[rip]; ok {
+				h.Virtual[s.VIP].Services[l4].XReals[rip] = r
 			}
 		}
 	}
 }
 */
 
-func (h *Healthchecks) SetReal(s SVC, rip IP4, r Real) {
-	l4 := L4{Port: s.Port, Protocol: s.Protocol}
-	if _, ok := h.Virtual[s.VIP]; ok {
-		if _, ok := h.Virtual[s.VIP].Services[l4]; ok {
-			if _, ok := h.Virtual[s.VIP].Services[l4].Reals[rip]; ok {
-				h.Virtual[s.VIP].Services[l4].Reals[rip] = r
-			}
-		}
-	}
+/*
+func (s *Service) SetReals(r map[IP4]Real) {
+	s.XReals = r
 }
+*/
 
 type Virtual struct {
 	Metadata Metadata
@@ -239,14 +310,26 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 			}
 
 			reals := map[IP4]Real{}
+			backends := map[IPPort]Real{}
 
-			for _rip, checks := range y.RIPs {
+			for r, checks := range y.RIPs {
 				var rip IP4
-				err := rip.UnmarshalText([]byte(_rip))
+
+				err := rip.UnmarshalText([]byte(r.IP))
 				if err != nil {
 					return nil, err
 				}
-				reals[rip] = Real{RIP: rip, Checks: checks, Port: l4.Port}
+
+				port := r.Port
+
+				if port == 0 {
+					port = l4.Port
+				}
+
+				real := Real{RIP: rip, Checks: checks, Port: port}
+
+				reals[rip] = real
+				backends[IPPort{IP: rip, Port: port}] = real
 			}
 
 			v.Services[l4] = Service{
@@ -255,7 +338,8 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 				Fallback:       y.Fallback,
 				Minimum:        y.Need,
 				Sticky:         y.Sticky,
-				Reals:          reals,
+				XXXReals:       reals,
+				Backend:        backends,
 			}
 		}
 
@@ -283,9 +367,13 @@ func (h *Healthchecks) buildvid() {
 	// write vlan id to each rip entry in services
 	for _, v := range h.Virtual {
 		for _, s := range v.Services {
-			for rip, real := range s.Reals {
-				real.VID = h._VID[rip]
-				s.Reals[rip] = real
+			//for rip, real := range s.Reals {
+			//	real.VID = h._VID[rip]
+			//	s.Reals[rip] = real
+			//}
+			for _, r := range s.reals() {
+				r.VID = h._VID[r.RIP]
+				s.UpdateReal(r)
 			}
 		}
 	}
@@ -339,25 +427,74 @@ func (h *Healthchecks) JSON() string {
 }
 
 func (h *Healthchecks) RIPs() map[IP4]IP4 {
-	r := map[IP4]IP4{}
+	rips := map[IP4]IP4{}
 	for _, v := range h.Virtual {
 		for _, s := range v.Services {
-			for rip, _ := range s.Reals {
-				r[rip] = rip
+			for _, r := range s.Reals__() {
+				rips[r.RIP] = r.RIP
 			}
 		}
 	}
-	return r
+	return rips
 }
 
 func (h *Healthchecks) Tuples() map[[2]IP4]bool {
 	n := map[[2]IP4]bool{}
 	for vip, v := range h.Virtual {
 		for _, s := range v.Services {
-			for rip, _ := range s.Reals {
-				n[[2]IP4{vip, rip}] = true
+			//for rip, _ := range s.XReals {
+			for k, _ := range s.reals() {
+				n[[2]IP4{vip, k.IP}] = true
 			}
 		}
 	}
 	return n
 }
+
+func (h *Healthchecks) SetReal_(s SVC, r Real) {
+	//rip := r.RIP
+	l4 := L4{Port: s.Port, Protocol: s.Protocol}
+	if _, ok := h.Virtual[s.VIP]; ok {
+		if s, ok := h.Virtual[s.VIP].Services[l4]; ok {
+			//if _, ok := h.Virtual[s.VIP].Services[l4].Reals[rip]; ok {
+			//	h.Virtual[s.VIP].Services[l4].Reals[rip] = r
+			//}
+			s.UpdateReal(r)
+		}
+	}
+}
+
+/********************************************************************************/
+func (s *Service) reals() map[IPPort]Real {
+	ret := map[IPPort]Real{}
+	for k, r := range s.XXXReals {
+		r.RIP = k
+		ret[IPPort{IP: r.RIP, Port: r.Port}] = r
+	}
+	return ret
+
+}
+
+func (s *Service) UpdateReal(r Real) {
+	if _, ok := s.XXXReals[r.RIP]; ok {
+		s.XXXReals[r.RIP] = r
+	}
+}
+
+// func (s *Service) reals() map[IPPort]Real {
+// 	ret := map[IPPort]Real{}
+// 	for k, r := range s.Backend {
+// 		r.RIP = k.IP
+// 		r.Port = k.Port
+// 		ret[k] = r
+// 	}
+// 	return ret
+
+// }
+
+// func (s *Service) UpdateReal(r Real) {
+// 	ip := IPPort{IP: r.RIP, Port: r.Port}
+// 	if _, ok := s.Backend[ip]; ok {
+// 		s.Backend[ip] = r
+// 	}
+// }
