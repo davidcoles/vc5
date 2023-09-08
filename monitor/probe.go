@@ -38,14 +38,21 @@ func (c *Probes) Start(ip string) {
 }
 
 func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthchecks.Check) (bool, string) {
+
+	if check.Port == 0 {
+		return false, "Port is zero"
+	}
+
 	switch schema {
 
 	case "http":
-		return httpget(schema, rip.String(), check)
+		//return httpget(schema, rip.String(), check)
+		x, y := httpget(schema, rip.String(), check)
+		return x, y
 	case "https":
 		return httpget(schema, rip.String(), check)
 	case "dns":
-		ok := dnsquery(rip.String(), fmt.Sprintf("%d", check.Port))
+		ok := dnsquery(rip.String(), check.Port)
 		return ok, ""
 	case "syn":
 		ok := c.syn.Probe(rip.String(), check.Port)

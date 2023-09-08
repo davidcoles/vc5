@@ -306,7 +306,6 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 	var status Service
 	var fallback *_Real
 
-	//reals := map[IP4]*_Real{}
 	reals := map[IPPort]*_Real{}
 
 	update := func(service *Service, fin bool) {
@@ -315,7 +314,7 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 			status = *service
 
 			//for _, r := range service.Reals_() {
-			for _, r := range service.Reals__() {
+			for _, r := range service.Reals() {
 				if _, ok := reals[r.IPPort()]; ok {
 					reals[r.IPPort()].Reconfigure(r)
 				} else {
@@ -337,7 +336,11 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 				}
 			}
 
-			confreals := service.Reals___()
+			//confreals := service.Reals___()
+			confreals := map[IPPort]bool{}
+			for _, r := range service.Reals() {
+				confreals[r.IPPort()] = true
+			}
 
 			for real, fn := range reals {
 				if _, ok := confreals[real]; !ok {
@@ -377,7 +380,7 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 		// copy reals to new map that we can modify
 		//r := map[IP4]healthchecks.Real{}
-		for _, r := range ret.Reals_() {
+		for _, r := range ret.Reals() {
 
 			if real, ok := reals[r.IPPort()]; ok {
 				probe := real.Status()

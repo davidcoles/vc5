@@ -104,6 +104,10 @@ func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string)
 
 	defer client.CloseIdleConnections()
 
+	if check.Port == 0 {
+		panic("oops")
+	}
+
 	p := probe{IP: ip, Scheme: scheme, Check: check}
 
 	buff := new(bytes.Buffer)
@@ -248,7 +252,7 @@ func (p *probe) httpget() (bool, string) {
 
 	port := check.Port
 	if port == 0 {
-		port = 80
+		return false, "Port is 0"
 	}
 
 	url := fmt.Sprintf("%s://%s:%d/%s", p.Scheme, p.IP, port, path)
@@ -281,7 +285,7 @@ func (p *probe) synprobe(syn *SynChecks) (bool, string) {
 	port := p.Check.Port
 
 	if port == 0 {
-		port = 80
+		return false, "Port is 0"
 	}
 
 	return syn.Probe(addr, port), ""
@@ -292,10 +296,10 @@ func (p *probe) dnsprobe() (bool, string) {
 	port := p.Check.Port
 
 	if port == 0 {
-		port = 53
+		return false, "Port is 0"
 	}
 
-	return dnsquery(addr, fmt.Sprint(port)), ""
+	return dnsquery(addr, port), ""
 }
 
 //func tcpdial(foo probe) (bool, string) {
@@ -304,7 +308,7 @@ func (p *probe) tcpdial() (bool, string) {
 	port := p.Check.Port
 
 	if port == 0 {
-		port = 23
+		return false, "Port is 0"
 	}
 
 	d := net.Dialer{Timeout: 2 * time.Second}

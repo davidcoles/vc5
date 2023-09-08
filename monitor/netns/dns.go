@@ -20,13 +20,19 @@ package netns
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"time"
 )
 
 // dig chaos txt version.bind @80.80.80.80
 
-func dnsquery(addr, port string) bool {
+func dnsquery(addr string, port uint16) bool {
+
+	if port == 0 {
+		return false
+	}
+
 	QUERY := []byte{
 		0x00, 0x00, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x07, 0x76, 0x65, 0x72,
 		0x73, 0x69, 0x6f, 0x6e, 0x04, 0x62, 0x69, 0x6e, 0x64, 0x00, 0x00, 0x10, 0x00, 0x03, 0x00, 0x00,
@@ -35,7 +41,7 @@ func dnsquery(addr, port string) bool {
 	}
 
 	d := net.Dialer{Timeout: 1 * time.Second}
-	conn, err := d.Dial("udp", addr+":"+port)
+	conn, err := d.Dial("udp", fmt.Sprint("%s:%d", addr, port))
 
 	if err != nil {
 		return false

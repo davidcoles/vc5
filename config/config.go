@@ -48,6 +48,12 @@ type Check struct {
 	Expect uint16 `json:"expect"`
 }
 
+func (c *Check) Unzero(p uint16) {
+	if c.Port == 0 {
+		c.Port = p
+	}
+}
+
 // Inventory of healthchecks required to pass to consider backend as healthy
 type Checks struct {
 	HTTP  []Check `json:"http,omitempty"`  // L7 HTTP checks
@@ -55,6 +61,34 @@ type Checks struct {
 	TCP   []Check `json:"tcp,omitempty"`   // L4 SYN, SYN/ACK, ACK checks
 	SYN   []Check `json:"syn,omitempty"`   // L4 SYN, SYN-ACK half-open checks
 	DNS   []Check `json:"dns,omitempty"`   // L7 UDP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
+}
+
+func (c *Checks) DefaultPort(p uint16) {
+
+	u := func(c Check, p uint16) Check {
+		c.Unzero(p)
+		return c
+	}
+
+	for i, v := range c.HTTP {
+		c.HTTP[i] = u(v, p)
+	}
+
+	for i, v := range c.HTTPS {
+		c.HTTPS[i] = u(v, p)
+	}
+
+	for i, v := range c.TCP {
+		c.TCP[i] = u(v, p)
+	}
+
+	for i, v := range c.SYN {
+		c.SYN[i] = u(v, p)
+	}
+
+	for i, v := range c.DNS {
+		c.DNS[i] = u(v, p)
+	}
 }
 
 // Describes a Layer 4 service
@@ -210,7 +244,7 @@ type ipport struct {
 }
 
 func (i *ipport) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("%s:%d", i.IP, i.Port)), nil
+	return []byte(`"` + fmt.Sprintf("%s:%d", i.IP, i.Port) + `"`), nil
 }
 
 func (i *ipport) UnmarshalJSON(data []byte) error {

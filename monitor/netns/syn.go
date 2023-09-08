@@ -76,6 +76,10 @@ func (s *SynChecks) ProbeS(target, port string) bool {
 
 func (s *SynChecks) Probe(target string, port uint16) bool {
 
+	if port == 0 {
+		return false
+	}
+
 	x := atomic.AddUint64(&s.atomic, 1)
 
 	var local uint16 = 65000 + uint16(x%500)

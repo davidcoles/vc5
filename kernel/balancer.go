@@ -204,7 +204,7 @@ func (b *Balancer) balancer() {
 			vip := k.VIP
 			l4 := k.L4()
 			b.update_backend_service(vip, l4, service, state)
-			b.create_counters(vip, l4, service.Reals_(), targets)
+			b.create_counters(vip, l4, service.Reals(), targets)
 			services[l4Service{vip: vip, svc: l4}] = true // add to log of active services
 
 			b.maps.update_vrpp_counter(&bpf_vrpp{vip: vip}, &bpf_counter{}, xdp.BPF_NOEXIST) // ICMP responder
@@ -227,7 +227,9 @@ func (b *Balancer) update_backend_service(vip IP4, l4 L4, s Service, state map[l
 	l4service := l4Service{vip: vip, svc: l4}
 
 	bpf_reals := map[IP4]bpf_real{}
-	for ip, real := range s.Reals_() {
+	//for ip, real := range s.Reals_() {
+	for _, real := range s.Reals() {
+		ip := real.RIP
 		if real.Probe().Passed {
 			bpf_reals[ip] = bpf_real{rip: ip, mac: real.MAC, vid: htons(real.VID)}
 		}
@@ -301,11 +303,13 @@ func (b *Balancer) connections(done chan bool) {
 	}
 }
 
-func (b *Balancer) create_counters(vip IP4, l4 L4, reals map[IP4]Real, targets map[Target]bool) {
+func (b *Balancer) create_counters(vip IP4, l4 L4, reals []Real, targets map[Target]bool) {
 	m := b.maps
 
 	// ensure that backend counters for the service exists
-	for rip, _ := range reals {
+	//for rip, _ := range reals {
+	for _, real := range reals {
+		rip := real.RIP
 		vr := bpf_vrpp{vip: vip, rip: rip, port: htons(l4.Port), protocol: l4.Protocol.Number()}
 		m.update_vrpp_counter(&vr, &bpf_counter{}, xdp.BPF_NOEXIST)
 		m.update_vrpp_concurrent(A, &vr, nil, xdp.BPF_NOEXIST) // create 'A' counter if it does not exist

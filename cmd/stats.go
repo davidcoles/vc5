@@ -56,12 +56,15 @@ func getStats(lb *LoadBalancer) *Stats {
 			stats.VIPs[vip] = map[L4]Service{}
 		}
 
-		reals := map[IP4]Real{}
+		//reals := map[IP4]Real{}
+		reals := map[string]Real{}
 
 		var servers uint8
 		var healthy uint8
 
-		for rip, real := range s.Reals_() {
+		//for rip, real := range s.Reals_() {
+		for _, real := range s.Reals() {
+			rip := real.RIP
 			servers++
 
 			probe := real.Probe()
@@ -75,7 +78,10 @@ func getStats(lb *LoadBalancer) *Stats {
 
 			stats.Concurrent += c.Concurrent
 
-			reals[rip] = Real{
+			ipport := real.IPPort()
+
+			//reals[rip.String()] = Real{
+			reals[ipport.String()] = Real{
 				Up:         probe.Passed,
 				When:       int64(time.Now().Sub(probe.Time) / time.Second),
 				Message:    probe.Message,
@@ -87,6 +93,7 @@ func getStats(lb *LoadBalancer) *Stats {
 				MAC:        real.MAC.String(),
 			}
 		}
+
 		stats.VIPs[vip][l4] = Service{
 			Reals:       reals,
 			Up:          s.Healthy,
@@ -100,7 +107,6 @@ func getStats(lb *LoadBalancer) *Stats {
 			Healthy:     healthy,
 			Minimum:     uint8(s.Minimum),
 		}
-		//}
 	}
 
 	return &stats
@@ -351,24 +357,24 @@ type Stats struct {
 }
 
 type Service struct {
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Up          bool         `json:"up"`
-	When        int64        `json:"when"`
-	Fallback    bool         `json:"fallback"`
-	FallbackOn  bool         `json:"fallback_on"`
-	FallbackUp  bool         `json:"fallback_up"`
-	Octets      uint64       `json:"octets"`
-	OctetsPS    uint64       `json:"octets_ps"`
-	Packets     uint64       `json:"packets"`
-	PacketsPS   uint64       `json:"packets_ps"`
-	Flows       uint64       `json:"flows"`
-	FlowsPS     uint64       `json:"flows_ps"`
-	Concurrent  uint64       `json:"concurrent"`
-	Reals       map[IP4]Real `json:"rips"`
-	Minimum     uint8        `json:"minimum"`
-	Servers     uint8        `json:"servers"`
-	Healthy     uint8        `json:"healthy"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Up          bool            `json:"up"`
+	When        int64           `json:"when"`
+	Fallback    bool            `json:"fallback"`
+	FallbackOn  bool            `json:"fallback_on"`
+	FallbackUp  bool            `json:"fallback_up"`
+	Octets      uint64          `json:"octets"`
+	OctetsPS    uint64          `json:"octets_ps"`
+	Packets     uint64          `json:"packets"`
+	PacketsPS   uint64          `json:"packets_ps"`
+	Flows       uint64          `json:"flows"`
+	FlowsPS     uint64          `json:"flows_ps"`
+	Concurrent  uint64          `json:"concurrent"`
+	Reals       map[string]Real `json:"rips"`
+	Minimum     uint8           `json:"minimum"`
+	Servers     uint8           `json:"servers"`
+	Healthy     uint8           `json:"healthy"`
 }
 
 type Real struct {

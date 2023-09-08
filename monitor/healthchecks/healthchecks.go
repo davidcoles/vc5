@@ -20,6 +20,7 @@ package healthchecks
 
 import (
 	"encoding/json"
+	//"fmt"
 	"net"
 	"time"
 
@@ -94,8 +95,8 @@ type Service struct {
 	Leastconns       bool
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
-	XXXReals         map[IP4]Real    `json:",omitempty"`
-	Backend          map[IPPort]Real `json:",omitempty"`
+	//XXXReals         map[IP4]Real    `json:",omitempty"`
+	Backend map[IPPort]Real `json:",omitempty"`
 }
 
 type Destination struct {
@@ -176,25 +177,26 @@ func (h *Healthchecks) Services_() []SVC {
 	return ret
 }
 
-func (s *Service) Reals_() map[IP4]Real {
-	ret := map[IP4]Real{}
-	//for _, r := range s.XReals {
-	for _, r := range s.reals() {
-		ret[r.RIP] = r
-	}
-	return ret
+//func (s *Service) xReals_() map[IP4]Real {
+//	ret := map[IP4]Real{}
+//	//for _, r := range s.XReals {
+//	for _, r := range s.reals() {
+//		ret[r.RIP] = r
+//	}
+//	return ret
+//}
+
+func (s *Service) xReals___() map[IPPort]Real {
+	return s.reals()
+	//ret := map[IPPort]Real{}
+	////for _, r := range s.XReals {
+	//for _, r := range s.reals() {
+	//	ret[r.IPPort()] = r
+	//}
+	//return ret
 }
 
-func (s *Service) Reals___() map[IPPort]Real {
-	ret := map[IPPort]Real{}
-	//for _, r := range s.XReals {
-	for _, r := range s.reals() {
-		ret[r.IPPort()] = r
-	}
-	return ret
-}
-
-func (s *Service) Reals__() []Real {
+func (s *Service) Reals() []Real {
 	var ret []Real
 	//for _, r := range s.XReals {
 	for _, r := range s.reals() {
@@ -221,12 +223,7 @@ func (h *Healthchecks) Reals(svc SVC) []Real {
 		return ret
 	}
 
-	for k, v := range service.reals() {
-		v.RIP = k.IP
-		ret = append(ret, v)
-	}
-
-	return ret
+	return service.Reals()
 }
 
 /*
@@ -326,6 +323,8 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 					port = l4.Port
 				}
 
+				checks.DefaultPort(port)
+
 				real := Real{RIP: rip, Checks: checks, Port: port}
 
 				reals[rip] = real
@@ -333,13 +332,16 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 			}
 
 			v.Services[l4] = Service{
+				VIP:            vip,
+				Port:           l4.Port,
+				UDP:            l4.Protocol == types.UDP,
 				Metadata:       Metadata{Name: y.Name, Description: y.Description},
 				FallbackChecks: y.Local,
 				Fallback:       y.Fallback,
 				Minimum:        y.Need,
 				Sticky:         y.Sticky,
-				XXXReals:       reals,
-				Backend:        backends,
+				//XXXReals:       reals,
+				Backend: backends,
 			}
 		}
 
@@ -430,7 +432,7 @@ func (h *Healthchecks) RIPs() map[IP4]IP4 {
 	rips := map[IP4]IP4{}
 	for _, v := range h.Virtual {
 		for _, s := range v.Services {
-			for _, r := range s.Reals__() {
+			for _, r := range s.Reals() {
 				rips[r.RIP] = r.RIP
 			}
 		}
@@ -465,36 +467,37 @@ func (h *Healthchecks) SetReal_(s SVC, r Real) {
 }
 
 /********************************************************************************/
+//func (s *Service) reals() map[IPPort]Real {
+//	ret := map[IPPort]Real{}
+//	for k, r := range s.XXXReals {
+//		r.RIP = k
+//		ret[IPPort{IP: r.RIP, Port: r.Port}] = r
+//	}
+//	return ret
+//
+//}
+
+//func (s *Service) UpdateReal(r Real) {
+//	if _, ok := s.XXXReals[r.RIP]; ok {
+//		s.XXXReals[r.RIP] = r
+//	}
+//}
+
 func (s *Service) reals() map[IPPort]Real {
 	ret := map[IPPort]Real{}
-	for k, r := range s.XXXReals {
-		r.RIP = k
-		ret[IPPort{IP: r.RIP, Port: r.Port}] = r
+	for k, r := range s.Backend {
+		r.RIP = k.IP
+		r.Port = k.Port
+		ret[k] = r
 	}
 	return ret
 
 }
 
 func (s *Service) UpdateReal(r Real) {
-	if _, ok := s.XXXReals[r.RIP]; ok {
-		s.XXXReals[r.RIP] = r
+	ip := IPPort{IP: r.RIP, Port: r.Port}
+	//fmt.Println(ip, r.XProbe)
+	if _, ok := s.Backend[ip]; ok {
+		s.Backend[ip] = r
 	}
 }
-
-// func (s *Service) reals() map[IPPort]Real {
-// 	ret := map[IPPort]Real{}
-// 	for k, r := range s.Backend {
-// 		r.RIP = k.IP
-// 		r.Port = k.Port
-// 		ret[k] = r
-// 	}
-// 	return ret
-
-// }
-
-// func (s *Service) UpdateReal(r Real) {
-// 	ip := IPPort{IP: r.RIP, Port: r.Port}
-// 	if _, ok := s.Backend[ip]; ok {
-// 		s.Backend[ip] = r
-// 	}
-// }
