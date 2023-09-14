@@ -343,3 +343,9 @@ func (c *checker) Socket() string { return c.socket }
 func (c *checker) Check(vip IP4, rip IP4, nat IP4, t string, check healthchecks.Check) (bool, string) {
 	return netns.Probe(c.socket, nat, t, check)
 }
+
+type Scheduler = types.Scheduler
+
+const WRR = types.WRR
+const WLC = types.WLC
+const MH_PORT = types.MH_PORT

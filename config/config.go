@@ -30,7 +30,8 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	//"github.com/davidcoles/vc5/types"
+
+	"github.com/davidcoles/vc5/types"
 )
 
 // Describes a Layer 4 or Layer 7 health check
@@ -117,6 +118,8 @@ type Service struct {
 
 	// Experimental/Unimplemented
 	Local Checks `json:"local,omitempty"`
+
+	Scheduler types.Scheduler `json:"scheduler"`
 }
 
 // Route Health Injection configration. Describes BGP peers and
@@ -239,12 +242,19 @@ func (c *community) UnmarshalJSON(data []byte) error {
 }
 
 type ipport struct {
-	IP   string
-	Port uint16
+	IP       types.IP4
+	Port     uint16
+	Disabled bool
 }
 
 func (i *ipport) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("%s:%d", i.IP, i.Port) + `"`), nil
+	text, err := i.MarshalText()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(`"` + string(text) + `"`), nil
 }
 
 func (i *ipport) UnmarshalJSON(data []byte) error {
@@ -256,49 +266,32 @@ func (i *ipport) UnmarshalJSON(data []byte) error {
 	}
 
 	return i.UnmarshalText(data[1 : l-1])
+}
 
-	/*
-		re := regexp.MustCompile(`^"(\d+\.\d+\.\d+\.\d+)(|:(\d+))"$`)
-
-		m := re.FindStringSubmatch(string(data))
-
-		if len(m) != 4 {
-			return errors.New("Badly formed ip:port")
-		}
-
-		fmt.Println(">>>>", m, *i)
-
-		i.IP = m[1]
-
-		if m[3] != "" {
-
-			port, err := strconv.Atoi(m[3])
-			if err != nil {
-				return err
-			}
-
-			if port < 0 || port > 65535 {
-				return errors.New("Badly formed ip:port")
-			}
-
-			i.Port = uint16(port)
-		}
-
-		return nil
-	*/
+func (i ipport) MarshalText() ([]byte, error) {
+	if i.Disabled {
+		return []byte(fmt.Sprintf("%s:%d!", i.IP, i.Port)), nil
+	}
+	return []byte(fmt.Sprintf("%s:%d", i.IP, i.Port)), nil
 }
 
 func (i *ipport) UnmarshalText(data []byte) error {
 
-	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
+	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))(!?)$`)
 
 	m := re.FindStringSubmatch(string(data))
 
-	if len(m) != 4 {
+	if len(m) != 5 {
 		return errors.New("Badly formed ip:port")
 	}
 
-	i.IP = m[1]
+	ip, ok := types.ParseIP(m[1])
+
+	if !ok {
+		return errors.New("Badly formed ip:port")
+	}
+
+	i.IP = ip
 
 	if m[3] != "" {
 
@@ -312,6 +305,10 @@ func (i *ipport) UnmarshalText(data []byte) error {
 		}
 
 		i.Port = uint16(port)
+	}
+
+	if m[4] != "" {
+		i.Disabled = true
 	}
 
 	return nil

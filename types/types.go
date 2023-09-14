@@ -608,3 +608,62 @@ func (i *IPPort) UnmarshalText(data []byte) error {
 
 	return nil
 }
+
+/********************************************************************************/
+
+type Scheduler uint8
+
+const (
+	MH_PORT = iota
+	WLC
+	WRR
+)
+
+var SNAME map[Scheduler]string = map[Scheduler]string{
+	WRR:     "round-robin",
+	MH_PORT: "maglev",
+	WLC:     "least-conns",
+}
+
+func (s *Scheduler) MarshalJSON() ([]byte, error) {
+	t := s.string()
+	if t == "" {
+		return nil, errors.New("Invalid scheduler")
+	}
+	return []byte(`"` + t + `"`), nil
+}
+
+func (s *Scheduler) UnmarshalJSON(data []byte) error {
+	l := len(data)
+
+	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+		return errors.New("Badly formed scheduler: " + string(data))
+	}
+
+	name := string(data[1 : l-1])
+	sval := SVAL(SNAME)
+
+	var ok bool
+	*s, ok = sval[name]
+
+	if !ok {
+		return errors.New("Unknown scheduler: " + name)
+	}
+
+	return nil
+}
+
+func (s *Scheduler) string() string { return SNAME[*s] }
+func (s *Scheduler) String() string { return SNAME[*s] }
+
+func SVAL(x map[Scheduler]string) map[string]Scheduler {
+	y := map[string]Scheduler{}
+	for k, v := range x {
+		y[v] = k
+	}
+	return y
+}
+
+func (s Scheduler) MarshalText() ([]byte, error) {
+	return []byte(s.string()), nil
+}
