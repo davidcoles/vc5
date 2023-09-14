@@ -272,7 +272,6 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 				return nil, err
 			}
 
-			reals := map[IP4]Real{}
 			backends := map[IPPort]Real{}
 
 			for r, checks := range y.RIPs {
@@ -285,10 +284,7 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 
 				checks.DefaultPort(port)
 
-				real := Real{RIP: rip, Checks: checks, Port: port, Disabled: r.Disabled}
-
-				reals[rip] = real
-				backends[IPPort{IP: rip, Port: port}] = real
+				backends[IPPort{IP: rip, Port: port}] = Real{RIP: rip, Checks: checks, Port: port, Disabled: r.Disabled}
 			}
 
 			v.Services[l4] = Service{
@@ -306,6 +302,43 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 		}
 
 		hc.Virtual[vip] = v
+	}
+
+	for s, svc := range c.Services {
+
+		_, ok := hc.Virtual[s.IP]
+
+		if !ok {
+			hc.Virtual[s.IP] = Virtual{Services: map[L4]Service{}}
+		}
+
+		backends := map[IPPort]Real{}
+
+		for d, dest := range svc.Reals {
+
+			port := d.Port
+
+			if port == 0 {
+				port = s.Port
+			}
+
+			dest.Checks.DefaultPort(port)
+
+			backends[IPPort{IP: d.IP, Port: port}] = Real{RIP: d.IP, Checks: dest.Checks, Port: port, Disabled: dest.Disabled}
+		}
+
+		l4 := L4{Port: s.Port, Protocol: s.Protocol == 17}
+
+		hc.Virtual[s.IP].Services[l4] = Service{
+			VIP:       s.IP,
+			Port:      l4.Port,
+			UDP:       l4.Protocol == types.UDP,
+			Metadata:  Metadata{Name: svc.Name, Description: svc.Description},
+			Minimum:   svc.Need,
+			Scheduler: svc.Scheduler,
+			Sticky:    svc.Sticky,
+			Backend:   backends,
+		}
 	}
 
 	hc.buildvid()
