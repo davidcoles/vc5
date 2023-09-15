@@ -51,6 +51,14 @@ type Counter struct {
 	DEFCON      uint8  // global only
 }
 
+func (c *Counter) Add(n Counter) {
+	c.Octets += n.Octets
+	c.Packets += n.Packets
+	c.Flows += n.Flows
+	c.Concurrent += n.Concurrent
+	c.Blocked += n.Blocked
+}
+
 type Balancer struct {
 	maps   *maps
 	checks chan Healthchecks

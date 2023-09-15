@@ -24,10 +24,12 @@ td.d5 { background: #008dff; }
 td.ip { background: #b00040; color: white; font-weight: bold; }
 td.up { background: #a0f0a0; color: black; font-weight: bold; }
 td.dn { background: #f0a0a0; color: black; font-weight: bold; }
+td.ds { background: #888888; color: black; font-weight: bold; }
 
 tr.hd { background: #a0a0f0; }
 tr.up { background: #a0f0a0; }
 tr.dn { background: #f0a0a0; }
+tr.ds { background: #888888; }
 tr.fb { background: #a0f0f0; }
 
 th.ac, td.ac { text-align: center; }

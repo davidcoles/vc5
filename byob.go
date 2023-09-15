@@ -48,12 +48,12 @@ type BYOB struct {
 // for each four-tuple of virtual IP, backend IP, layer
 // four protocol and port number (Target).
 func (lb *BYOB) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
-	//return lb.balancer.Global(), lb.balancer.Stats()
+	//return lb.byolb.Global(), lb.bbyolb.Stats()
 	lb.mutex.Lock()
-	stats := lb.byolb.Stats(lb.report)
+	global, stats := lb.byolb.Stats(lb.report)
 	lb.mutex.Unlock()
 
-	return kernel.Counter{}, stats
+	return global, stats
 }
 
 // Status returns a Healthchecks object which is a copy of the current
@@ -111,7 +111,8 @@ func (lb *BYOB) Start(ip string, hc *healthchecks.Healthchecks, balancer Balance
 
 type Balancer interface {
 	Configure(healthchecks.Healthchecks)
-	Stats(healthchecks.Healthchecks) map[kernel.Target]kernel.Counter
+	//Stats_(healthchecks.Healthchecks) map[kernel.Target]kernel.Counter
+	Stats(healthchecks.Healthchecks) (kernel.Counter, map[kernel.Target]kernel.Counter)
 	Close()
 }
 

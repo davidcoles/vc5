@@ -59,9 +59,11 @@ function updateStats(url) {
 	    var summary = document.createElement("div");
 	    var t = append(summary, "table")
 	    var tr = append(t, "tr", null, "hd")
-	    
-	    append(tr, "th", "Readiness Level")
-	    append(tr, "th", "Latency")
+
+	    if(data.vc5) {
+		append(tr, "th", "Readiness Level")
+		append(tr, "th", "Latency")
+	    }
 	    append(tr, "th", "Bandwidth")
 	    append(tr, "th", "Packets")
 	    append(tr, "th", "New flows")
@@ -69,8 +71,10 @@ function updateStats(url) {
 	    
 	    tr = append(t, "tr", null, "up")
 
-	    append(tr, "td", "DEFCON" + data.defcon, "d"+data.defcon)
-	    append(tr, "td", data.latency +"ns")
+	    if(data.vc5) {
+		append(tr, "td", "DEFCON" + data.defcon, "d"+data.defcon)
+		append(tr, "td", data.latency +"ns")
+	    }
 	    append(tr, "td", tsf(data.octets_ps*8) + "bps")
 	    append(tr, "td", tsf(data.packets_ps) + "pps")
 	    append(tr, "td", tsf(data.flows_ps) + " flows/s")
@@ -161,7 +165,7 @@ function service(vip, l4, s) {
     var m = append(t, "tr", null, "hd")
     append(m, "th", esc(s.name))
     var title = esc(s.description) + " [" + s.healthy + "/" +s.servers + " healthy, " + s.minimum + " needed]"
-    append(m, "th", title).setAttribute("colspan", 4)
+    append(m, "th", title).setAttribute("colspan", 3)
     append(m, "th", `<div title="Estimated concurrent connections">Concurrent*</div>`)
     
     var up = s.up ? "UP" : "DOWN"
@@ -174,9 +178,7 @@ function service(vip, l4, s) {
 
     
     var tr = append(t, "tr", null, udf)
-    append(tr, "th", vip)
-    append(tr, "th", l4)
-    //append(tr, "th", up)
+    append(tr, "th", vip+":"+l4)
     append(tr, "th", dhms(s.when) + " " + up)
     append(tr, "th", tsf(s.octets_ps*8) + "bps")
     append(tr, "th", tsf(s.packets_ps) + "pps")
@@ -184,20 +186,24 @@ function service(vip, l4, s) {
     
     for(var rip in s.rips) {
 	var r = s.rips[rip]
-	var tr = append(t, "tr", null, r.up ? "up" : "dn")
+
+	var udd = r.up ? "up" : "dn"
+	udd = r.disabled ? "ds" : udd
+	
+	var tr = append(t, "tr", null, udd)
 	var when = dhms(r.when)
 
-	var span = document.createElement("span")
-	span.setAttribute("title", r.message)
-	span.innerHTML = when + " " + (r.up ? "UP" : "DOWN") + " ("+r.duration_ms+"ms)"
+	var status = document.createElement("span")
+	status.setAttribute("title", r.message)
+	status.innerHTML = when + " " + (r.up ? "UP" : "DOWN") + " ("+r.duration_ms+"ms)"
+	
+	var real = document.createElement("span")
+	real.setAttribute("title", r.mac)
+	real.innerHTML = rip
 	
 	
-	append(tr, "td", rip)
-	append(tr, "td", r.mac)
-	//append(tr, "td", when + " " + (r.up ? "UP" : "DOWN") + " ("+r.duration_ms+"ms)")
-
-	var td = append(tr, "td")
-	td.appendChild(span)
+	append(tr, "td").appendChild(real)
+	append(tr, "td").appendChild(status)
 	
 	append(tr, "td", spc(r.octets_ps*8), "ar")
 	append(tr, "td", spc(r.packets_ps), "ar")

@@ -83,6 +83,7 @@ func getStats(lb *LoadBalancer) *Stats {
 			//reals[rip.String()] = Real{
 			reals[ipport.String()] = Real{
 				Up:         probe.Passed,
+				Disabled:   real.Disabled,
 				When:       int64(time.Now().Sub(probe.Time) / time.Second),
 				Message:    probe.Message,
 				Duration:   int64(probe.Duration / time.Millisecond),
@@ -340,6 +341,7 @@ const (
 /**********************************************************************/
 
 type Stats struct {
+	VC5        bool                   `json:"vc5"`
 	Octets     uint64                 `json:"octets"`
 	OctetsPS   uint64                 `json:"octets_ps"`
 	Packets    uint64                 `json:"packets"`
@@ -379,6 +381,7 @@ type Service struct {
 
 type Real struct {
 	Up         bool   `json:"up"`
+	Disabled   bool   `json:"disabled"`
 	When       int64  `json:"when"`
 	Message    string `json:"message"`
 	Duration   int64  `json:"duration_ms"`
