@@ -22,7 +22,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -222,66 +221,7 @@ func Server(path string, ip string) {
 	log.Fatal(server.Serve(s))
 }
 
-func (p *probe) httpget() (bool, string) {
-	check := p.Check
-
-	if client == nil {
-
-		transport := &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout: 2 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 1 * time.Second,
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		}
-
-		client = &http.Client{
-			Timeout:   time.Second * 3,
-			Transport: transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	}
-
-	defer client.CloseIdleConnections()
-
-	path := check.Path
-	if len(path) > 0 && path[0] == '/' {
-		path = path[1:]
-	}
-
-	port := check.Port
-	if port == 0 {
-		return false, "Port is 0"
-	}
-
-	url := fmt.Sprintf("%s://%s:%d/%s", p.Scheme, p.IP, port, path)
-	req, err := http.NewRequest("GET", url, nil)
-	if check.Host != "" {
-		req.Host = check.Host
-	}
-
-	resp, err := client.Do(req)
-
-	if err != nil {
-		return false, err.Error()
-	}
-
-	defer resp.Body.Close()
-
-	ioutil.ReadAll(resp.Body)
-
-	exp := int(check.Expect)
-
-	if exp == 0 {
-		exp = 200
-	}
-
-	return resp.StatusCode == exp, resp.Status
-}
-
-func (p *probe) synprobe(syn *SynChecks) (bool, string) {
+func (p *probe) synprobe(syn *monitor.SynChecks) (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
 
@@ -346,8 +286,12 @@ func (p *probe) tcpdial() (bool, string) {
 	return false, fmt.Sprint(err)
 }
 
+func (p *probe) httpget() (bool, string) {
+	return monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
+}
+
 //func (p *probe) probe(syn *SynChecks) (bool, string) {
-func (p *probe) probe(syn *SynChecks) response {
+func (p *probe) probe(syn *monitor.SynChecks) response {
 	//fmt.Println(p)
 
 	var ok bool

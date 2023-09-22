@@ -24,6 +24,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/monitor/healthchecks"
@@ -46,11 +47,10 @@ func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthche
 	switch schema {
 
 	case "http":
-		//return httpget(schema, rip.String(), check)
-		x, y := httpget(schema, rip.String(), check)
+		x, y := HTTPGet(schema, rip.String(), check)
 		return x, y
 	case "https":
-		return httpget(schema, rip.String(), check)
+		return HTTPGet(schema, rip.String(), check)
 	case "dns":
 		ok := dnsquery(rip.String(), check.Port)
 		return ok, ""
@@ -63,8 +63,12 @@ func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthche
 }
 
 var client *http.Client
+var mu sync.Mutex
 
-func httpget(scheme, ip string, check healthchecks.Check) (bool, string) {
+func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if client == nil {
 
