@@ -457,18 +457,20 @@ func (i ipp) MarshalText() ([]byte, error) {
 
 func (i *ipp) UnmarshalText(data []byte) error {
 
+	text := string(data)
+
 	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+):(\d+):(tcp|udp)$`)
 
-	m := re.FindStringSubmatch(string(data))
+	m := re.FindStringSubmatch(text)
 
 	if len(m) != 4 {
-		return errors.New("Badly formed ip:port:protocol")
+		return errors.New("Badly formed ip:port:protocol - " + text)
 	}
 
 	ip, ok := types.ParseIP(m[1])
 
 	if !ok {
-		return errors.New("Badly formed ip:port:protocol")
+		return errors.New("Badly formed ip:port:protocol - IP" + text)
 	}
 
 	i.IP = ip
@@ -479,7 +481,7 @@ func (i *ipp) UnmarshalText(data []byte) error {
 	}
 
 	if port < 0 || port > 65535 {
-		return errors.New("Badly formed ip:port:protocol")
+		return errors.New("Badly formed ip:port:protocol, port out of rance 0-65535 - " + text)
 	}
 
 	i.Port = uint16(port)
@@ -487,10 +489,10 @@ func (i *ipp) UnmarshalText(data []byte) error {
 	switch m[3] {
 	case "tcp":
 		i.Protocol = 6
-	case "UDP":
+	case "udp":
 		i.Protocol = 17
 	default:
-		return errors.New("Badly formed ip:port:protocol")
+		return errors.New("Badly formed ip:port:protocol, tcp/udp - " + text)
 	}
 
 	return nil

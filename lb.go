@@ -28,7 +28,7 @@ import (
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
-	"github.com/davidcoles/vc5/monitor/netns"
+	"github.com/davidcoles/vc5/netns"
 	"github.com/davidcoles/vc5/types"
 )
 

@@ -27,7 +27,7 @@ import (
 
 // dig chaos txt version.bind @80.80.80.80
 
-func dnsquery(addr string, port uint16) bool {
+func zdnsquery(addr string, port uint16) bool {
 
 	if port == 0 {
 		return false

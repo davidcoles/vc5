@@ -27,6 +27,10 @@ import (
 
 // dig chaos txt version.bind @80.80.80.80
 
+func DNSQuery(addr string, port uint16) bool {
+	return dnsquery(addr, port)
+}
+
 func dnsquery(addr string, port uint16) bool {
 
 	if port == 0 {

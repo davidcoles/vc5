@@ -34,6 +34,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
 	"github.com/davidcoles/vc5/types"
 )
@@ -299,7 +300,7 @@ func (p *probe) dnsprobe() (bool, string) {
 		return false, "Port is 0"
 	}
 
-	return dnsquery(addr, port), ""
+	return monitor.DNSQuery(addr, port), ""
 }
 
 //func tcpdial(foo probe) (bool, string) {
