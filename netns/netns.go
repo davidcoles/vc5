@@ -164,7 +164,7 @@ func Server(path string, ip string) {
 
 	os.Remove(path)
 
-	syn := Syn(ip)
+	syn := monitor.Syn(ip)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 
