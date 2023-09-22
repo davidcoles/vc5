@@ -28,12 +28,24 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
+const UDP = 17
+const TCP = 6
+
 type IP4 = types.IP4
 type MAC = types.MAC
 type NET = types.NET
 type L4 = types.L4
-type Protocol = types.Protocol
+
 type IPPort = types.IPPort
+type Protocol uint8
+
+func (p Protocol) Old() types.Protocol {
+	if p == 17 {
+		return types.UDP
+	}
+
+	return types.TCP
+}
 
 type Checks = config.Checks
 type Check = config.Check
@@ -55,7 +67,7 @@ type Real struct {
 	NAT      IP4
 	MAC      MAC
 	VID      uint16
-	Checks   Checks
+	Checks   []Check
 	XProbe   Probe
 	Disabled bool
 }
@@ -126,7 +138,7 @@ type SVC struct {
 }
 
 func (s *SVC) L4() L4 {
-	return L4{Port: s.Port, Protocol: s.Protocol}
+	return L4{Port: s.Port, Protocol: s.Protocol.Old()}
 }
 
 type Up struct {
@@ -144,12 +156,12 @@ func (h *Healthchecks) Health() map[IP4]Up {
 	return ret
 }
 
-func (h *Healthchecks) Services() map[SVC]Service {
+func (h *Healthchecks) Services__() map[SVC]Service {
 	ret := map[SVC]Service{}
 
 	for vip, v := range h.Virtual {
 		for l4, s := range v.Services {
-			f := SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol}
+			f := SVC{VIP: vip, Port: l4.Port, Protocol: Protocol(l4.Protocol.Number())}
 
 			s.VIP = vip
 			s.Port = l4.Port
@@ -166,20 +178,16 @@ func (h *Healthchecks) Services() map[SVC]Service {
 	return ret
 }
 
-func (h *Healthchecks) Services_() []SVC {
+func (h *Healthchecks) Services() []SVC {
 	var ret []SVC
 
 	for vip, v := range h.Virtual {
 		for l4, _ := range v.Services {
-			ret = append(ret, SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol})
+			ret = append(ret, SVC{VIP: vip, Port: l4.Port, Protocol: Protocol(l4.Protocol.Number())})
 		}
 	}
 
 	return ret
-}
-
-func (s *Service) xReals___() map[IPPort]Real {
-	return s.reals()
 }
 
 func (s *Service) Reals() []Real {
@@ -200,7 +208,7 @@ func (h *Healthchecks) Reals(svc SVC) []Real {
 		return ret
 	}
 
-	l4 := L4{Port: svc.Port, Protocol: svc.Protocol}
+	l4 := L4{Port: svc.Port, Protocol: svc.Protocol.Old()}
 
 	service, ok := v.Services[l4]
 
@@ -256,54 +264,6 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 
 	hc.VLAN = c.VLANs
 
-	for _vip, x := range c.VIPs {
-		var vip IP4
-		err := vip.UnmarshalText([]byte(_vip))
-		if err != nil {
-			return nil, err
-		}
-
-		v := Virtual{Services: map[L4]Service{}}
-
-		for _l4, y := range x {
-			var l4 L4
-			err := l4.UnmarshalText([]byte(_l4))
-			if err != nil {
-				return nil, err
-			}
-
-			backends := map[IPPort]Real{}
-
-			for r, checks := range y.RIPs {
-				rip := r.IP
-				port := r.Port
-
-				if port == 0 {
-					port = l4.Port
-				}
-
-				checks.DefaultPort(port)
-
-				backends[IPPort{IP: rip, Port: port}] = Real{RIP: rip, Checks: checks, Port: port, Disabled: r.Disabled}
-			}
-
-			v.Services[l4] = Service{
-				VIP:            vip,
-				Port:           l4.Port,
-				UDP:            l4.Protocol == types.UDP,
-				Metadata:       Metadata{Name: y.Name, Description: y.Description},
-				FallbackChecks: y.Local,
-				Fallback:       y.Fallback,
-				Minimum:        y.Need,
-				Sticky:         y.Sticky,
-				Backend:        backends,
-				Scheduler:      y.Scheduler,
-			}
-		}
-
-		hc.Virtual[vip] = v
-	}
-
 	for s, svc := range c.Services {
 
 		_, ok := hc.Virtual[s.IP]
@@ -322,7 +282,13 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 				port = s.Port
 			}
 
-			dest.Checks.DefaultPort(port)
+			for i, c := range dest.Checks {
+				if c.Port == 0 {
+					c.Port = port
+				}
+
+				dest.Checks[i] = c
+			}
 
 			backends[IPPort{IP: d.IP, Port: port}] = Real{RIP: d.IP, Checks: dest.Checks, Port: port, Disabled: dest.Disabled}
 		}
@@ -362,10 +328,6 @@ func (h *Healthchecks) buildvid() {
 	// write vlan id to each rip entry in services
 	for _, v := range h.Virtual {
 		for _, s := range v.Services {
-			//for rip, real := range s.Reals {
-			//	real.VID = h._VID[rip]
-			//	s.Reals[rip] = real
-			//}
 			for _, r := range s.reals() {
 				r.VID = h._VID[r.RIP]
 				s.UpdateReal(r)
@@ -437,7 +399,6 @@ func (h *Healthchecks) Tuples() map[[2]IP4]bool {
 	n := map[[2]IP4]bool{}
 	for vip, v := range h.Virtual {
 		for _, s := range v.Services {
-			//for rip, _ := range s.XReals {
 			for k, _ := range s.reals() {
 				n[[2]IP4{vip, k.IP}] = true
 			}
@@ -447,8 +408,7 @@ func (h *Healthchecks) Tuples() map[[2]IP4]bool {
 }
 
 func (h *Healthchecks) SetReal_(s SVC, r Real) {
-	//rip := r.RIP
-	l4 := L4{Port: s.Port, Protocol: s.Protocol}
+	l4 := L4{Port: s.Port, Protocol: s.Protocol.Old()}
 	if _, ok := h.Virtual[s.VIP]; ok {
 		if s, ok := h.Virtual[s.VIP].Services[l4]; ok {
 			s.UpdateReal(r)

@@ -31,26 +31,23 @@ import (
 type Healthchecks = healthchecks.Healthchecks
 type Counter = kernel.Counter
 
-// A LoadBalancer defines the network parameters for operation of the
-// load-balancing logic, such as what interfaces and driver
-// modes to use.
-type BYOB struct {
+type Director struct {
 
 	// Logging interface to use for event reporting.
-	Logger types.Logger
-	report monitor.Report
-	byolb  Balancer
-	mutex  sync.Mutex
-	update chan *healthchecks.Healthchecks
+	Logger   types.Logger
+	report   monitor.Report
+	Balancer Balancer
+	mutex    sync.Mutex
+	update   chan *healthchecks.Healthchecks
 }
 
 // Returns a map of active service statistics. A counter is returned
 // for each four-tuple of virtual IP, backend IP, layer
 // four protocol and port number (Target).
-func (lb *BYOB) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
+func (lb *Director) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
 	//return lb.byolb.Global(), lb.bbyolb.Stats()
 	lb.mutex.Lock()
-	global, stats := lb.byolb.Stats(lb.report)
+	global, stats := lb.Balancer.Stats(lb.report)
 	lb.mutex.Unlock()
 
 	return global, stats
@@ -59,7 +56,7 @@ func (lb *BYOB) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
 // Status returns a Healthchecks object which is a copy of the current
 // load-balancer configuration with backend server MAC addresses and
 // healthcheck probe results, service and virtual IP status filled in.
-func (lb *BYOB) Status() healthchecks.Healthchecks {
+func (lb *Director) Status() healthchecks.Healthchecks {
 	lb.mutex.Lock()
 	r := lb.report
 	lb.mutex.Unlock()
@@ -68,14 +65,14 @@ func (lb *BYOB) Status() healthchecks.Healthchecks {
 
 // Cease all load-balancing functionality. Once called the
 // LoadBalancer object must not be used.
-func (lb *BYOB) Close() {
+func (lb *Director) Close() {
 	close(lb.update)
 }
 
 // Replace the LoadBalancer configuration with hc. New VIPs, services
 // and backend server will be added in a non-disruptive manner,
 // existing elements will be unchanged and obsolete ones removed.
-func (lb *BYOB) Update(hc *healthchecks.Healthchecks) {
+func (lb *Director) Update(hc *healthchecks.Healthchecks) {
 	lb.update <- hc
 }
 
@@ -86,7 +83,8 @@ func (lb *BYOB) Update(hc *healthchecks.Healthchecks) {
 
 // If all of the backend servers are in VLANs specified in the
 // healthchecks configuration then address will not be used.
-func (lb *BYOB) Start(ip string, hc *healthchecks.Healthchecks, balancer Balancer) error {
+//func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks, balancer Balancer) error {
+func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks) error {
 
 	if lb.Logger == nil {
 		lb.Logger = &types.NilLogger{}
@@ -100,23 +98,20 @@ func (lb *BYOB) Start(ip string, hc *healthchecks.Healthchecks, balancer Balance
 
 	lb.update = make(chan *healthchecks.Healthchecks)
 
-	balancer.Configure(lb.report)
+	lb.Balancer.Configure(lb.report)
 
-	lb.byolb = balancer
-
-	go lb.background(monitor, balancer)
+	go lb.background(monitor, lb.Balancer)
 
 	return nil
 }
 
 type Balancer interface {
 	Configure(healthchecks.Healthchecks)
-	//Stats_(healthchecks.Healthchecks) map[kernel.Target]kernel.Counter
 	Stats(healthchecks.Healthchecks) (kernel.Counter, map[kernel.Target]kernel.Counter)
 	Close()
 }
 
-func (lb *BYOB) background(monitor *monitor.Mon, balancer Balancer) {
+func (lb *Director) background(monitor *monitor.Mon, balancer Balancer) {
 
 	go func() {
 		defer balancer.Close()

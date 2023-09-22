@@ -48,7 +48,7 @@ func getStats(lb *LoadBalancer) *Stats {
 		stats.When[k] = int64(now.Sub(v.Time) / time.Second)
 	}
 
-	for svc, s := range status.Services() {
+	for svc, s := range status.Services__() {
 		vip := svc.VIP
 		l4 := svc.L4()
 

@@ -36,17 +36,19 @@ import (
 
 // Describes a Layer 4 or Layer 7 health check
 type Check struct {
+	Type string `json:"type,omitempty"`
+
 	// TCP/UDP port to use for L4/L7 checks
-	Port uint16 `json:"port"'`
+	Port uint16 `json:"port,omitempty"`
 
 	// HTTP Host header to send in healthcheck
-	Host string `json:"host"`
+	Host string `json:"host,omitempty"`
 
 	// Path of resource to use when building a URI for HTTP/HTTPS healthchecks
-	Path string `json:"path"`
+	Path string `json:"path,omitempty"`
 
 	// Expected HTTP status code to allow check to succeed
-	Expect uint16 `json:"expect"`
+	Expect uint16 `json:"expect,omitempty"`
 }
 
 func (c *Check) Unzero(p uint16) {
@@ -56,20 +58,24 @@ func (c *Check) Unzero(p uint16) {
 }
 
 type Real struct {
-	Checks   Checks `json:"checks,omitempty"`
-	Disabled bool   `json:"disabled,omitempty"`
-	Weight   uint16 `json:"weight,omitempty"`
+	//Checks   Checks `json:"checks,omitempty"`
+	Checks   []Check `json:"checks,omitempty"`
+	Disabled bool    `json:"disabled,omitempty"`
+	Weight   uint16  `json:"weight,omitempty"`
 }
 
 // Inventory of healthchecks required to pass to consider backend as healthy
 type Checks struct {
-	HTTP   []Check `json:"http,omitempty"`   // L7 HTTP checks
-	HTTPS  []Check `json:"https,omitempty"`  // L7 HTTPS checks - certificate is not validated
-	TCP    []Check `json:"tcp,omitempty"`    // L4 SYN, SYN/ACK, ACK checks
+	HTTP  []Check `json:"http,omitempty"`  // L7 HTTP checks
+	HTTPS []Check `json:"https,omitempty"` // L7 HTTPS checks - certificate is not validated
+	//TCP    []Check `json:"tcp,omitempty"`    // L4 SYN, SYN/ACK, ACK checks
 	SYN    []Check `json:"syn,omitempty"`    // L4 SYN, SYN-ACK half-open checks
 	DNS    []Check `json:"dns,omitempty"`    // L7 UDP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
-	DNSTCP []Check `json:"dnstcp,omitempty"` // L7 TCPDNS queries: CHAOS TXT version.bind - only response transaction ID is checked
+	DNSTCP []Check `json:"dnstcp,omitempty"` // L7 TCP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
+}
 
+func (c *Checks) Slice() []Check {
+	return nil
 }
 
 func (c *Checks) DefaultPort(p uint16) {
@@ -87,9 +93,9 @@ func (c *Checks) DefaultPort(p uint16) {
 		c.HTTPS[i] = u(v, p)
 	}
 
-	for i, v := range c.TCP {
-		c.TCP[i] = u(v, p)
-	}
+	//for i, v := range c.TCP {
+	//	c.TCP[i] = u(v, p)
+	//}
 
 	for i, v := range c.SYN {
 		c.SYN[i] = u(v, p)
@@ -192,7 +198,7 @@ func (r *RHI) Communities() []uint32 {
 type Config struct {
 	// Two level dictionary of virual IP addresses and Layer 4
 	// protocol/port number of services provided by the balancer
-	VIPs map[string]map[string]Service `json:"vips,omitempty"`
+	//VIPs map[string]map[string]Service `json:"vips,omitempty"`
 
 	Services map[ipp]Service2 `json:"services,omitempty"`
 

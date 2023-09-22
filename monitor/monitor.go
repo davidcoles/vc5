@@ -31,7 +31,7 @@ type IP4 = types.IP4
 type L4 = types.L4
 type IPPort = types.IPPort
 
-type Checks = healthchecks.Checks
+//type Checks = healthchecks.Checks
 type Check = healthchecks.Check
 type Metadata = healthchecks.Metadata
 type Healthchecks = healthchecks.Healthchecks
@@ -323,7 +323,8 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 			}
 
 			if service.Fallback {
-				r := healthchecks.Real{Checks: service.FallbackChecks, RIP: c.vip}
+				//r := healthchecks.Real{Checks: service.FallbackChecks, RIP: c.vip}
+				r := healthchecks.Real{Checks: service.FallbackChecks.Slice(), RIP: c.vip}
 				if fallback == nil {
 					fallback = StartReal(r, c, true)
 				} else {
@@ -544,9 +545,9 @@ func healthy(b [5]bool) bool {
 	return true
 }
 
-func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker Checker, checks Checks, l types.Logger, notify chan bool) chan Checks {
+func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker Checker, checks []Check, l types.Logger, notify chan bool) chan []Check {
 
-	ch := make(chan Checks, 1000)
+	ch := make(chan []Check, 1000)
 
 	go func() {
 
@@ -596,45 +597,15 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker C
 	return ch
 }
 
-func probes(vip, rip, nat IP4, checker Checker, checks Checks) (bool, string) {
+func probes(vip, rip, nat IP4, checker Checker, checks []Check) (bool, string) {
 
 	if checker == nil {
 		return false, "Internal error - Checker is nil"
 	}
 
-	for _, c := range checks.HTTPS {
-		if ok, msg := checker.Check(vip, rip, nat, "https", c); !ok {
-			return false, "HTTPS probe failed: " + msg
-		}
-	}
-
-	for _, c := range checks.HTTP {
-		if ok, msg := checker.Check(vip, rip, nat, "http", c); !ok {
-			return false, "HTTP probe failed: " + msg
-		}
-	}
-
-	for _, c := range checks.TCP {
-		if ok, msg := checker.Check(vip, rip, nat, "tcp", c); !ok {
-			return false, "TCP probe failed: " + msg
-		}
-	}
-
-	for _, c := range checks.SYN {
-		if ok, msg := checker.Check(vip, rip, nat, "syn", c); !ok {
-			return false, "SYN probe failed: " + msg
-		}
-	}
-
-	for _, c := range checks.DNS {
-		if ok, msg := checker.Check(vip, rip, nat, "dns", c); !ok {
-			return false, "DNS probe failed: " + msg
-		}
-	}
-
-	for _, c := range checks.DNSTCP {
-		if ok, msg := checker.Check(vip, rip, nat, "dnstcp", c); !ok {
-			return false, "DNS probe failed: " + msg
+	for _, c := range checks {
+		if ok, msg := checker.Check(vip, rip, nat, c.Type, c); !ok {
+			return false, c.Type + " probe failed: " + msg
 		}
 	}
 
