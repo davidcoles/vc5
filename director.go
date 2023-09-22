@@ -31,6 +31,12 @@ import (
 type Healthchecks = healthchecks.Healthchecks
 type Counter = kernel.Counter
 
+type Balancer interface {
+	Configure(*healthchecks.Healthchecks)
+	Stats(healthchecks.Healthchecks) (kernel.Counter, map[kernel.Target]kernel.Counter)
+	Close()
+}
+
 type Director struct {
 
 	// Logging interface to use for event reporting.
@@ -98,17 +104,11 @@ func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks) error {
 
 	lb.update = make(chan *healthchecks.Healthchecks)
 
-	lb.Balancer.Configure(lb.report)
+	lb.Balancer.Configure(&(lb.report))
 
 	go lb.background(monitor, lb.Balancer)
 
 	return nil
-}
-
-type Balancer interface {
-	Configure(healthchecks.Healthchecks)
-	Stats(healthchecks.Healthchecks) (kernel.Counter, map[kernel.Target]kernel.Counter)
-	Close()
 }
 
 func (lb *Director) background(monitor *monitor.Mon, balancer Balancer) {
@@ -120,7 +120,7 @@ func (lb *Director) background(monitor *monitor.Mon, balancer Balancer) {
 			lb.mutex.Lock()
 			lb.report = *(h.DeepCopy())
 			lb.mutex.Unlock()
-			balancer.Configure(h)
+			balancer.Configure(&h)
 		}
 	}()
 
