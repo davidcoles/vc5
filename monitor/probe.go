@@ -30,6 +30,10 @@ import (
 	"github.com/davidcoles/vc5/monitor/healthchecks"
 )
 
+var client *http.Client
+var dialer *net.Dialer
+var mu sync.Mutex
+
 type Probes struct {
 	syn *SynChecks
 }
@@ -52,8 +56,9 @@ func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthche
 	case "https":
 		return HTTPGet(schema, rip.String(), check)
 	case "dns":
-		ok := dnsquery(rip.String(), check.Port)
-		return ok, ""
+		return DNSUDP(rip.String(), check.Port)
+	case "dnstcp":
+		return DNSTCP(rip.String(), check.Port)
 	case "syn":
 		ok := c.syn.Probe(rip.String(), check.Port)
 		return ok, ""
@@ -61,9 +66,6 @@ func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthche
 
 	return false, "not implemented"
 }
-
-var client *http.Client
-var mu sync.Mutex
 
 func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
 

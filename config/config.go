@@ -63,11 +63,13 @@ type Real struct {
 
 // Inventory of healthchecks required to pass to consider backend as healthy
 type Checks struct {
-	HTTP  []Check `json:"http,omitempty"`  // L7 HTTP checks
-	HTTPS []Check `json:"https,omitempty"` // L7 HTTPS checks - certificate is not validated
-	TCP   []Check `json:"tcp,omitempty"`   // L4 SYN, SYN/ACK, ACK checks
-	SYN   []Check `json:"syn,omitempty"`   // L4 SYN, SYN-ACK half-open checks
-	DNS   []Check `json:"dns,omitempty"`   // L7 UDP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
+	HTTP   []Check `json:"http,omitempty"`   // L7 HTTP checks
+	HTTPS  []Check `json:"https,omitempty"`  // L7 HTTPS checks - certificate is not validated
+	TCP    []Check `json:"tcp,omitempty"`    // L4 SYN, SYN/ACK, ACK checks
+	SYN    []Check `json:"syn,omitempty"`    // L4 SYN, SYN-ACK half-open checks
+	DNS    []Check `json:"dns,omitempty"`    // L7 UDP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
+	DNSTCP []Check `json:"dnstcp,omitempty"` // L7 TCPDNS queries: CHAOS TXT version.bind - only response transaction ID is checked
+
 }
 
 func (c *Checks) DefaultPort(p uint16) {
@@ -95,6 +97,10 @@ func (c *Checks) DefaultPort(p uint16) {
 
 	for i, v := range c.DNS {
 		c.DNS[i] = u(v, p)
+	}
+
+	for i, v := range c.DNSTCP {
+		c.DNSTCP[i] = u(v, p)
 	}
 }
 

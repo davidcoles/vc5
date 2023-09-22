@@ -48,6 +48,7 @@ import (
 
 	"github.com/davidcoles/vc5"
 	"github.com/davidcoles/vc5/bgp4"
+	"github.com/davidcoles/vc5/monitor"
 )
 
 var logger *Logger
@@ -88,6 +89,9 @@ func ulimit(resource int) {
 }
 
 func main() {
+
+	println(monitor.DNSUDP("10.7.116.14", 53))
+	return
 
 	flag.Parse()
 	args := flag.Args()

@@ -31,6 +31,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/monitor"
@@ -41,6 +42,7 @@ import (
 type Check = healthchecks.Check
 
 var client *http.Client
+var mu sync.Mutex
 
 type probe struct {
 	IP     types.IP4
@@ -92,6 +94,9 @@ func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string)
 		return false, "No socket given"
 	}
 
+	mu.Lock()
+	defer mu.Unlock()
+
 	if client == nil {
 		client = &http.Client{
 			Transport: &http.Transport{
@@ -102,7 +107,7 @@ func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string)
 		}
 	}
 
-	defer client.CloseIdleConnections()
+	//defer client.CloseIdleConnections()
 
 	if check.Port == 0 {
 		panic("oops")
@@ -232,7 +237,7 @@ func (p *probe) synprobe(syn *monitor.SynChecks) (bool, string) {
 	return syn.Probe(addr, port), ""
 }
 
-func (p *probe) dnsprobe() (bool, string) {
+func (p *probe) dnsudp() (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
 
@@ -240,7 +245,18 @@ func (p *probe) dnsprobe() (bool, string) {
 		return false, "Port is 0"
 	}
 
-	return monitor.DNSQuery(addr, port), ""
+	return monitor.DNSUDP(addr, port)
+}
+
+func (p *probe) dnstcp() (bool, string) {
+	addr := p.IP.String()
+	port := p.Check.Port
+
+	if port == 0 {
+		return false, "Port is 0"
+	}
+
+	return monitor.DNSTCP(addr, port)
 }
 
 //func tcpdial(foo probe) (bool, string) {
@@ -307,7 +323,9 @@ func (p *probe) probe(syn *monitor.SynChecks) response {
 	case "tcp":
 		ok, st = p.tcpdial()
 	case "dns":
-		ok, st = p.dnsprobe()
+		ok, st = p.dnsudp()
+	case "dnstcp":
+		ok, st = p.dnstcp()
 	default:
 		st = "Unknown probe type"
 	}

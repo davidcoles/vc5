@@ -27,58 +27,127 @@ import (
 
 // dig chaos txt version.bind @80.80.80.80
 
-func DNSQuery(addr string, port uint16) bool {
-	return dnsquery(addr, port)
-}
-
-func dnsquery(addr string, port uint16) bool {
+func DNSUDP(addr string, port uint16) (bool, string) {
 
 	if port == 0 {
-		return false
+		return false, "Port is 0"
 	}
 
-	QUERY := []byte{
+	mu.Lock()
+	defer mu.Unlock()
+
+	if dialer == nil {
+		dialer = &net.Dialer{Timeout: 2 * time.Second}
+	}
+
+	conn, err := dialer.Dial("udp", fmt.Sprintf("%s:%d", addr, port))
+
+	if err != nil {
+		return false, err.Error()
+	}
+
+	defer conn.Close()
+
+	query := []byte{
 		0x00, 0x00, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x07, 0x76, 0x65, 0x72,
 		0x73, 0x69, 0x6f, 0x6e, 0x04, 0x62, 0x69, 0x6e, 0x64, 0x00, 0x00, 0x10, 0x00, 0x03, 0x00, 0x00,
 		0x29, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x0a, 0x00, 0x08, 0x56, 0x16, 0xf6,
 		0x23, 0xc3, 0xf6, 0x35, 0x9c,
 	}
 
-	d := net.Dialer{Timeout: 1 * time.Second}
-	conn, err := d.Dial("udp", fmt.Sprintf("%s:%d", addr, port))
-
-	if err != nil {
-		return false
-	}
-
-	defer conn.Close()
-
-	var buff [2948]byte
-
 	var tid uint16 = uint16(time.Now().Unix() % 65536)
 
-	QUERY[0] = byte(tid >> 8)
-	QUERY[1] = byte(tid & 0xff)
+	query[0] = byte(tid >> 8)
+	query[1] = byte(tid & 0xff)
 
 	conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
 
-	n, err := conn.Write(QUERY)
+	_, err = conn.Write(query)
 
-	if err != nil || n != len(QUERY) {
-		return false
+	if err != nil {
+		return false, "Write to server failed:" + err.Error()
 	}
 
 	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
-	n, err = bufio.NewReader(conn).Read(buff[:])
+	var buff [256]byte
 
-	if err != nil || n < 2 {
-		return false
+	read, err := bufio.NewReader(conn).Read(buff[:])
+
+	if err != nil {
+		return false, "Read from server failed:" + err.Error()
+	}
+
+	if read < 2 {
+		return false, "Malformed packet: Too short"
 	}
 
 	if tid != (uint16(buff[0])<<8 + uint16(buff[1])) {
-		return false
+		return false, "Malformed packet: Incorrect transaction ID"
 	}
 
-	return true
+	return true, ""
+}
+
+func DNSTCP(addr string, port uint16) (bool, string) {
+
+	if port == 0 {
+		return false, "Port is 0"
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if dialer == nil {
+		dialer = &net.Dialer{Timeout: 2 * time.Second}
+	}
+
+	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+	if err != nil {
+		return false, err.Error()
+	}
+
+	defer conn.Close()
+
+	query := []byte{
+		0x00, 0x1e, 0xf4, 0xda, 0x01, 0x20, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x07, 0x76,
+		0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x04, 0x62, 0x69, 0x6e, 0x64, 0x00, 0x00, 0x10, 0x00, 0x03,
+	}
+
+	var tid uint16 = uint16(time.Now().UnixNano() % 65536)
+
+	query[2] = byte(tid >> 8)
+	query[3] = byte(tid & 0xff)
+
+	conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+
+	_, err = conn.Write(query)
+	if err != nil {
+		return false, "Write to server failed:" + err.Error()
+	}
+
+	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+
+	var buff [256]byte
+	read, err := conn.Read(buff[:])
+
+	if err != nil {
+		return false, "Read from server failed:" + err.Error()
+	}
+
+	if read < 4 {
+		return false, "Malformed packet: Too short"
+	}
+
+	length := int(buff[0])<<8 + int(buff[1])
+
+	if length+2 != read {
+		return false, "Malformed packet: Length mismatch"
+	}
+
+	if tid != (uint16(buff[2])<<8 + uint16(buff[3])) {
+		return false, "Malformed packet: Incorrect transaction ID"
+	}
+
+	return true, ""
 }

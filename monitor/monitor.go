@@ -632,5 +632,11 @@ func probes(vip, rip, nat IP4, checker Checker, checks Checks) (bool, string) {
 		}
 	}
 
+	for _, c := range checks.DNSTCP {
+		if ok, msg := checker.Check(vip, rip, nat, "dnstcp", c); !ok {
+			return false, "DNS probe failed: " + msg
+		}
+	}
+
 	return true, "OK"
 }
