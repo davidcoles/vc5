@@ -19,9 +19,6 @@
 package vc5
 
 import (
-	"sync"
-
-	//"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
@@ -30,20 +27,20 @@ import (
 
 type Healthchecks = healthchecks.Healthchecks
 type Counter = kernel.Counter
+type Checker = monitor.Checker
 
 type Balancer interface {
+	Start(string, *healthchecks.Healthchecks) error
 	Configure(*healthchecks.Healthchecks)
-	Stats(healthchecks.Healthchecks) (kernel.Counter, map[kernel.Target]kernel.Counter)
+	Checker() monitor.Checker
+	Status() healthchecks.Healthchecks
+	Stats() (kernel.Counter, map[kernel.Target]kernel.Counter)
 	Close()
 }
 
 type Director struct {
-
-	// Logging interface to use for event reporting.
 	Logger   types.Logger
-	report   monitor.Report
 	Balancer Balancer
-	mutex    sync.Mutex
 	update   chan *healthchecks.Healthchecks
 }
 
@@ -51,22 +48,14 @@ type Director struct {
 // for each four-tuple of virtual IP, backend IP, layer
 // four protocol and port number (Target).
 func (lb *Director) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
-	//return lb.byolb.Global(), lb.bbyolb.Stats()
-	lb.mutex.Lock()
-	global, stats := lb.Balancer.Stats(lb.report)
-	lb.mutex.Unlock()
-
-	return global, stats
+	return lb.Balancer.Stats()
 }
 
 // Status returns a Healthchecks object which is a copy of the current
 // load-balancer configuration with backend server MAC addresses and
 // healthcheck probe results, service and virtual IP status filled in.
 func (lb *Director) Status() healthchecks.Healthchecks {
-	lb.mutex.Lock()
-	r := lb.report
-	lb.mutex.Unlock()
-	return r
+	return lb.Balancer.Status()
 }
 
 // Cease all load-balancing functionality. Once called the
@@ -96,15 +85,11 @@ func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks) error {
 		lb.Logger = &types.NilLogger{}
 	}
 
-	probes := &monitor.Probes{}
-	probes.Start(ip)
-
-	monitor, report := monitor.Monitor(hc, probes, lb.Logger)
-	lb.report = report
+	monitor, report := monitor.Monitor(hc, lb.Balancer.Checker(), lb.Logger)
 
 	lb.update = make(chan *healthchecks.Healthchecks)
 
-	lb.Balancer.Configure(&(lb.report))
+	lb.Balancer.Start(ip, report.DeepCopy())
 
 	go lb.background(monitor, lb.Balancer)
 
@@ -116,17 +101,14 @@ func (lb *Director) background(monitor *monitor.Mon, balancer Balancer) {
 	go func() {
 		defer balancer.Close()
 		for h := range monitor.C {
-			lb.Logger.INFO("LoadBalancer", "Monitor update")
-			lb.mutex.Lock()
-			lb.report = *(h.DeepCopy())
-			lb.mutex.Unlock()
+			lb.Logger.INFO("Director", "Monitor update")
 			balancer.Configure(&h)
 		}
 	}()
 
 	defer monitor.Close()
 	for h := range lb.update {
-		lb.Logger.INFO("LoadBalancer", "Config update")
+		lb.Logger.INFO("Director", "Config update")
 		monitor.Update(h)
 	}
 

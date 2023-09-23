@@ -22,11 +22,36 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/kernel/xdp"
 	"github.com/davidcoles/vc5/types"
 )
+
+var nm map[[2]IP4]uint16 = map[[2]IP4]uint16{}
+var mu sync.Mutex
+
+func Lookup(vip, rip IP4) IP4 {
+	ip := IP4{10, 255, 255, 254}
+
+	key := [2]IP4{vip, rip}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var nat IP4
+
+	n, ok := nm[key]
+
+	if !ok {
+		return nat
+	}
+
+	nat = natAddress(n, ip)
+
+	return nat
+}
 
 type NAT struct {
 	C      chan *Healthchecks
@@ -57,6 +82,10 @@ func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 	}
 
 	natMap := natIndex(h.Tuples(), nil)
+
+	mu.Lock()
+	nm = natMap
+	mu.Unlock()
 
 	go n.nat(h, natMap, icmp)
 
@@ -200,6 +229,10 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 			vlans, redirect, ifmacs = resolveVLANs(h.VLANs(), n.Logger)
 
 			natMap = natIndex(h.Tuples(), natMap)
+
+			mu.Lock()
+			nm = natMap
+			mu.Unlock()
 
 			time.Sleep(time.Second) // give ARP a second to resolve
 		}

@@ -40,6 +40,7 @@ type IP4 = types.IP4
 type L4 = types.L4
 type Target = kernel.Target
 type Scheduler = types.Scheduler
+type Probes = monitor.Probes
 
 // Generate a Healthchecks object from a Config
 func Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
@@ -342,9 +343,13 @@ func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balanc
 	}
 }
 
-type checker struct{ socket string }
+type checker struct {
+	socket string
+	nat    *kernel.NAT
+}
 
 func (c *checker) Socket() string { return c.socket }
 func (c *checker) Check(vip IP4, rip IP4, nat IP4, t string, check healthchecks.Check) (bool, string) {
+	nat = kernel.Lookup(vip, rip)
 	return netns.Probe(c.socket, nat, t, check)
 }

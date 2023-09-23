@@ -94,6 +94,8 @@ func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string)
 		return false, "No socket given"
 	}
 
+	//fmt.Println(path, ip, scheme)
+
 	mu.Lock()
 	defer mu.Unlock()
 

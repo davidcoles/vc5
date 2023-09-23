@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-func getStats(lb *LoadBalancer) *Stats {
+func getStats(lb Balancer) *Stats {
 
 	now := time.Now()
 	status := lb.Status()

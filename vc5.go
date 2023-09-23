@@ -122,16 +122,6 @@ func (lb *VC5) StoreFlow(fs []byte) {
 	lb.balancer.StoreFlow(fs)
 }
 
-// Status returns a Healthchecks object which is a copy of the current
-// load-balancer configuration with backend server MAC addresses and
-// healthcheck probe results, service and virtual IP status filled in.
-func (lb *VC5) Status() healthchecks.Healthchecks {
-	lb.mutex.Lock()
-	r := lb.report.DeepCopy()
-	lb.mutex.Unlock()
-	return *r
-}
-
 // Update readiness level. This enables various levels of DDoS
 // mitigation.
 func (lb *VC5) DEFCON(d uint8) uint8 {
@@ -286,10 +276,22 @@ func (lb *VC5) background(nat *kernel.NAT, balancer *kernel.Balancer) {
 
 /********************************************************************************/
 
+// Status returns a Healthchecks object which is a copy of the current
+// load-balancer configuration with backend server MAC addresses and
+// healthcheck probe results, service and virtual IP status filled in.
+func (v *VC5) Status() healthchecks.Healthchecks {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	r := v.report.DeepCopy()
+	return *r
+}
+
 // Returns a map of active service statistics. A counter is returned
 // for each four-tuple of virtual IP, backend IP, layer
 // four protocol and port number (Target).
 func (v *VC5) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
 	return v.balancer.Global(), v.balancer.Stats()
 }
 
@@ -302,4 +304,8 @@ func (v *VC5) Close() {
 
 func (v *VC5) Configure(h *healthchecks.Healthchecks) {
 	v.update <- h
+}
+
+func (v *VC5) Checker() monitor.Checker {
+	return &checker{socket: v.Socket}
 }
