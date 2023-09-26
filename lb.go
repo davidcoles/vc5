@@ -18,48 +18,19 @@
 
 package vc5
 
+/*
+
 import (
 	"errors"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
-	"github.com/davidcoles/vc5/netns"
 	"github.com/davidcoles/vc5/types"
 )
-
-const WRR = types.WRR
-const WLC = types.WLC
-const MH_PORT = types.MH_PORT
-
-type IP4 = types.IP4
-type L4 = types.L4
-type Target = kernel.Target
-type Scheduler = types.Scheduler
-type Probes = monitor.Probes
-
-// Generate a Healthchecks object from a Config
-func Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
-	return healthchecks.Load(conf)
-}
-
-// Unmarshal a Config object from a JSON file. An internal
-// LoadBalancer Healthchecks object can be generated from this
-func LoadConf(file string) (*config.Config, error) {
-	return config.Load(file)
-}
-
-// Start a healthcheck server which will listen for requests via the
-// UNIX domain socket. This should be called by the executable spawned
-// from the LoadBalancer.NetnsCommand[] setting, which will be run a
-// different network namespace.
-func NetnsServer(socket string) {
-	netns.Server(socket, kernel.IP.String())
-}
 
 // A LoadBalancer defines the network parameters for operation of the
 // load-balancing logic, such as what interfaces and driver
@@ -343,13 +314,4 @@ func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balanc
 	}
 }
 
-type checker struct {
-	socket string
-	nat    *kernel.NAT
-}
-
-func (c *checker) Socket() string { return c.socket }
-func (c *checker) Check(vip IP4, rip IP4, nat IP4, t string, check healthchecks.Check) (bool, string) {
-	nat = kernel.Lookup(vip, rip)
-	return netns.Probe(c.socket, nat, t, check)
-}
+*/

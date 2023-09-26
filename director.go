@@ -19,12 +19,22 @@
 package vc5
 
 import (
+	"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
 	"github.com/davidcoles/vc5/types"
 )
 
+const WRR = types.WRR
+const WLC = types.WLC
+const MH_PORT = types.MH_PORT
+
+type IP4 = types.IP4
+type L4 = types.L4
+type Target = kernel.Target
+type Scheduler = types.Scheduler
+type Probes = monitor.Probes
 type Healthchecks = healthchecks.Healthchecks
 type Counter = kernel.Counter
 type Checker = monitor.Checker
@@ -112,4 +122,16 @@ func (lb *Director) background(monitor *monitor.Mon, balancer Balancer) {
 		monitor.Update(h)
 	}
 
+}
+
+/********************************************************************************/
+// Generate a Healthchecks object from a Config
+func Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
+	return healthchecks.Load(conf)
+}
+
+// Unmarshal a Config object from a JSON file. An internal
+// LoadBalancer Healthchecks object can be generated from this
+func LoadConf(file string) (*config.Config, error) {
+	return config.Load(file)
 }

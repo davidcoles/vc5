@@ -36,6 +36,7 @@ import (
 
 // Describes a Layer 4 or Layer 7 health check
 type Check struct {
+	//Type string `json:"type,omitempty"`
 	Type string `json:"type,omitempty"`
 
 	// TCP/UDP port to use for L4/L7 checks
@@ -49,6 +50,9 @@ type Check struct {
 
 	// Expected HTTP status code to allow check to succeed
 	Expect uint16 `json:"expect,omitempty"`
+
+	// HTTP Method
+	Method method `json:"method,omitempty"`
 }
 
 func (c *Check) Unzero(p uint16) {
@@ -138,6 +142,8 @@ type Service struct {
 	Local Checks `json:"local,omitempty"`
 
 	Scheduler types.Scheduler `json:"scheduler"`
+
+	DSR bool `json:"dsr,omitempty"`
 }
 
 // Describes a Layer 4 service
@@ -508,4 +514,56 @@ func (i *ipp) UnmarshalText(data []byte) error {
 	}
 
 	return nil
+}
+
+/**********************************************************************/
+
+type method string
+
+func (m *method) MarshalJSON() ([]byte, error) {
+	text, err := m.MarshalText()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return []byte(`"` + string(text) + `"`), nil
+}
+
+func (m *method) UnmarshalJSON(data []byte) error {
+
+	l := len(data)
+
+	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+		return errors.New("Bad method")
+	}
+
+	return m.UnmarshalText(data[1 : l-1])
+}
+
+func (m method) MarshalText() ([]byte, error) {
+
+	return []byte(m), nil
+}
+
+func (m *method) UnmarshalText(data []byte) error {
+
+	text := string(data)
+
+	switch text {
+	case "":
+		fallthrough
+	case "GET":
+		fallthrough
+	case "HEAD":
+		*m = method(data)
+	default:
+		return errors.New("Bad method: " + text)
+	}
+
+	return nil
+}
+
+func (m *method) String() string {
+	return string(*m)
 }

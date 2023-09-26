@@ -20,7 +20,8 @@ package healthchecks
 
 import (
 	"encoding/json"
-	//"fmt"
+	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -47,6 +48,14 @@ func (p Protocol) Old() types.Protocol {
 	return types.TCP
 }
 
+func (p Protocol) String() string {
+	if p == 17 {
+		return "UDP"
+	}
+
+	return "TCP"
+}
+
 type Checks = config.Checks
 type Check = config.Check
 
@@ -64,12 +73,12 @@ type Real struct {
 	RIP  IP4
 	Port uint16
 
-	NAT      IP4
-	MAC      MAC
-	VID      uint16
-	Checks   []Check
-	XProbe   Probe
 	Disabled bool
+	Checks   []Check
+
+	MAC    MAC
+	VID    uint16
+	XProbe Probe
 }
 
 func (r *Real) IPPort() IPPort {
@@ -112,21 +121,75 @@ type Service struct {
 	Backend          map[IPPort]Real `json:",omitempty"`
 }
 
+type Virtual struct {
+	Metadata Metadata
+	Healthy  bool
+	Change   time.Time
+	Services map[L4]Service
+}
+
+type Interface struct {
+	Index int
+	Name  string
+	Addr  NET
+	MAC   MAC
+}
+type Healthchecks struct {
+	Virtual map[IP4]Virtual `json:",omitempty"`
+	_VID    map[IP4]uint16  `json:",omitempty"`
+	VLAN    map[uint16]string
+}
+
 type Destination struct {
 	Address IP4
 	Port    uint16
 	Up      bool
+
+	Disabled   bool
+	Healthy    bool
+	Time       time.Time
+	Duration   time.Duration
+	Diagnostic string
+}
+
+func (r *Real) Destination() Destination {
+	p := r.Probe()
+	return Destination{
+		Address: r.RIP,
+		Port:    r.Port,
+		Up:      p.Passed && !r.Disabled,
+
+		Disabled:   r.Disabled,
+		Healthy:    p.Passed,
+		Time:       p.Time,
+		Duration:   p.Duration,
+		Diagnostic: p.Message,
+	}
+}
+
+func (h *Healthchecks) Destinations(svc Serv) ([]Destination, error) {
+	vip := svc.Address
+	l4 := L4{Port: svc.Port, Protocol: svc.Protocol == UDP}
+
+	v, ok := h.Virtual[vip]
+
+	if !ok {
+		return nil, errors.New("Unknown service")
+	}
+
+	s, ok := v.Services[l4]
+
+	if !ok {
+		return nil, errors.New("Unknown service")
+	}
+
+	return s.Destinations(), nil
 }
 
 func (s *Service) Destinations() []Destination {
 	var ret []Destination
 	for _, r := range s.reals() {
-		d := Destination{
-			Address: r.RIP,
-			Port:    r.Port,
-			Up:      r.Probe().Passed && !r.Disabled,
-		}
-		ret = append(ret, d)
+		ret = append(ret, r.Destination())
 	}
 	return ret
 }
@@ -178,7 +241,7 @@ func (h *Healthchecks) Services__() map[SVC]Service {
 	return ret
 }
 
-func (h *Healthchecks) Services() []SVC {
+func (h *Healthchecks) Services_() []SVC {
 	var ret []SVC
 
 	for vip, v := range h.Virtual {
@@ -188,6 +251,32 @@ func (h *Healthchecks) Services() []SVC {
 	}
 
 	return ret
+}
+
+type Serv struct {
+	Address   IP4
+	Port      uint16
+	Protocol  uint8
+	Scheduler types.Scheduler
+	Sticky    bool
+}
+
+func (h *Healthchecks) Services() ([]Serv, error) {
+	var ret []Serv
+
+	for vip, v := range h.Virtual {
+		for l4, s := range v.Services {
+			ret = append(ret, Serv{
+				Address:   vip,
+				Port:      l4.Port,
+				Protocol:  l4.Protocol.Number(),
+				Scheduler: s.Scheduler,
+				Sticky:    s.Sticky,
+			})
+		}
+	}
+
+	return ret, nil
 }
 
 func (s *Service) Reals() []Real {
@@ -219,30 +308,10 @@ func (h *Healthchecks) Reals(svc SVC) []Real {
 	return service.Reals()
 }
 
-type Virtual struct {
-	Metadata Metadata
-	Healthy  bool
-	Change   time.Time
-	Services map[L4]Service
-}
-
-type Interface struct {
-	Index int
-	Name  string
-	Addr  NET
-	MAC   MAC
-}
-
 type vr [2]IP4
 
 func (v vr) MarshalText() ([]byte, error) {
 	return []byte(v[0].String() + "/" + v[1].String()), nil
-}
-
-type Healthchecks struct {
-	Virtual map[IP4]Virtual `json:",omitempty"`
-	_VID    map[IP4]uint16  `json:",omitempty"`
-	VLAN    map[uint16]string
 }
 
 func Load(c *config.Config) (*Healthchecks, error) {
@@ -263,6 +332,8 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 	hc.Virtual = map[IP4]Virtual{}
 
 	hc.VLAN = c.VLANs
+
+	dsr := true
 
 	for s, svc := range c.Services {
 
@@ -288,6 +359,12 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 				}
 
 				dest.Checks[i] = c
+			}
+
+			if dsr && port != s.Port {
+				return nil, errors.New(
+					fmt.Sprintf("Destination port does not match service port in DSR service: %s %s:%d->%s:%d",
+						Protocol(s.Protocol), s.IP, s.Port, d.IP, port))
 			}
 
 			backends[IPPort{IP: d.IP, Port: port}] = Real{RIP: d.IP, Checks: dest.Checks, Port: port, Disabled: dest.Disabled}

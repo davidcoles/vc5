@@ -31,7 +31,6 @@ type IP4 = types.IP4
 type L4 = types.L4
 type IPPort = types.IPPort
 
-//type Checks = healthchecks.Checks
 type Check = healthchecks.Check
 type Metadata = healthchecks.Metadata
 type Healthchecks = healthchecks.Healthchecks
@@ -60,7 +59,7 @@ func ud(b bool) string {
 }
 
 type Checker interface {
-	Check(IP4, IP4, IP4, string, Check) (bool, string)
+	Check(vip IP4, rip IP4, check Check) (bool, string)
 }
 
 func (m *Mon) manage(l types.Logger) {
@@ -476,11 +475,6 @@ func (r *_Real) Status() Probe {
 func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real, bool) Probe {
 
 	probe := Probe{Time: time.Now()}
-	nat := c.vip
-
-	if !local {
-		nat = real.NAT
-	}
 
 	// When:
 	// * adding a new vip, all checks should start in down state to prevent traffic being sent to the LB
@@ -497,7 +491,7 @@ func rip(real healthchecks.Real, c context, local bool) func(*healthchecks.Real,
 
 	var mutex sync.Mutex
 
-	ch := checks(&probe, &mutex, nat, real.RIP, c.vip, c.l4, c.checker, real.Checks, c.log, c.notify)
+	ch := checks(&probe, &mutex, real.RIP, c.vip, c.l4, c.checker, real.Checks, c.log, c.notify)
 
 	return func(ip *healthchecks.Real, fin bool) Probe {
 
@@ -545,7 +539,7 @@ func healthy(b [5]bool) bool {
 	return true
 }
 
-func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker Checker, checks []Check, l types.Logger, notify chan bool) chan []Check {
+func checks(probe *Probe, mutex *sync.Mutex, rip, vip IP4, l4 L4, checker Checker, checks []Check, l types.Logger, notify chan bool) chan []Check {
 
 	ch := make(chan []Check, 1000)
 
@@ -562,9 +556,8 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker C
 			case <-t.C:
 
 				now := time.Now()
-				//history = rotate(history, probes(nat, sock, checks))
 
-				ok, msg := probes(vip, rip, nat, checker, checks)
+				ok, msg := probes(vip, rip, checker, checks)
 				history = rotate(history, ok)
 
 				mutex.Lock()
@@ -574,8 +567,7 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker C
 				probe.Message = msg
 
 				if probe.Passed != last {
-					//l.NOTICE("monitor", vip, l4, rip, nat, "went", probe.Passed)
-					l.NOTICE("monitor", fmt.Sprintf("Real server %s for %s:%s (NAT address %s) went %s: %s", rip, vip, l4, nat, ud(ok), msg))
+					l.NOTICE("monitor", fmt.Sprintf("Real server %s for %s:%s went %s: %s", rip, vip, l4, ud(ok), msg))
 					probe.Time = time.Now()
 					if notify != nil {
 						select {
@@ -597,14 +589,14 @@ func checks(probe *Probe, mutex *sync.Mutex, nat, rip, vip IP4, l4 L4, checker C
 	return ch
 }
 
-func probes(vip, rip, nat IP4, checker Checker, checks []Check) (bool, string) {
+func probes(vip, rip IP4, checker Checker, checks []Check) (bool, string) {
 
 	if checker == nil {
 		return false, "Internal error - Checker is nil"
 	}
 
 	for _, c := range checks {
-		if ok, msg := checker.Check(vip, rip, nat, c.Type, c); !ok {
+		if ok, msg := checker.Check(vip, rip, c); !ok {
 			return false, c.Type + " probe failed: " + msg
 		}
 	}

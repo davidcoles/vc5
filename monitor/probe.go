@@ -42,7 +42,9 @@ func (c *Probes) Start(ip string) {
 	c.syn = Syn(ip)
 }
 
-func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthchecks.Check) (bool, string) {
+func (c *Probes) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string) {
+
+	schema := string(check.Type)
 
 	if check.Port == 0 {
 		return false, "Port is zero"
@@ -68,6 +70,14 @@ func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthche
 }
 
 func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
+
+	method := "GET"
+
+	switch check.Method.String() {
+	case "HEAD":
+		method = "HEAD"
+	default:
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -104,7 +114,7 @@ func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
 	}
 
 	url := fmt.Sprintf("%s://%s:%d/%s", scheme, ip, port, path)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest(method, url, nil)
 	if check.Host != "" {
 		req.Host = check.Host
 	}

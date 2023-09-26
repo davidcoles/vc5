@@ -32,7 +32,7 @@ import (
 var nm map[[2]IP4]uint16 = map[[2]IP4]uint16{}
 var mu sync.Mutex
 
-func Lookup(vip, rip IP4) IP4 {
+func LookupNAT(vip, rip IP4) IP4 {
 	ip := IP4{10, 255, 255, 254}
 
 	key := [2]IP4{vip, rip}
@@ -309,10 +309,8 @@ func copyHealthchecks(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4
 
 	new := h.DeepCopy()
 
-	for _, s := range h.Services() {
+	for _, s := range h.Services_() {
 		for _, r := range h.Reals(s) {
-			n, _ := m[[2]IP4{s.VIP, r.RIP}]
-			r.NAT = natAddress(n, ip)
 			r.MAC = macs[r.RIP]
 			new.SetReal_(s, r)
 		}

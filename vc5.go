@@ -89,12 +89,12 @@ type VC5 struct {
 // Submit an array of bool elements, each corresponding to a /20 IPv4
 // prefix. A true value will cause packets with a source address
 // withing the prefix to be dropped.
-func (lb *VC5) BlockList(list [1048576]bool) {
-	lb.balancer.BlockList(list)
+func (v *VC5) BlockList(list [1048576]bool) {
+	v.balancer.BlockList(list)
 }
 
-func (lb *VC5) NoBlockList() {
-	lb.balancer.NoBlockList()
+func (v *VC5) NoBlockList() {
+	v.balancer.NoBlockList()
 }
 
 // Returns an array of packet counters. Each counter is the total
@@ -105,27 +105,27 @@ func (lb *VC5) NoBlockList() {
 // DDoS mitigation purposes. This is an expensive operation (may take
 // over a second to complete) so you should rate-limit how often is it
 // called.
-func (lb *VC5) Prefixes() [1048576]uint64 {
-	return lb.maps.ReadPrefixCounters()
+func (v *VC5) Prefixes() [1048576]uint64 {
+	return v.maps.ReadPrefixCounters()
 }
 
 // Poll the flow queue for state records which can be shared with
 // other nodes in a cluster to preserve connections when failing over
 // between nodes.
-func (lb *VC5) FlowQueue() []byte {
-	return lb.balancer.FlowQueue()
+func (v *VC5) FlowQueue() []byte {
+	return v.balancer.FlowQueue()
 }
 
 // Write state records retrieved from a node's flow queue into the
 // kernel.
-func (lb *VC5) StoreFlow(fs []byte) {
-	lb.balancer.StoreFlow(fs)
+func (v *VC5) StoreFlow(fs []byte) {
+	v.balancer.StoreFlow(fs)
 }
 
 // Update readiness level. This enables various levels of DDoS
 // mitigation.
-func (lb *VC5) DEFCON(d uint8) uint8 {
-	return lb.maps.DEFCON(d)
+func (v *VC5) DEFCON(d uint8) uint8 {
+	return v.maps.DEFCON(d)
 }
 
 // Initialse load-balancing functionality using address as the
@@ -135,7 +135,7 @@ func (lb *VC5) DEFCON(d uint8) uint8 {
 
 // If all of the backend servers are in VLANs specified in the
 // healthchecks configuration then address will not be used.
-func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
+func (v *VC5) start(address string, hc *healthchecks.Healthchecks) error {
 
 	ip := net.ParseIP(address)
 
@@ -149,7 +149,7 @@ func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 		return errors.New("Not an IPv4 address")
 	}
 
-	l := lb.Logger
+	l := v.Logger
 
 	if l == nil {
 		l = &types.NilLogger{}
@@ -162,7 +162,7 @@ func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 		return err
 	}
 
-	lb.netns = ns
+	v.netns = ns
 
 	var cleanup bool = true
 
@@ -172,11 +172,10 @@ func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 		}
 	}()
 
-	bond := lb.EgressInterface
-	peth := lb.Interfaces
-	native := lb.Native
-	args := lb.NetnsCommand
-	//sock := lb.Socket
+	bond := v.EgressInterface
+	peth := v.Interfaces
+	native := v.Native
+	args := v.NetnsCommand
 
 	var bondidx int
 	var bondmac [6]byte
@@ -197,7 +196,7 @@ func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 		copy(bondmac[:], iface.HardwareAddr[:])
 	}
 
-	lb.maps, err = kernel.Open(native, ns.IfA, ns.IfB, peth...)
+	v.maps, err = kernel.Open(native, ns.IfA, ns.IfB, peth...)
 
 	if err != nil {
 		return err
@@ -211,24 +210,24 @@ func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 
 	cleanup = false
 
-	lb.maps.MultiNIC(lb.MultiNIC)
-	lb.maps.Distributed(lb.Distributed)
+	v.maps.MultiNIC(v.MultiNIC)
+	v.maps.Distributed(v.Distributed)
 
-	if lb.ReadinessLevel != 0 {
-		lb.DEFCON(lb.ReadinessLevel)
+	if v.ReadinessLevel != 0 {
+		v.DEFCON(v.ReadinessLevel)
 	}
 
 	if len(args) > 0 {
 		go netns.Spawn(ns.NS, args...)
 	}
 
-	if lb.Native {
+	if v.Native {
 		l.NOTICE("lb", "Waiting for NIC to quiesce")
 		time.Sleep(15 * time.Second)
 	}
 
 	nat := &kernel.NAT{
-		Maps:          lb.maps,
+		Maps:          v.maps,
 		DefaultIP:     IP4{ip[0], ip[1], ip[2], ip[3]},
 		PhysicalMAC:   bondmac,
 		PhysicalIndex: bondidx,
@@ -243,13 +242,13 @@ func (lb *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 	}
 
 	//monitor, report := monitor.Monitor(hc2, &checker{socket: sock}, l)
-	lb.report = hc2
+	v.report = hc2
 
-	lb.balancer = lb.maps.Balancer(*lb.report, l)
+	v.balancer = v.maps.Balancer(*v.report, l)
 
-	lb.update = make(chan *healthchecks.Healthchecks)
+	v.update = make(chan *healthchecks.Healthchecks)
 
-	go lb.background(nat, lb.balancer)
+	go v.background(nat, v.balancer)
 
 	return nil
 }
@@ -308,4 +307,27 @@ func (v *VC5) Configure(h *healthchecks.Healthchecks) {
 
 func (v *VC5) Checker() monitor.Checker {
 	return &checker{socket: v.Socket}
+}
+
+func (v *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
+	return v.start(address, hc)
+}
+
+/********************************************************************************/
+type checker struct {
+	socket string
+	nat    *kernel.NAT
+}
+
+func (c *checker) Socket() string { return c.socket }
+func (c *checker) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string) {
+	return netns.Probe(c.socket, kernel.LookupNAT(vip, rip), check)
+}
+
+// Start a healthcheck server which will listen for requests via the
+// UNIX domain socket. This should be called by the executable spawned
+// from the LoadBalancer.NetnsCommand[] setting, which will be run a
+// different network namespace.
+func NetnsServer(socket string) {
+	netns.Server(socket, kernel.IP.String())
 }

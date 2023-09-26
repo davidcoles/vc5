@@ -88,7 +88,9 @@ func Spawn(netns string, args ...string) {
 	}
 }
 
-func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string) {
+func Probe(path string, ip types.IP4, check Check) (bool, string) {
+
+	scheme := check.Type
 
 	if path == "" {
 		return false, "No socket given"

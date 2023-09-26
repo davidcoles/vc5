@@ -16,14 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-// TODO
-// manage existing connection (SYN/RST/etc)
-// sticky sessions
-// BGP stats/state
-// MAC address uniqueness check
-// clean up tag/multinic
-// add warning for untagged hosts
-
 package main
 
 import (
@@ -58,7 +50,6 @@ var STATIC embed.FS
 type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
-type LoadBalancer = vc5.LoadBalancer
 type Balancer = vc5.Balancer
 
 var level = flag.Uint("l", LOG_ERR, "debug level level")
@@ -178,28 +169,12 @@ func main() {
 		Distributed:     conf.Multicast != "",
 	}
 
-	lb := &vc5.Director{
+	director := &vc5.Director{
 		Balancer: balancer,
 		Logger:   logger,
 	}
 
-	/*
-		lb := &vc5.LoadBalancer{
-			ReadinessLevel:  uint8(*dfcn),
-			Native:          *native,
-			MultiNIC:        *multi,
-			Socket:          socket,
-			NetnsCommand:    []string{os.Args[0], "-s", socket},
-			Interfaces:      peth,
-			EgressInterface: *bond,
-			Logger:          logger,
-			Distributed:     conf.Multicast != "",
-		}
-
-		fmt.Println(director, lb1)
-	*/
-
-	err = lb.Start(addr, hc)
+	err = director.Start(addr, hc)
 
 	if err != nil {
 		log.Fatal(err)
@@ -245,7 +220,7 @@ func main() {
 					} else {
 						hc = h
 						pool.Peer(conf.RHI.Peers)
-						lb.Update(hc)
+						director.Update(hc)
 					}
 				}
 			}
@@ -390,7 +365,7 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		cf := lb.Status()
+		cf := director.Status()
 		j, err := json.MarshalIndent(cf, "", "  ")
 
 		if err != nil {
