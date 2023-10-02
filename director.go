@@ -95,11 +95,14 @@ func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks) error {
 		lb.Logger = &types.NilLogger{}
 	}
 
+	lb.Balancer.Start(ip, hc.DeepCopy())
+
 	monitor, report := monitor.Monitor(hc, lb.Balancer.Checker(), lb.Logger)
 
 	lb.update = make(chan *healthchecks.Healthchecks)
 
-	lb.Balancer.Start(ip, report.DeepCopy())
+	//lb.Balancer.Start(ip, report.DeepCopy())
+	lb.Balancer.Configure(report.DeepCopy())
 
 	go lb.background(monitor, lb.Balancer)
 

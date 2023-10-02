@@ -99,9 +99,6 @@ func getStats(lb Balancer) *Stats {
 			Reals:       reals,
 			Up:          s.Healthy,
 			When:        int64(now.Sub(s.Change) / time.Second),
-			Fallback:    s.Fallback,
-			FallbackOn:  s.FallbackOn,
-			FallbackUp:  s.FallbackProbe.Passed,
 			Name:        s.Metadata.Name,
 			Description: s.Metadata.Description,
 			Servers:     servers,
@@ -363,9 +360,6 @@ type Service struct {
 	Description string          `json:"description"`
 	Up          bool            `json:"up"`
 	When        int64           `json:"when"`
-	Fallback    bool            `json:"fallback"`
-	FallbackOn  bool            `json:"fallback_on"`
-	FallbackUp  bool            `json:"fallback_up"`
 	Octets      uint64          `json:"octets"`
 	OctetsPS    uint64          `json:"octets_ps"`
 	Packets     uint64          `json:"packets"`

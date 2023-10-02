@@ -333,7 +333,7 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 
 	hc.VLAN = c.VLANs
 
-	dsr := true
+	dsr := false
 
 	for s, svc := range c.Services {
 

@@ -171,12 +171,6 @@ function service(vip, l4, s) {
     var up = s.up ? "UP" : "DOWN"
     var udf = s.up ? "up" : "dn"
     
-    if(s.fallback_on)  {
-	up = "FALLBACK"
-	udf = "fb"
-    }
-
-    
     var tr = append(t, "tr", null, udf)
     append(tr, "th", vip+":"+l4)
     append(tr, "th", dhms(s.when) + " " + up)
@@ -210,16 +204,6 @@ function service(vip, l4, s) {
 	append(tr, "td", spc(r.concurrent), "ar")
     }
 
-    if(s.fallback) {
-	var tr = append(t, "tr", null, s.fallback_up ? "up" : "dn")
-	append(tr, "td", "Fallback")
-	append(tr, "td", "localhost")
-	append(tr, "td", s.fallback_up ? "UP" : "DOWN")
-	append(tr, "td", "not")
-	append(tr, "td", "tracked")
-	append(tr, "td", "yet")
-    }
-    
     return d
 }
 
