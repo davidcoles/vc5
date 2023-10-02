@@ -234,7 +234,7 @@ func (b *Balancer) update_backend_service(vip IP4, l4 L4, s Service, state map[l
 
 	key := &bpf_service{vip: vip, port: l4.NP(), protocol: l4.PN()}
 	val := &be_state{
-		fallback:  s.FallbackOn,
+		fallback:  false,
 		sticky:    s.Sticky,
 		bpf_reals: bpf_reals,
 	}

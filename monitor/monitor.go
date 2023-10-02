@@ -379,11 +379,8 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 			//r[k] = v
 		}
-		//ret.Reals = r // write the map to the returned object
-		//ret.SetReals(r) // write the map to the returned object
 
-		// need to treat minimum == 0 differently in the case of fallback
-		ret.Healthy = healthy >= ret.Minimum
+		ret.Healthy = (healthy >= ret.Minimum)
 
 		if ret.Healthy != was {
 			change = time.Now()

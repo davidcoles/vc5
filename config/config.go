@@ -135,12 +135,6 @@ type Service struct {
 	// Experimental/Unimplemented
 	Leastconns bool `json:"leastconns,omitempty"`
 
-	// Experimental/Unimplemented
-	Fallback bool `json:"fallback,omitempty"`
-
-	// Experimental/Unimplemented
-	Local Checks `json:"local,omitempty"`
-
 	Scheduler types.Scheduler `json:"scheduler"`
 
 	DSR bool `json:"dsr,omitempty"`

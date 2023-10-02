@@ -111,10 +111,6 @@ type Service struct {
 	Change           time.Time
 	Scheduler        types.Scheduler
 	Sticky           bool
-	Fallback         bool
-	FallbackOn       bool
-	FallbackProbe    Probe
-	FallbackChecks   Checks
 	Leastconns       bool
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
