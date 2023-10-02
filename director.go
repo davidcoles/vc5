@@ -38,6 +38,7 @@ type Probes = monitor.Probes
 type Healthchecks = healthchecks.Healthchecks
 type Counter = kernel.Counter
 type Checker = monitor.Checker
+type Service = healthchecks.Serv
 
 type Balancer interface {
 	Start(string, *healthchecks.Healthchecks) error
