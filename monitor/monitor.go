@@ -303,7 +303,6 @@ func (s *Serv) Close() {
 func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 	var status Service
-	var fallback *_Real
 
 	reals := map[IPPort]*_Real{}
 
@@ -318,21 +317,6 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 					reals[r.IPPort()].Reconfigure(r)
 				} else {
 					reals[r.IPPort()] = StartReal(r, c, false)
-				}
-			}
-
-			if service.Fallback {
-				//r := healthchecks.Real{Checks: service.FallbackChecks, RIP: c.vip}
-				r := healthchecks.Real{Checks: service.FallbackChecks.Slice(), RIP: c.vip}
-				if fallback == nil {
-					fallback = StartReal(r, c, true)
-				} else {
-					fallback.Reconfigure(r)
-				}
-			} else {
-				if fallback != nil {
-					fallback.Close()
-					fallback = nil
 				}
 			}
 
@@ -351,9 +335,6 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 		}
 
 		if fin {
-			if fallback != nil {
-				fallback.Close()
-			}
 			for k, fn := range reals {
 				fn.Close()
 				delete(reals, k)
@@ -376,7 +357,6 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 
 		ret := status
 		ret.Healthy = false
-		ret.FallbackOn = false
 
 		// copy reals to new map that we can modify
 		//r := map[IP4]healthchecks.Real{}
@@ -402,36 +382,8 @@ func (s *Serv) init(service *Service, c context) func(*Service, bool) Service {
 		//ret.Reals = r // write the map to the returned object
 		//ret.SetReals(r) // write the map to the returned object
 
-		if fallback != nil {
-			ret.FallbackProbe = fallback.Status()
-		}
-
-		// need to treat 0 differently in the case of fallback
-		//if healthy >= ret.Minimum {
-		//	ret.Healthy = true
-		//} else if fallback != nil {
-		//	if ret.FallbackProbe.Passed {
-		//		ret.Healthy = true
-		//		ret.FallbackOn = true
-		//	}
-		//}
-
 		// need to treat minimum == 0 differently in the case of fallback
-		if healthy >= ret.Minimum {
-			ret.Healthy = true
-
-			if healthy == 0 && fallback != nil && ret.FallbackProbe.Passed {
-				ret.FallbackOn = true
-			}
-
-		} else if fallback != nil {
-
-			if ret.FallbackProbe.Passed {
-				ret.Healthy = true
-				ret.FallbackOn = true
-			}
-
-		}
+		ret.Healthy = healthy >= ret.Minimum
 
 		if ret.Healthy != was {
 			change = time.Now()
