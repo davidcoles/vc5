@@ -33,12 +33,7 @@ func DNSUDP(addr string, port uint16) (bool, string) {
 		return false, "Port is 0"
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	if dialer == nil {
-		dialer = &net.Dialer{Timeout: 2 * time.Second}
-	}
+	dialer := getdialer()
 
 	conn, err := dialer.Dial("udp", fmt.Sprintf("%s:%d", addr, port))
 
@@ -89,12 +84,7 @@ func DNSUDP(addr string, port uint16) (bool, string) {
 	return true, ""
 }
 
-func DNSTCP(addr string, port uint16) (bool, string) {
-
-	if port == 0 {
-		return false, "Port is 0"
-	}
-
+func getdialer() {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -102,7 +92,19 @@ func DNSTCP(addr string, port uint16) (bool, string) {
 		dialer = &net.Dialer{Timeout: 2 * time.Second}
 	}
 
+	return dialer
+}
+
+func DNSTCP(addr string, port uint16) (bool, string) {
+
+	if port == 0 {
+		return false, "Port is 0"
+	}
+
+	dialer := getdialer()
+
 	conn, err := dialer.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+
 	if err != nil {
 		return false, err.Error()
 	}

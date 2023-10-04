@@ -131,14 +131,28 @@ func (s *SYN) Check(dst [4]byte, remp uint16) (bool, string) {
 
 func (s *SYN) background(reset bool) {
 
+	var buf [1500]byte
+
 	for {
 		s.con.SetReadDeadline(time.Now().Add(2 * time.Second))
-
-		var buf [1500]byte
 
 		n, peer, err := s.con.ReadFrom(buf[:])
 
 		if err != nil || n < 20 {
+			continue
+		}
+
+		flg := buf[13]
+		//cwr := (flg & 128) != 0
+		//ece := (flg & 64) != 0
+		//urg := (flg & 32) != 0
+		ack := (flg & 16) != 0
+		//psh := (flg & 8) != 0
+		rst := (flg & 4) != 0
+		syn := (flg & 2) != 0
+		fin := (flg & 1) != 0
+
+		if !syn || !ack || fin || rst {
 			continue
 		}
 
@@ -154,16 +168,6 @@ func (s *SYN) background(reset bool) {
 		locp := uint16(buf[2])<<8 | uint16(buf[3])
 		acn := uint32(buf[8])<<24 | uint32(buf[9])<<16 | uint32(buf[10])<<8 | uint32(buf[11])
 
-		flg := buf[13]
-		//cwr := (flg & 128) != 0
-		//ece := (flg & 64) != 0
-		//urg := (flg & 32) != 0
-		ack := (flg & 16) != 0
-		//psh := (flg & 8) != 0
-		rst := (flg & 4) != 0
-		syn := (flg & 2) != 0
-		fin := (flg & 1) != 0
-
 		v, ok := s.syn.LoadAndDelete(synkey{seq: acn, rem: rem, locp: locp, remp: remp})
 
 		if !ok {
@@ -176,20 +180,19 @@ func (s *SYN) background(reset bool) {
 			continue
 		}
 
-		if syn && ack && !fin && !rst {
+		//if syn && ack && !fin && !rst {
 
-			close(val)
+		close(val)
 
-			if reset {
+		if reset {
 
-				go func() {
-					packet := synrst(s.src, rem, locp, remp, acn, true)
-					addr := net.ParseIP(fmt.Sprintf("%d.%d.%d.%d", rem[0], rem[1], rem[2], rem[3]))
+			go func() {
+				packet := synrst(s.src, rem, locp, remp, acn, true)
+				addr := net.ParseIP(fmt.Sprintf("%d.%d.%d.%d", rem[0], rem[1], rem[2], rem[3]))
 
-					s.con.SetWriteDeadline(time.Now().Add(1 * time.Second))
-					s.con.WriteTo(packet, &net.IPAddr{IP: addr})
-				}()
-			}
+				s.con.SetWriteDeadline(time.Now().Add(1 * time.Second))
+				s.con.WriteTo(packet, &net.IPAddr{IP: addr})
+			}()
 		}
 	}
 }
