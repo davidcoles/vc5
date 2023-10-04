@@ -172,7 +172,8 @@ func Server(path string, ip string) {
 
 	os.Remove(path)
 
-	syn := monitor.Syn(ip)
+	//syn := monitor.Syn(ip)
+	syn := monitor.SynServer(ip, true) // true: send RSTs
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 
@@ -231,14 +232,12 @@ func Server(path string, ip string) {
 }
 
 func (p *probe) synprobe(syn *monitor.SynChecks) (bool, string) {
-	addr := p.IP.String()
-	port := p.Check.Port
 
-	if port == 0 {
+	if p.Check.Port == 0 {
 		return false, "Port is 0"
 	}
 
-	return syn.Probe(addr, port), ""
+	return syn.Check(p.IP, p.Check.Port)
 }
 
 func (p *probe) dnsudp() (bool, string) {
@@ -263,7 +262,7 @@ func (p *probe) dnstcp() (bool, string) {
 	return monitor.DNSTCP(addr, port)
 }
 
-//func tcpdial(foo probe) (bool, string) {
+// func tcpdial(foo probe) (bool, string) {
 func (p *probe) tcpdial() (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
@@ -310,7 +309,7 @@ func (p *probe) httpget() (bool, string) {
 	return monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
 }
 
-//func (p *probe) probe(syn *SynChecks) (bool, string) {
+// func (p *probe) probe(syn *SynChecks) (bool, string) {
 func (p *probe) probe(syn *monitor.SynChecks) response {
 	//fmt.Println(p)
 

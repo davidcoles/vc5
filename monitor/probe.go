@@ -62,8 +62,9 @@ func (c *Probes) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string
 	case "dnstcp":
 		return DNSTCP(rip.String(), check.Port)
 	case "syn":
-		ok := c.syn.Probe(rip.String(), check.Port)
-		return ok, ""
+		//ok := c.syn.Probe(rip.String(), check.Port)
+		//return ok, ""
+		return c.syn.Check(rip, check.Port)
 	}
 
 	return false, "not implemented"

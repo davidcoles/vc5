@@ -30,6 +30,9 @@ const WRR = types.WRR
 const WLC = types.WLC
 const MH_PORT = types.MH_PORT
 
+const UDP = healthchecks.UDP
+const TCP = healthchecks.TCP
+
 type IP4 = types.IP4
 type L4 = types.L4
 type Target = kernel.Target
