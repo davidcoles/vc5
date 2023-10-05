@@ -167,6 +167,11 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 					//logger.NOTICE("peers", "NLRI", ip, up, "to", k)
 					v.NLRI(IP4(ip), up)
 				}
+				for ip, up := range nlri {
+					if _, ok := n[ip]; !ok && up {
+						v.NLRI(IP4(ip), false)
+					}
+				}
 			}
 
 			nlri = n

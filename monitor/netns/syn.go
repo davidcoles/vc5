@@ -22,191 +22,228 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-type tuple struct {
-	dest string
+type SynChecks = SYN
+
+type synkey struct {
+	seq  uint32
+	rem  [4]byte
 	locp uint16
 	remp uint16
 }
 
-func (t *tuple) String() string {
-	return fmt.Sprintf("%s:%d:%d", t.dest, t.locp, t.remp)
+type SYN struct {
+	src [4]byte
+	con net.PacketConn
+	syn sync.Map
+	seq atomic.Uint32
 }
 
-type synprobe struct {
-	tuple tuple
-	resp  chan bool
-}
+func (s *SYN) Probe(addr string, port uint16) bool {
 
-type SynChecks struct {
-	probes sync.Map
-	submit chan synprobe
-	atomic uint64
-}
+	ip := net.ParseIP(addr).To4()
 
-func Syn(source string) *SynChecks {
-
-	var syn SynChecks
-
-	c, err := net.ListenPacket("ip4:tcp", source)
-	if err != nil {
-		log.Fatalf("listen err, %s", err)
-	}
-	//defer c.Close()
-
-	syn.submit = make(chan synprobe, 100)
-	go syn.sniffer(c)
-	go syn.prober(c, source)
-
-	return &syn
-}
-
-func (s *SynChecks) ProbeS(target, port string) bool {
-	p, err := strconv.Atoi(port)
-	if err != nil {
+	if ip == nil || len(ip) != 4 {
 		return false
 	}
-	return s.Probe(target, uint16(p))
+
+	ok, _ := s.Check([4]byte{ip[0], ip[1], ip[2], ip[3]}, port)
+
+	return ok
 }
 
-func (s *SynChecks) Probe(target string, port uint16) bool {
+func SynServer(addr string, rst bool) *SYN {
+	return syn(addr, rst)
+}
 
-	x := atomic.AddUint64(&s.atomic, 1)
+func Syn(addr string) *SYN {
+	return syn(addr, true)
+}
 
-	var local uint16 = 65000 + uint16(x%500)
+func syn(addr string, rst bool) *SYN {
 
-	t := tuple{dest: target, locp: local, remp: port}
-	r := make(chan bool)
+	ip := net.ParseIP(addr).To4()
 
-	s.submit <- synprobe{tuple: t, resp: r}
+	if ip == nil || len(ip) != 4 {
+		return nil
+	}
+
+	src := [4]byte{ip[0], ip[1], ip[2], ip[3]}
+
+	con, err := net.ListenPacket("ip4:tcp", addr)
+
+	if err != nil {
+		log.Fatalf("listen err, %s", err)
+		return nil
+	}
+
+	f := &SYN{
+		con: con,
+		src: src,
+	}
+
+	go f.background(rst)
+
+	return f
+}
+
+func (s *SYN) Check(dst [4]byte, remp uint16) (bool, string) {
+
+	socket := s.con
+	src := s.src
+
+	seq := s.seq.Add(1)
+	locp := uint16(seq%4999) + 61000
+
+	k := synkey{seq: seq + 1, rem: dst, locp: locp, remp: remp} // reply will include ack seq+1
+	c := make(chan bool)                                        // closed when reply received
+
+	packet := synrst(src, dst, locp, remp, seq, false)
+
+	addr := net.ParseIP(fmt.Sprintf("%d.%d.%d.%d", dst[0], dst[1], dst[2], dst[3]))
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+
+	socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
+
+	s.syn.Store(k, c)
+
+	_, err := socket.WriteTo(packet, &net.IPAddr{IP: addr})
+
+	if err != nil {
+		return false, err.Error()
+	}
 
 	select {
-	case <-time.After(1 * time.Second):
-	case <-r:
-		return true
+	case <-c:
+		s.syn.Delete(k)
+		return true, ""
+	case <-timer.C:
 	}
 
-	return false
+	return false, "Timeout"
 }
 
-func (s *SynChecks) prober(socket net.PacketConn, source string) {
-	type qe struct {
-		time  time.Time
-		tuple tuple
-	}
+func (s *SYN) background(reset bool) {
 
-	for p := range s.submit {
-		s.probes.Store(p.tuple.String(), p.resp)
-
-		go func(k string) {
-			time.Sleep(1 * time.Second)
-			s.probes.Delete(k)
-		}(p.tuple.String())
-
-		target := p.tuple.dest
-
-		wb := craftTCP(source, target, p.tuple.locp, p.tuple.remp)
-
-		socket.SetWriteDeadline(time.Now().Add(1 * time.Second))
-
-		if _, err := socket.WriteTo(wb, &net.IPAddr{IP: net.ParseIP(target)}); err != nil {
-			log.Fatalf("WriteTo err, %s", err)
-		}
-
-		var n int
-		s.probes.Range(func(key, value interface{}) bool {
-			n += 1
-			return true
-		})
-		if n > 10 {
-			fmt.Println(">>>", n)
-		}
-	}
-}
-
-func (s *SynChecks) sniffer(socket net.PacketConn) {
+	var buf [1500]byte
 
 	for {
-		socket.SetReadDeadline(time.Now().Add(2 * time.Second))
+		s.con.SetReadDeadline(time.Now().Add(2 * time.Second))
 
-		rb := make([]byte, 1500)
-		n, peer, err := socket.ReadFrom(rb)
+		n, peer, err := s.con.ReadFrom(buf[:])
+
 		if err != nil || n < 20 {
-			//log.Fatal(err)
 			continue
 		}
 
-		f := rb[13]
-		//cwr := (f & 128) != 0
-		//ece := (f & 64) != 0
-		//urg := (f & 32) != 0
-		ack := (f & 16) != 0
-		//psh := (f & 8) != 0
-		rst := (f & 4) != 0
-		syn := (f & 2) != 0
-		fin := (f & 1) != 0
+		flg := buf[13]
+		//cwr := (flg & 128) != 0
+		//ece := (flg & 64) != 0
+		//urg := (flg & 32) != 0
+		ack := (flg & 16) != 0
+		//psh := (flg & 8) != 0
+		rst := (flg & 4) != 0
+		syn := (flg & 2) != 0
+		fin := (flg & 1) != 0
 
-		remp := uint16(rb[0])<<8 | uint16(rb[1])
-		locp := uint16(rb[2])<<8 | uint16(rb[3])
+		if !syn || !ack || fin || rst {
+			continue
+		}
 
-		t := tuple{dest: peer.String(), locp: locp, remp: remp}
+		addr := net.ParseIP(peer.String()).To4()
 
-		c, l := s.probes.LoadAndDelete(t.String())
+		if addr == nil || len(addr) != 4 {
+			continue
+		}
 
-		if l && syn && ack && !fin && !rst {
-			close(c.(chan bool))
+		rem := [4]byte{addr[0], addr[1], addr[2], addr[3]}
+
+		remp := uint16(buf[0])<<8 | uint16(buf[1])
+		locp := uint16(buf[2])<<8 | uint16(buf[3])
+		acn := uint32(buf[8])<<24 | uint32(buf[9])<<16 | uint32(buf[10])<<8 | uint32(buf[11])
+
+		v, ok := s.syn.LoadAndDelete(synkey{seq: acn, rem: rem, locp: locp, remp: remp})
+
+		if !ok {
+			continue
+		}
+
+		val, ok := v.(chan bool)
+
+		if !ok {
+			continue
+		}
+
+		//if syn && ack && !fin && !rst {
+
+		close(val)
+
+		if reset {
+
+			go func() {
+				packet := synrst(s.src, rem, locp, remp, acn, true)
+				addr := net.ParseIP(fmt.Sprintf("%d.%d.%d.%d", rem[0], rem[1], rem[2], rem[3]))
+
+				s.con.SetWriteDeadline(time.Now().Add(1 * time.Second))
+				s.con.WriteTo(packet, &net.IPAddr{IP: addr})
+			}()
 		}
 	}
 }
 
-func craftTCP(sourceIP, targetIP string, sourcePort, targetPort uint16) []byte {
+func synrst(src, dst [4]byte, srcPort, dstPort uint16, seq uint32, reset bool) []byte {
 
-	var csum uint32
-	wb := make([]byte, 20)
+	var sum uint32
+	var buf [20]byte
 
-	wb[0] = byte(sourcePort >> 8)
-	wb[1] = byte(sourcePort & 0xff)
-	wb[2] = byte(targetPort >> 8)
-	wb[3] = byte(targetPort & 0xff)
-	wb[12] = 5 << 4 // header length 5 * 32bit-words - top 4 bits
-	wb[13] = 2      // SYN flag
+	buf[0] = byte(srcPort >> 8)
+	buf[1] = byte(srcPort)
+	buf[2] = byte(dstPort >> 8)
+	buf[3] = byte(dstPort)
+	buf[12] = 5 << 4 // header length 5 * 32bit-words - top 4 bits
 
-	wb[4] = 10 // seq. no
-	wb[5] = 10
-	wb[6] = 10
-	wb[7] = 10
+	if reset {
+		buf[13] = 4 // RST flag
+	} else {
+		buf[13] = 2 // SYN flag
+	}
 
-	wb[14] = 64240 >> 8   // window size
-	wb[15] = 64240 & 0xff // window size
+	buf[4] = byte(seq >> 24)
+	buf[5] = byte(seq >> 16)
+	buf[6] = byte(seq >> 8)
+	buf[7] = byte(seq)
 
-	src := net.ParseIP(sourceIP)[12:]
-	dst := net.ParseIP(targetIP)[12:]
-	len := uint16(20)
+	if !reset {
+		win := 64240 // window size
+		buf[14] = byte(win >> 8)
+		buf[15] = byte(win)
+	}
 
 	// pseudo-header
-	csum += uint32(uint16(src[0])<<8 | uint16(src[1]))
-	csum += uint32(uint16(src[2])<<8 | uint16(src[3]))
-	csum += uint32(uint16(dst[0])<<8 | uint16(dst[1]))
-	csum += uint32(uint16(dst[2])<<8 | uint16(dst[3]))
-	csum += uint32(uint16(6))
-	csum += uint32(len)
+	sum += uint32(uint16(src[0])<<8 | uint16(src[1]))
+	sum += uint32(uint16(src[2])<<8 | uint16(src[3]))
+	sum += uint32(uint16(dst[0])<<8 | uint16(dst[1]))
+	sum += uint32(uint16(dst[2])<<8 | uint16(dst[3]))
+	sum += uint32(uint16(6)) // TCP protocol number
+	sum += uint32(len(buf))
 
-	for n := 0; n < 20; n += 2 {
-		csum += uint32(uint16(wb[n])<<8 | uint16(wb[n+1]))
+	for n := 0; n < len(buf); n += 2 {
+		sum += uint32(uint16(buf[n])<<8 | uint16(buf[n+1]))
 	}
 
 	var cs uint16
 
-	cs = uint16(csum>>16) + uint16(csum&0xffff)
+	cs = uint16(sum>>16) + uint16(sum&0xffff)
 	cs = ^cs
 
-	wb[16] = byte(cs >> 8)
-	wb[17] = byte(cs & 0xff)
+	buf[16] = byte(cs >> 8)
+	buf[17] = byte(cs & 0xff)
 
-	return wb
+	return buf[:]
 }
