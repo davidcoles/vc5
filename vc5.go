@@ -18,8 +18,6 @@
 
 package vc5
 
-/*
-
 import (
 	"errors"
 	"net"
@@ -29,13 +27,14 @@ import (
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
+	"github.com/davidcoles/vc5/netns"
 	"github.com/davidcoles/vc5/types"
 )
 
-// A LoadBalancer defines the network parameters for operation of the
+// A VC5 defines the network parameters for operation of the
 // load-balancing logic, such as what interfaces and driver
 // modes to use.
-type LoadBalancer struct {
+type VC5 struct {
 	// DEFCON level at which to start the load-balancer; will default
 	// to normal operation if left at 0.
 	ReadinessLevel uint8
@@ -82,7 +81,7 @@ type LoadBalancer struct {
 	balancer *kernel.Balancer
 	maps     *kernel.Maps
 	netns    *kernel.NetNS
-	report   monitor.Report
+	report   *monitor.Report
 	mutex    sync.Mutex
 	update   chan *healthchecks.Healthchecks
 }
@@ -90,12 +89,12 @@ type LoadBalancer struct {
 // Submit an array of bool elements, each corresponding to a /20 IPv4
 // prefix. A true value will cause packets with a source address
 // withing the prefix to be dropped.
-func (lb *LoadBalancer) BlockList(list [1048576]bool) {
-	lb.balancer.BlockList(list)
+func (v *VC5) BlockList(list [1048576]bool) {
+	v.balancer.BlockList(list)
 }
 
-func (lb *LoadBalancer) NoBlockList() {
-	lb.balancer.NoBlockList()
+func (v *VC5) NoBlockList() {
+	v.balancer.NoBlockList()
 }
 
 // Returns an array of packet counters. Each counter is the total
@@ -106,58 +105,27 @@ func (lb *LoadBalancer) NoBlockList() {
 // DDoS mitigation purposes. This is an expensive operation (may take
 // over a second to complete) so you should rate-limit how often is it
 // called.
-func (lb *LoadBalancer) Prefixes() [1048576]uint64 {
-	return lb.maps.ReadPrefixCounters()
+func (v *VC5) Prefixes() [1048576]uint64 {
+	return v.maps.ReadPrefixCounters()
 }
 
 // Poll the flow queue for state records which can be shared with
 // other nodes in a cluster to preserve connections when failing over
 // between nodes.
-func (lb *LoadBalancer) FlowQueue() []byte {
-	return lb.balancer.FlowQueue()
+func (v *VC5) FlowQueue() []byte {
+	return v.balancer.FlowQueue()
 }
 
 // Write state records retrieved from a node's flow queue into the
 // kernel.
-func (lb *LoadBalancer) StoreFlow(fs []byte) {
-	lb.balancer.StoreFlow(fs)
-}
-
-// Returns a map of active service statistics. A counter is returned
-// for each four-tuple of virtual IP, backend IP, layer
-// four protocol and port number (Target).
-func (lb *LoadBalancer) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
-	return lb.balancer.Global(), lb.balancer.Stats()
-}
-
-// Status returns a Healthchecks object which is a copy of the current
-// load-balancer configuration with backend server MAC addresses and
-// healthcheck probe results, service and virtual IP status filled in.
-func (lb *LoadBalancer) Status() healthchecks.Healthchecks {
-	lb.mutex.Lock()
-	r := lb.report
-	lb.mutex.Unlock()
-	return r
+func (v *VC5) StoreFlow(fs []byte) {
+	v.balancer.StoreFlow(fs)
 }
 
 // Update readiness level. This enables various levels of DDoS
 // mitigation.
-func (lb *LoadBalancer) DEFCON(d uint8) uint8 {
-	return lb.maps.DEFCON(d)
-}
-
-// Cease all load-balancing functionality. Once called the
-// LoadBalancer object must not be used.
-func (lb *LoadBalancer) Close() {
-	close(lb.update)
-	lb.netns.Close()
-}
-
-// Replace the LoadBalancer configuration with hc. New VIPs, services
-// and backend server will be added in a non-disruptive manner,
-// existing elements will be unchanged and obsolete ones removed.
-func (lb *LoadBalancer) Update(hc *healthchecks.Healthchecks) {
-	lb.update <- hc
+func (v *VC5) DEFCON(d uint8) uint8 {
+	return v.maps.DEFCON(d)
 }
 
 // Initialse load-balancing functionality using address as the
@@ -167,7 +135,7 @@ func (lb *LoadBalancer) Update(hc *healthchecks.Healthchecks) {
 
 // If all of the backend servers are in VLANs specified in the
 // healthchecks configuration then address will not be used.
-func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) error {
+func (v *VC5) start(address string, hc *healthchecks.Healthchecks) error {
 
 	ip := net.ParseIP(address)
 
@@ -181,7 +149,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		return errors.New("Not an IPv4 address")
 	}
 
-	l := lb.Logger
+	l := v.Logger
 
 	if l == nil {
 		l = &types.NilLogger{}
@@ -194,7 +162,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		return err
 	}
 
-	lb.netns = ns
+	v.netns = ns
 
 	var cleanup bool = true
 
@@ -204,11 +172,10 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		}
 	}()
 
-	bond := lb.EgressInterface
-	peth := lb.Interfaces
-	native := lb.Native
-	args := lb.NetnsCommand
-	sock := lb.Socket
+	bond := v.EgressInterface
+	peth := v.Interfaces
+	native := v.Native
+	args := v.NetnsCommand
 
 	var bondidx int
 	var bondmac [6]byte
@@ -229,7 +196,7 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		copy(bondmac[:], iface.HardwareAddr[:])
 	}
 
-	lb.maps, err = kernel.Open(native, ns.IfA, ns.IfB, peth...)
+	v.maps, err = kernel.Open(native, ns.IfA, ns.IfB, peth...)
 
 	if err != nil {
 		return err
@@ -243,24 +210,24 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 
 	cleanup = false
 
-	lb.maps.MultiNIC(lb.MultiNIC)
-	lb.maps.Distributed(lb.Distributed)
+	v.maps.MultiNIC(v.MultiNIC)
+	v.maps.Distributed(v.Distributed)
 
-	if lb.ReadinessLevel != 0 {
-		lb.DEFCON(lb.ReadinessLevel)
+	if v.ReadinessLevel != 0 {
+		v.DEFCON(v.ReadinessLevel)
 	}
 
 	if len(args) > 0 {
 		go netns.Spawn(ns.NS, args...)
 	}
 
-	if lb.Native {
+	if v.Native {
 		l.NOTICE("lb", "Waiting for NIC to quiesce")
 		time.Sleep(15 * time.Second)
 	}
 
 	nat := &kernel.NAT{
-		Maps:          lb.maps,
+		Maps:          v.maps,
 		DefaultIP:     IP4{ip[0], ip[1], ip[2], ip[3]},
 		PhysicalMAC:   bondmac,
 		PhysicalIndex: bondidx,
@@ -274,44 +241,93 @@ func (lb *LoadBalancer) Start(address string, hc *healthchecks.Healthchecks) err
 		return err
 	}
 
-	monitor, report := monitor.Monitor(hc2, &checker{socket: sock}, l)
-	lb.report = report
+	//monitor, report := monitor.Monitor(hc2, &checker{socket: sock}, l)
+	v.report = hc2
 
-	lb.balancer = lb.maps.Balancer(lb.report, l)
+	v.balancer = v.maps.Balancer(*v.report, l)
 
-	lb.update = make(chan *healthchecks.Healthchecks)
+	v.update = make(chan *healthchecks.Healthchecks)
 
-	go lb.background(nat, monitor, lb.balancer)
+	go v.background(nat, v.balancer)
 
 	return nil
 }
 
-func (lb *LoadBalancer) background(nat *kernel.NAT, monitor *monitor.Mon, balancer *kernel.Balancer) {
+func (lb *VC5) background(nat *kernel.NAT, balancer *kernel.Balancer) {
 
 	go func() {
 		defer balancer.Close()
-		for h := range monitor.C {
-			lb.Logger.INFO("LoadBalancer", "Monitor update")
-			lb.mutex.Lock()
-			lb.report = *(h.DeepCopy())
-			lb.mutex.Unlock()
-			balancer.Configure(h)
-		}
-	}()
-
-	go func() {
-		defer monitor.Close()
 		for h := range nat.C {
-			lb.Logger.INFO("LoadBalancer", "NAT update")
-			monitor.Update(h)
+			lb.Logger.INFO("VC5", "NAT update")
+			lb.mutex.Lock()
+			lb.report = h.DeepCopy()
+			lb.mutex.Unlock()
+			balancer.Configure(*h)
 		}
 	}()
 
 	defer nat.Close()
 	for h := range lb.update {
-		lb.Logger.INFO("LoadBalancer", "Config update")
+		lb.Logger.INFO("VC5", "Config update")
 		nat.Configure(h)
 	}
 }
 
-*/
+/********************************************************************************/
+
+// Status returns a Healthchecks object which is a copy of the current
+// load-balancer configuration with backend server MAC addresses and
+// healthcheck probe results, service and virtual IP status filled in.
+func (v *VC5) Status() healthchecks.Healthchecks {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	r := v.report.DeepCopy()
+	return *r
+}
+
+// Returns a map of active service statistics. A counter is returned
+// for each four-tuple of virtual IP, backend IP, layer
+// four protocol and port number (Target).
+func (v *VC5) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	return v.balancer.Global(), v.balancer.Stats()
+}
+
+// Cease all load-balancing functionality. Once called the
+// VC5 object must not be used.
+func (v *VC5) Close() {
+	close(v.update)
+	v.netns.Close()
+}
+
+func (v *VC5) Configure(h *healthchecks.Healthchecks) {
+	v.update <- h
+}
+
+func (v *VC5) Checker() monitor.Checker {
+	return &checker{socket: v.Socket}
+}
+
+func (v *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
+	return v.start(address, hc)
+}
+
+/********************************************************************************/
+type checker struct {
+	socket string
+	nat    *kernel.NAT
+}
+
+func (c *checker) Socket() string { return c.socket }
+func (c *checker) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string) {
+	return netns.Probe(c.socket, kernel.LookupNAT(vip, rip), check)
+}
+
+// Start a healthcheck server which will listen for requests via the
+// UNIX domain socket. This should be called by the executable spawned
+// from the LoadBalancer.NetnsCommand[] setting, which will be run a
+// different network namespace.
+func NetnsServer(socket string) {
+	netns.Server(socket, kernel.IP.String())
+}

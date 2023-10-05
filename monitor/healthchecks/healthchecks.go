@@ -20,7 +20,8 @@ package healthchecks
 
 import (
 	"encoding/json"
-	//"fmt"
+	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -28,12 +29,32 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
+const UDP = 17
+const TCP = 6
+
 type IP4 = types.IP4
 type MAC = types.MAC
 type NET = types.NET
 type L4 = types.L4
-type Protocol = types.Protocol
+
 type IPPort = types.IPPort
+type Protocol uint8
+
+func (p Protocol) Old() types.Protocol {
+	if p == 17 {
+		return types.UDP
+	}
+
+	return types.TCP
+}
+
+func (p Protocol) String() string {
+	if p == 17 {
+		return "UDP"
+	}
+
+	return "TCP"
+}
 
 type Checks = config.Checks
 type Check = config.Check
@@ -52,12 +73,12 @@ type Real struct {
 	RIP  IP4
 	Port uint16
 
-	NAT      IP4
-	MAC      MAC
-	VID      uint16
-	Checks   Checks
-	XProbe   Probe
 	Disabled bool
+	Checks   []Check
+
+	MAC    MAC
+	VID    uint16
+	XProbe Probe
 }
 
 func (r *Real) IPPort() IPPort {
@@ -90,31 +111,81 @@ type Service struct {
 	Change           time.Time
 	Scheduler        types.Scheduler
 	Sticky           bool
-	Fallback         bool
-	FallbackOn       bool
-	FallbackProbe    Probe
-	FallbackChecks   Checks
 	Leastconns       bool
 	LeastconnsIP     IP4
 	LeastconnsWeight uint8
 	Backend          map[IPPort]Real `json:",omitempty"`
 }
 
+type Virtual struct {
+	Metadata Metadata
+	Healthy  bool
+	Change   time.Time
+	Services map[L4]Service
+}
+
+type Interface struct {
+	Index int
+	Name  string
+	Addr  NET
+	MAC   MAC
+}
+type Healthchecks struct {
+	Virtual map[IP4]Virtual `json:",omitempty"`
+	_VID    map[IP4]uint16  `json:",omitempty"`
+	VLAN    map[uint16]string
+}
+
 type Destination struct {
 	Address IP4
 	Port    uint16
 	Up      bool
+
+	Disabled   bool
+	Healthy    bool
+	Time       time.Time
+	Duration   time.Duration
+	Diagnostic string
+}
+
+func (r *Real) Destination() Destination {
+	p := r.Probe()
+	return Destination{
+		Address: r.RIP,
+		Port:    r.Port,
+		Up:      p.Passed && !r.Disabled,
+
+		Disabled:   r.Disabled,
+		Healthy:    p.Passed,
+		Time:       p.Time,
+		Duration:   p.Duration,
+		Diagnostic: p.Message,
+	}
+}
+
+func (h *Healthchecks) Destinations(svc Serv) ([]Destination, error) {
+	vip := svc.Address
+	l4 := L4{Port: svc.Port, Protocol: svc.Protocol == UDP}
+
+	v, ok := h.Virtual[vip]
+
+	if !ok {
+		return nil, errors.New("Unknown service")
+	}
+
+	s, ok := v.Services[l4]
+
+	if !ok {
+		return nil, errors.New("Unknown service")
+	}
+
+	return s.Destinations(), nil
 }
 
 func (s *Service) Destinations() []Destination {
 	var ret []Destination
 	for _, r := range s.reals() {
-		d := Destination{
-			Address: r.RIP,
-			Port:    r.Port,
-			Up:      r.Probe().Passed && !r.Disabled,
-		}
-		ret = append(ret, d)
+		ret = append(ret, r.Destination())
 	}
 	return ret
 }
@@ -126,7 +197,7 @@ type SVC struct {
 }
 
 func (s *SVC) L4() L4 {
-	return L4{Port: s.Port, Protocol: s.Protocol}
+	return L4{Port: s.Port, Protocol: s.Protocol.Old()}
 }
 
 type Up struct {
@@ -144,12 +215,12 @@ func (h *Healthchecks) Health() map[IP4]Up {
 	return ret
 }
 
-func (h *Healthchecks) Services() map[SVC]Service {
+func (h *Healthchecks) Services__() map[SVC]Service {
 	ret := map[SVC]Service{}
 
 	for vip, v := range h.Virtual {
 		for l4, s := range v.Services {
-			f := SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol}
+			f := SVC{VIP: vip, Port: l4.Port, Protocol: Protocol(l4.Protocol.Number())}
 
 			s.VIP = vip
 			s.Port = l4.Port
@@ -171,15 +242,37 @@ func (h *Healthchecks) Services_() []SVC {
 
 	for vip, v := range h.Virtual {
 		for l4, _ := range v.Services {
-			ret = append(ret, SVC{VIP: vip, Port: l4.Port, Protocol: l4.Protocol})
+			ret = append(ret, SVC{VIP: vip, Port: l4.Port, Protocol: Protocol(l4.Protocol.Number())})
 		}
 	}
 
 	return ret
 }
 
-func (s *Service) xReals___() map[IPPort]Real {
-	return s.reals()
+type Serv struct {
+	Address   IP4
+	Port      uint16
+	Protocol  uint8
+	Scheduler types.Scheduler
+	Sticky    bool
+}
+
+func (h *Healthchecks) Services() ([]Serv, error) {
+	var ret []Serv
+
+	for vip, v := range h.Virtual {
+		for l4, s := range v.Services {
+			ret = append(ret, Serv{
+				Address:   vip,
+				Port:      l4.Port,
+				Protocol:  l4.Protocol.Number(),
+				Scheduler: s.Scheduler,
+				Sticky:    s.Sticky,
+			})
+		}
+	}
+
+	return ret, nil
 }
 
 func (s *Service) Reals() []Real {
@@ -200,7 +293,7 @@ func (h *Healthchecks) Reals(svc SVC) []Real {
 		return ret
 	}
 
-	l4 := L4{Port: svc.Port, Protocol: svc.Protocol}
+	l4 := L4{Port: svc.Port, Protocol: svc.Protocol.Old()}
 
 	service, ok := v.Services[l4]
 
@@ -211,30 +304,10 @@ func (h *Healthchecks) Reals(svc SVC) []Real {
 	return service.Reals()
 }
 
-type Virtual struct {
-	Metadata Metadata
-	Healthy  bool
-	Change   time.Time
-	Services map[L4]Service
-}
-
-type Interface struct {
-	Index int
-	Name  string
-	Addr  NET
-	MAC   MAC
-}
-
 type vr [2]IP4
 
 func (v vr) MarshalText() ([]byte, error) {
 	return []byte(v[0].String() + "/" + v[1].String()), nil
-}
-
-type Healthchecks struct {
-	Virtual map[IP4]Virtual `json:",omitempty"`
-	_VID    map[IP4]uint16  `json:",omitempty"`
-	VLAN    map[uint16]string
 }
 
 func Load(c *config.Config) (*Healthchecks, error) {
@@ -256,56 +329,55 @@ func _ConfHealthchecks(c *config.Config, old *Healthchecks) (*Healthchecks, erro
 
 	hc.VLAN = c.VLANs
 
-	for _vip, x := range c.VIPs {
-		var vip IP4
-		err := vip.UnmarshalText([]byte(_vip))
-		if err != nil {
-			return nil, err
+	dsr := false
+
+	for s, svc := range c.Services {
+
+		_, ok := hc.Virtual[s.IP]
+
+		if !ok {
+			hc.Virtual[s.IP] = Virtual{Services: map[L4]Service{}}
 		}
 
-		v := Virtual{Services: map[L4]Service{}}
+		backends := map[IPPort]Real{}
 
-		for _l4, y := range x {
-			var l4 L4
-			err := l4.UnmarshalText([]byte(_l4))
-			if err != nil {
-				return nil, err
+		for d, dest := range svc.Reals {
+
+			port := d.Port
+
+			if port == 0 {
+				port = s.Port
 			}
 
-			reals := map[IP4]Real{}
-			backends := map[IPPort]Real{}
-
-			for r, checks := range y.RIPs {
-				rip := r.IP
-				port := r.Port
-
-				if port == 0 {
-					port = l4.Port
+			for i, c := range dest.Checks {
+				if c.Port == 0 {
+					c.Port = port
 				}
 
-				checks.DefaultPort(port)
-
-				real := Real{RIP: rip, Checks: checks, Port: port, Disabled: r.Disabled}
-
-				reals[rip] = real
-				backends[IPPort{IP: rip, Port: port}] = real
+				dest.Checks[i] = c
 			}
 
-			v.Services[l4] = Service{
-				VIP:            vip,
-				Port:           l4.Port,
-				UDP:            l4.Protocol == types.UDP,
-				Metadata:       Metadata{Name: y.Name, Description: y.Description},
-				FallbackChecks: y.Local,
-				Fallback:       y.Fallback,
-				Minimum:        y.Need,
-				Sticky:         y.Sticky,
-				Backend:        backends,
-				Scheduler:      y.Scheduler,
+			if dsr && port != s.Port {
+				return nil, errors.New(
+					fmt.Sprintf("Destination port does not match service port in DSR service: %s %s:%d->%s:%d",
+						Protocol(s.Protocol), s.IP, s.Port, d.IP, port))
 			}
+
+			backends[IPPort{IP: d.IP, Port: port}] = Real{RIP: d.IP, Checks: dest.Checks, Port: port, Disabled: dest.Disabled}
 		}
 
-		hc.Virtual[vip] = v
+		l4 := L4{Port: s.Port, Protocol: s.Protocol == 17}
+
+		hc.Virtual[s.IP].Services[l4] = Service{
+			VIP:       s.IP,
+			Port:      l4.Port,
+			UDP:       l4.Protocol == types.UDP,
+			Metadata:  Metadata{Name: svc.Name, Description: svc.Description},
+			Minimum:   svc.Need,
+			Scheduler: svc.Scheduler,
+			Sticky:    svc.Sticky,
+			Backend:   backends,
+		}
 	}
 
 	hc.buildvid()
@@ -329,10 +401,6 @@ func (h *Healthchecks) buildvid() {
 	// write vlan id to each rip entry in services
 	for _, v := range h.Virtual {
 		for _, s := range v.Services {
-			//for rip, real := range s.Reals {
-			//	real.VID = h._VID[rip]
-			//	s.Reals[rip] = real
-			//}
 			for _, r := range s.reals() {
 				r.VID = h._VID[r.RIP]
 				s.UpdateReal(r)
@@ -404,7 +472,6 @@ func (h *Healthchecks) Tuples() map[[2]IP4]bool {
 	n := map[[2]IP4]bool{}
 	for vip, v := range h.Virtual {
 		for _, s := range v.Services {
-			//for rip, _ := range s.XReals {
 			for k, _ := range s.reals() {
 				n[[2]IP4{vip, k.IP}] = true
 			}
@@ -414,8 +481,7 @@ func (h *Healthchecks) Tuples() map[[2]IP4]bool {
 }
 
 func (h *Healthchecks) SetReal_(s SVC, r Real) {
-	//rip := r.RIP
-	l4 := L4{Port: s.Port, Protocol: s.Protocol}
+	l4 := L4{Port: s.Port, Protocol: s.Protocol.Old()}
 	if _, ok := h.Virtual[s.VIP]; ok {
 		if s, ok := h.Virtual[s.VIP].Services[l4]; ok {
 			s.UpdateReal(r)

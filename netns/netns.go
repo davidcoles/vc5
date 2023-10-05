@@ -22,7 +22,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,8 +31,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
+	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
 	"github.com/davidcoles/vc5/types"
 )
@@ -41,6 +42,7 @@ import (
 type Check = healthchecks.Check
 
 var client *http.Client
+var mu sync.Mutex
 
 type probe struct {
 	IP     types.IP4
@@ -86,11 +88,18 @@ func Spawn(netns string, args ...string) {
 	}
 }
 
-func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string) {
+func Probe(path string, ip types.IP4, check Check) (bool, string) {
+
+	scheme := check.Type
 
 	if path == "" {
 		return false, "No socket given"
 	}
+
+	//fmt.Println(path, ip, scheme)
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if client == nil {
 		client = &http.Client{
@@ -102,7 +111,7 @@ func Probe(path string, ip types.IP4, scheme string, check Check) (bool, string)
 		}
 	}
 
-	defer client.CloseIdleConnections()
+	//defer client.CloseIdleConnections()
 
 	if check.Port == 0 {
 		panic("oops")
@@ -163,7 +172,8 @@ func Server(path string, ip string) {
 
 	os.Remove(path)
 
-	syn := Syn(ip)
+	//syn := monitor.Syn(ip)
+	syn := monitor.SynServer(ip, true) // true: send RSTs
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 
@@ -221,66 +231,16 @@ func Server(path string, ip string) {
 	log.Fatal(server.Serve(s))
 }
 
-func (p *probe) httpget() (bool, string) {
-	check := p.Check
+func (p *probe) synprobe(syn *monitor.SynChecks) (bool, string) {
 
-	if client == nil {
-
-		transport := &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout: 2 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 1 * time.Second,
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		}
-
-		client = &http.Client{
-			Timeout:   time.Second * 3,
-			Transport: transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	}
-
-	defer client.CloseIdleConnections()
-
-	path := check.Path
-	if len(path) > 0 && path[0] == '/' {
-		path = path[1:]
-	}
-
-	port := check.Port
-	if port == 0 {
+	if p.Check.Port == 0 {
 		return false, "Port is 0"
 	}
 
-	url := fmt.Sprintf("%s://%s:%d/%s", p.Scheme, p.IP, port, path)
-	req, err := http.NewRequest("GET", url, nil)
-	if check.Host != "" {
-		req.Host = check.Host
-	}
-
-	resp, err := client.Do(req)
-
-	if err != nil {
-		return false, err.Error()
-	}
-
-	defer resp.Body.Close()
-
-	ioutil.ReadAll(resp.Body)
-
-	exp := int(check.Expect)
-
-	if exp == 0 {
-		exp = 200
-	}
-
-	return resp.StatusCode == exp, resp.Status
+	return syn.Check(p.IP, p.Check.Port)
 }
 
-func (p *probe) synprobe(syn *SynChecks) (bool, string) {
+func (p *probe) dnsudp() (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
 
@@ -288,10 +248,10 @@ func (p *probe) synprobe(syn *SynChecks) (bool, string) {
 		return false, "Port is 0"
 	}
 
-	return syn.Probe(addr, port), ""
+	return monitor.DNSUDP(addr, port)
 }
 
-func (p *probe) dnsprobe() (bool, string) {
+func (p *probe) dnstcp() (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
 
@@ -299,10 +259,10 @@ func (p *probe) dnsprobe() (bool, string) {
 		return false, "Port is 0"
 	}
 
-	return dnsquery(addr, port), ""
+	return monitor.DNSTCP(addr, port)
 }
 
-//func tcpdial(foo probe) (bool, string) {
+// func tcpdial(foo probe) (bool, string) {
 func (p *probe) tcpdial() (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
@@ -345,8 +305,12 @@ func (p *probe) tcpdial() (bool, string) {
 	return false, fmt.Sprint(err)
 }
 
-//func (p *probe) probe(syn *SynChecks) (bool, string) {
-func (p *probe) probe(syn *SynChecks) response {
+func (p *probe) httpget() (bool, string) {
+	return monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
+}
+
+// func (p *probe) probe(syn *SynChecks) (bool, string) {
+func (p *probe) probe(syn *monitor.SynChecks) response {
 	//fmt.Println(p)
 
 	var ok bool
@@ -362,7 +326,9 @@ func (p *probe) probe(syn *SynChecks) response {
 	case "tcp":
 		ok, st = p.tcpdial()
 	case "dns":
-		ok, st = p.dnsprobe()
+		ok, st = p.dnsudp()
+	case "dnstcp":
+		ok, st = p.dnstcp()
 	default:
 		st = "Unknown probe type"
 	}

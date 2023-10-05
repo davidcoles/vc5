@@ -16,14 +16,6 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-// TODO
-// manage existing connection (SYN/RST/etc)
-// sticky sessions
-// BGP stats/state
-// MAC address uniqueness check
-// clean up tag/multinic
-// add warning for untagged hosts
-
 package main
 
 import (
@@ -58,7 +50,7 @@ var STATIC embed.FS
 type IP4 = vc5.IP4
 type L4 = vc5.L4
 type Target = vc5.Target
-type LoadBalancer = vc5.LoadBalancer
+type Balancer = vc5.Balancer
 
 var level = flag.Uint("l", LOG_ERR, "debug level level")
 var kill = flag.Uint("k", 0, "killswitch engage - automatic shutoff after k minutes")
@@ -165,7 +157,7 @@ func main() {
 		log.Fatal("BGP peer initialisation failed")
 	}
 
-	lb := &vc5.LoadBalancer{
+	balancer := &vc5.VC5{
 		ReadinessLevel:  uint8(*dfcn),
 		Native:          *native,
 		MultiNIC:        *multi,
@@ -177,7 +169,12 @@ func main() {
 		Distributed:     conf.Multicast != "",
 	}
 
-	err = lb.Start(addr, hc)
+	director := &vc5.Director{
+		Balancer: balancer,
+		Logger:   logger,
+	}
+
+	err = director.Start(addr, hc)
 
 	if err != nil {
 		log.Fatal(err)
@@ -194,7 +191,7 @@ func main() {
 			for {
 				time.Sleep(time.Duration(*kill) * time.Minute)
 				logger.ALERT("LoadBalancer", "DISABLING")
-				lb.DEFCON(0)
+				balancer.DEFCON(0)
 			}
 		}()
 	}
@@ -223,7 +220,7 @@ func main() {
 					} else {
 						hc = h
 						pool.Peer(conf.RHI.Peers)
-						lb.Update(hc)
+						director.Update(hc)
 					}
 				}
 			}
@@ -237,7 +234,7 @@ func main() {
 		var t time.Time
 
 		for {
-			s := getStats(lb)
+			s := getStats(balancer)
 			s.Sub(stats, time.Now().Sub(t))
 			t = time.Now()
 			stats = s
@@ -249,8 +246,8 @@ func main() {
 	}()
 
 	if conf.Multicast != "" {
-		go multicast_send(lb, conf.Multicast)
-		go multicast_recv(lb, conf.Multicast)
+		go multicast_send(balancer, conf.Multicast)
+		go multicast_recv(balancer, conf.Multicast)
 	}
 
 	var timestamp time.Time
@@ -278,7 +275,7 @@ func main() {
 			}
 		}
 
-		if defcon(w, r, lb) {
+		if defcon(w, r, balancer) {
 			return
 		}
 
@@ -287,7 +284,7 @@ func main() {
 	})
 
 	http.HandleFunc("/clear", func(w http.ResponseWriter, r *http.Request) {
-		lb.NoBlockList()
+		balancer.NoBlockList()
 	})
 
 	http.HandleFunc("/block", func(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +307,7 @@ func main() {
 			return
 		}
 
-		lb.BlockList(list)
+		balancer.BlockList(list)
 	})
 
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
@@ -320,7 +317,7 @@ func main() {
 		now := time.Now()
 
 		if now.Sub(timestamp) > (time.Second * 50) {
-			p := lb.Prefixes()
+			p := balancer.Prefixes()
 			j, err := json.Marshal(p)
 
 			if err != nil {
@@ -368,7 +365,7 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		cf := lb.Status()
+		cf := director.Status()
 		j, err := json.MarshalIndent(cf, "", "  ")
 
 		if err != nil {
@@ -428,7 +425,7 @@ func main() {
 	log.Fatal(server.Serve(s))
 }
 
-func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer) (ret bool) {
+func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.VC5) (ret bool) {
 
 	var d uint8
 
@@ -475,7 +472,7 @@ func defcon(w http.ResponseWriter, r *http.Request, lb *vc5.LoadBalancer) (ret b
 
 const maxDatagramSize = 1500
 
-func multicast_send(lb *vc5.LoadBalancer, address string) {
+func multicast_send(lb *vc5.VC5, address string) {
 
 	addr, err := net.ResolveUDPAddr("udp", address)
 
@@ -519,7 +516,7 @@ func multicast_send(lb *vc5.LoadBalancer, address string) {
 	}
 }
 
-func multicast_recv(lb *vc5.LoadBalancer, address string) {
+func multicast_recv(lb *vc5.VC5, address string) {
 	udp, err := net.ResolveUDPAddr("udp", address)
 
 	if err != nil {

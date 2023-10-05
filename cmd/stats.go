@@ -26,7 +26,7 @@ import (
 	"time"
 )
 
-func getStats(lb *LoadBalancer) *Stats {
+func getStats(lb Balancer) *Stats {
 
 	now := time.Now()
 	status := lb.Status()
@@ -48,7 +48,7 @@ func getStats(lb *LoadBalancer) *Stats {
 		stats.When[k] = int64(now.Sub(v.Time) / time.Second)
 	}
 
-	for svc, s := range status.Services() {
+	for svc, s := range status.Services__() {
 		vip := svc.VIP
 		l4 := svc.L4()
 
@@ -83,6 +83,7 @@ func getStats(lb *LoadBalancer) *Stats {
 			//reals[rip.String()] = Real{
 			reals[ipport.String()] = Real{
 				Up:         probe.Passed,
+				Disabled:   real.Disabled,
 				When:       int64(time.Now().Sub(probe.Time) / time.Second),
 				Message:    probe.Message,
 				Duration:   int64(probe.Duration / time.Millisecond),
@@ -98,9 +99,6 @@ func getStats(lb *LoadBalancer) *Stats {
 			Reals:       reals,
 			Up:          s.Healthy,
 			When:        int64(now.Sub(s.Change) / time.Second),
-			Fallback:    s.Fallback,
-			FallbackOn:  s.FallbackOn,
-			FallbackUp:  s.FallbackProbe.Passed,
 			Name:        s.Metadata.Name,
 			Description: s.Metadata.Description,
 			Servers:     servers,
@@ -340,6 +338,7 @@ const (
 /**********************************************************************/
 
 type Stats struct {
+	VC5        bool                   `json:"vc5"`
 	Octets     uint64                 `json:"octets"`
 	OctetsPS   uint64                 `json:"octets_ps"`
 	Packets    uint64                 `json:"packets"`
@@ -361,9 +360,6 @@ type Service struct {
 	Description string          `json:"description"`
 	Up          bool            `json:"up"`
 	When        int64           `json:"when"`
-	Fallback    bool            `json:"fallback"`
-	FallbackOn  bool            `json:"fallback_on"`
-	FallbackUp  bool            `json:"fallback_up"`
 	Octets      uint64          `json:"octets"`
 	OctetsPS    uint64          `json:"octets_ps"`
 	Packets     uint64          `json:"packets"`
@@ -379,6 +375,7 @@ type Service struct {
 
 type Real struct {
 	Up         bool   `json:"up"`
+	Disabled   bool   `json:"disabled"`
 	When       int64  `json:"when"`
 	Message    string `json:"message"`
 	Duration   int64  `json:"duration_ms"`

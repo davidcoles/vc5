@@ -22,11 +22,36 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/kernel/xdp"
 	"github.com/davidcoles/vc5/types"
 )
+
+var nm map[[2]IP4]uint16 = map[[2]IP4]uint16{}
+var mu sync.Mutex
+
+func LookupNAT(vip, rip IP4) IP4 {
+	ip := IP4{10, 255, 255, 254}
+
+	key := [2]IP4{vip, rip}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var nat IP4
+
+	n, ok := nm[key]
+
+	if !ok {
+		return nat
+	}
+
+	nat = natAddress(n, ip)
+
+	return nat
+}
 
 type NAT struct {
 	C      chan *Healthchecks
@@ -57,6 +82,10 @@ func (n *NAT) NAT(h *Healthchecks) (*Healthchecks, error) {
 	}
 
 	natMap := natIndex(h.Tuples(), nil)
+
+	mu.Lock()
+	nm = natMap
+	mu.Unlock()
 
 	go n.nat(h, natMap, icmp)
 
@@ -201,6 +230,10 @@ func (n *NAT) nat(h *Healthchecks, natMap map[[2]IP4]uint16, icmp *ICMPs) {
 
 			natMap = natIndex(h.Tuples(), natMap)
 
+			mu.Lock()
+			nm = natMap
+			mu.Unlock()
+
 			time.Sleep(time.Second) // give ARP a second to resolve
 		}
 	}
@@ -276,42 +309,8 @@ func copyHealthchecks(ip IP4, h *Healthchecks, m map[[2]IP4]uint16, macs map[IP4
 
 	new := h.DeepCopy()
 
-	// for vip, v := range h.Virtual {
-	// 	for l4, s := range v.Services {
-	// 		for rip, r := range s.Reals {
-	// 			n, _ := m[[2]IP4{vip, rip}]
-	// 			r.NAT = natAddress(n, ip)
-	// 			r.MAC = macs[rip]
-	// 			//new.Virtual[vip].Services[l4].Reals[rip] = r
-	// 			new.SetReal(vip, l4, rip, r)
-	// 		}
-	// 	}
-	// }
-
-	// for k, s := range h.Services() {
-	// 	for rip, r := range s.Reals {
-	// 		n, _ := m[[2]IP4{k.VIP, rip}]
-	// 		r.NAT = natAddress(n, ip)
-	// 		r.MAC = macs[rip]
-	// 		//new.Virtual[vip].Services[l4].Reals[rip] = r
-	// 		//new.SetReal(k.VIP, L4{Port: k.Port, Protocol: k.Protocol}, rip, r)
-	// 		new.SetReal(k, rip, r)
-	// 	}
-	// }
-
-	//for k, s := range h.Services() {
-	//	for _, r := range s.Reals__() {
-	//		n, _ := m[[2]IP4{k.VIP, r.RIP}]
-	//		r.NAT = natAddress(n, ip)
-	//		r.MAC = macs[r.RIP]
-	//		new.SetReal_(k, r)
-	//	}
-	//}
-
 	for _, s := range h.Services_() {
 		for _, r := range h.Reals(s) {
-			n, _ := m[[2]IP4{s.VIP, r.RIP}]
-			r.NAT = natAddress(n, ip)
 			r.MAC = macs[r.RIP]
 			new.SetReal_(s, r)
 		}

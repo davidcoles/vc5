@@ -19,63 +19,69 @@
 package vc5
 
 import (
-	"sync"
-
-	//"github.com/davidcoles/vc5/config"
+	"github.com/davidcoles/vc5/config"
 	"github.com/davidcoles/vc5/kernel"
 	"github.com/davidcoles/vc5/monitor"
 	"github.com/davidcoles/vc5/monitor/healthchecks"
 	"github.com/davidcoles/vc5/types"
 )
 
+const WRR = types.WRR
+const WLC = types.WLC
+const MH_PORT = types.MH_PORT
+
+const UDP = healthchecks.UDP
+const TCP = healthchecks.TCP
+
+type IP4 = types.IP4
+type L4 = types.L4
+type Target = kernel.Target
+type Scheduler = types.Scheduler
+type Probes = monitor.Probes
 type Healthchecks = healthchecks.Healthchecks
 type Counter = kernel.Counter
+type Checker = monitor.Checker
+type Service = healthchecks.Serv
 
-// A LoadBalancer defines the network parameters for operation of the
-// load-balancing logic, such as what interfaces and driver
-// modes to use.
-type BYOB struct {
+type Balancer interface {
+	Start(string, *healthchecks.Healthchecks) error
+	Configure(*healthchecks.Healthchecks)
+	Checker() monitor.Checker
+	Status() healthchecks.Healthchecks
+	Stats() (kernel.Counter, map[kernel.Target]kernel.Counter)
+	Close()
+}
 
-	// Logging interface to use for event reporting.
-	Logger types.Logger
-	report monitor.Report
-	byolb  Balancer
-	mutex  sync.Mutex
-	update chan *healthchecks.Healthchecks
+type Director struct {
+	Logger   types.Logger
+	Balancer Balancer
+	update   chan *healthchecks.Healthchecks
 }
 
 // Returns a map of active service statistics. A counter is returned
 // for each four-tuple of virtual IP, backend IP, layer
 // four protocol and port number (Target).
-func (lb *BYOB) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
-	//return lb.balancer.Global(), lb.balancer.Stats()
-	lb.mutex.Lock()
-	stats := lb.byolb.Stats(lb.report)
-	lb.mutex.Unlock()
-
-	return kernel.Counter{}, stats
+func (lb *Director) Stats() (kernel.Counter, map[kernel.Target]kernel.Counter) {
+	return lb.Balancer.Stats()
 }
 
 // Status returns a Healthchecks object which is a copy of the current
 // load-balancer configuration with backend server MAC addresses and
 // healthcheck probe results, service and virtual IP status filled in.
-func (lb *BYOB) Status() healthchecks.Healthchecks {
-	lb.mutex.Lock()
-	r := lb.report
-	lb.mutex.Unlock()
-	return r
+func (lb *Director) Status() healthchecks.Healthchecks {
+	return lb.Balancer.Status()
 }
 
 // Cease all load-balancing functionality. Once called the
 // LoadBalancer object must not be used.
-func (lb *BYOB) Close() {
+func (lb *Director) Close() {
 	close(lb.update)
 }
 
 // Replace the LoadBalancer configuration with hc. New VIPs, services
 // and backend server will be added in a non-disruptive manner,
 // existing elements will be unchanged and obsolete ones removed.
-func (lb *BYOB) Update(hc *healthchecks.Healthchecks) {
+func (lb *Director) Update(hc *healthchecks.Healthchecks) {
 	lb.update <- hc
 }
 
@@ -86,52 +92,53 @@ func (lb *BYOB) Update(hc *healthchecks.Healthchecks) {
 
 // If all of the backend servers are in VLANs specified in the
 // healthchecks configuration then address will not be used.
-func (lb *BYOB) Start(ip string, hc *healthchecks.Healthchecks, balancer Balancer) error {
+//func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks, balancer Balancer) error {
+func (lb *Director) Start(ip string, hc *healthchecks.Healthchecks) error {
 
 	if lb.Logger == nil {
 		lb.Logger = &types.NilLogger{}
 	}
 
-	probes := &monitor.Probes{}
-	probes.Start(ip)
+	lb.Balancer.Start(ip, hc.DeepCopy())
 
-	monitor, report := monitor.Monitor(hc, probes, lb.Logger)
-	lb.report = report
+	monitor, report := monitor.Monitor(hc, lb.Balancer.Checker(), lb.Logger)
 
 	lb.update = make(chan *healthchecks.Healthchecks)
 
-	balancer.Configure(lb.report)
+	//lb.Balancer.Start(ip, report.DeepCopy())
+	lb.Balancer.Configure(report.DeepCopy())
 
-	lb.byolb = balancer
-
-	go lb.background(monitor, balancer)
+	go lb.background(monitor, lb.Balancer)
 
 	return nil
 }
 
-type Balancer interface {
-	Configure(healthchecks.Healthchecks)
-	Stats(healthchecks.Healthchecks) map[kernel.Target]kernel.Counter
-	Close()
-}
-
-func (lb *BYOB) background(monitor *monitor.Mon, balancer Balancer) {
+func (lb *Director) background(monitor *monitor.Mon, balancer Balancer) {
 
 	go func() {
 		defer balancer.Close()
 		for h := range monitor.C {
-			lb.Logger.INFO("LoadBalancer", "Monitor update")
-			lb.mutex.Lock()
-			lb.report = *(h.DeepCopy())
-			lb.mutex.Unlock()
-			balancer.Configure(h)
+			lb.Logger.INFO("Director", "Monitor update")
+			balancer.Configure(&h)
 		}
 	}()
 
 	defer monitor.Close()
 	for h := range lb.update {
-		lb.Logger.INFO("LoadBalancer", "Config update")
+		lb.Logger.INFO("Director", "Config update")
 		monitor.Update(h)
 	}
 
+}
+
+/********************************************************************************/
+// Generate a Healthchecks object from a Config
+func Load(conf *config.Config) (*healthchecks.Healthchecks, error) {
+	return healthchecks.Load(conf)
+}
+
+// Unmarshal a Config object from a JSON file. An internal
+// LoadBalancer Healthchecks object can be generated from this
+func LoadConf(file string) (*config.Config, error) {
+	return config.Load(file)
 }

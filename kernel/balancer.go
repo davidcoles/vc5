@@ -51,6 +51,14 @@ type Counter struct {
 	DEFCON      uint8  // global only
 }
 
+func (c *Counter) Add(n Counter) {
+	c.Octets += n.Octets
+	c.Packets += n.Packets
+	c.Flows += n.Flows
+	c.Concurrent += n.Concurrent
+	c.Blocked += n.Blocked
+}
+
 type Balancer struct {
 	maps   *maps
 	checks chan Healthchecks
@@ -189,18 +197,7 @@ func (b *Balancer) balancer() {
 			xdp.BpfMapUpdateElem(b.maps.redirect_map(), uP(&_vlanid), uP(&(_ifindex)), xdp.BPF_ANY)
 		}
 
-		// for vip, virtual := range h.Virtual {
-		//     for l4, service := range virtual.Services {
-		// 			b.update_backend_service(vip, l4, service, state)
-		// 			b.create_counters(vip, l4, service.Reals_(), targets)
-		// 			services[l4Service{vip: vip, svc: l4}] = true // add to log of active services
-		// 		}
-
-		// 		b.maps.update_vrpp_counter(&bpf_vrpp{vip: vip}, &bpf_counter{}, xdp.BPF_NOEXIST) // ICMP responder
-		// 		vips[vip] = true
-		// 	}
-
-		for k, service := range h.Services() {
+		for k, service := range h.Services__() {
 			vip := k.VIP
 			l4 := k.L4()
 			b.update_backend_service(vip, l4, service, state)
@@ -237,7 +234,7 @@ func (b *Balancer) update_backend_service(vip IP4, l4 L4, s Service, state map[l
 
 	key := &bpf_service{vip: vip, port: l4.NP(), protocol: l4.PN()}
 	val := &be_state{
-		fallback:  s.FallbackOn,
+		fallback:  false,
 		sticky:    s.Sticky,
 		bpf_reals: bpf_reals,
 	}

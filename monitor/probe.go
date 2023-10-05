@@ -24,10 +24,15 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/monitor/healthchecks"
 )
+
+var client *http.Client
+var dialer *net.Dialer
+var mu sync.Mutex
 
 type Probes struct {
 	syn *SynChecks
@@ -37,7 +42,9 @@ func (c *Probes) Start(ip string) {
 	c.syn = Syn(ip)
 }
 
-func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthchecks.Check) (bool, string) {
+func (c *Probes) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string) {
+
+	schema := string(check.Type)
 
 	if check.Port == 0 {
 		return false, "Port is zero"
@@ -46,25 +53,35 @@ func (c *Probes) Check(vip IP4, rip IP4, nat IP4, schema string, check healthche
 	switch schema {
 
 	case "http":
-		//return httpget(schema, rip.String(), check)
-		x, y := httpget(schema, rip.String(), check)
+		x, y := HTTPGet(schema, rip.String(), check)
 		return x, y
 	case "https":
-		return httpget(schema, rip.String(), check)
+		return HTTPGet(schema, rip.String(), check)
 	case "dns":
-		ok := dnsquery(rip.String(), check.Port)
-		return ok, ""
+		return DNSUDP(rip.String(), check.Port)
+	case "dnstcp":
+		return DNSTCP(rip.String(), check.Port)
 	case "syn":
-		ok := c.syn.Probe(rip.String(), check.Port)
-		return ok, ""
+		//ok := c.syn.Probe(rip.String(), check.Port)
+		//return ok, ""
+		return c.syn.Check(rip, check.Port)
 	}
 
 	return false, "not implemented"
 }
 
-var client *http.Client
+func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
 
-func httpget(scheme, ip string, check healthchecks.Check) (bool, string) {
+	method := "GET"
+
+	switch check.Method.String() {
+	case "HEAD":
+		method = "HEAD"
+	default:
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
 
 	if client == nil {
 
@@ -98,7 +115,7 @@ func httpget(scheme, ip string, check healthchecks.Check) (bool, string) {
 	}
 
 	url := fmt.Sprintf("%s://%s:%d/%s", scheme, ip, port, path)
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest(method, url, nil)
 	if check.Host != "" {
 		req.Host = check.Host
 	}
