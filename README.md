@@ -1,7 +1,11 @@
 # VC5
 
-A distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load
+Primarily a distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load
 balancer (L4LB) for Linux using XDP/eBPF.
+
+It is currently undergoing modification to work with other balancing
+solutions, such as the Linux Virtual Server/IPVS implementation (see
+https://github.com/davidcoles/stayinalived).
 
 If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or raise a GitHub issue.
@@ -22,7 +26,7 @@ See below for build instructions.
 * Minimally invasive; does not require any modification of iptables rules on server
 * No modification of backend servers beyond adding the VIP to a loopback device
 * Health-checks run against the VIP on backend servers, not their real addresses
-* HTTP/HTTPS, full TCP handshake, half-open SYN probe and UDP DNS healthchecks supported
+* HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks supported
 * As close as possible to line-rate 10Gbps performance
 * In-kernel code execution with XDP/eBGP - native mode drivers bypass sk_buff allocation
 * (D)DoS mitigation with fast early drop rules (filtering at /20 granularity - in progress)
@@ -30,6 +34,7 @@ See below for build instructions.
 * Bonded network device support to provide high-availibility with LAG/MLAG
 * Observability via a web console and Prometheus metrics
 * Simple API to enable embedding into your own project
+* Extention to support LVS/IPVS for non-DRS operation
 
 ## About
 
@@ -73,20 +78,32 @@ load-balancer is in the [cmd/hilbert/](cmd/hilbert/) directory:
 A good use for the traffic stats would be to track which prefixes are
 usually active and to generate a table of which /20s to early drop
 traffic from in the case of a DoS/DDoS (particularly spoofed source
-addresses). The drop table is not implemented yet, but will be added
-soon.
+addresses).
+
+Initially this began as self-contained director/balancer
+project. Recently, it seems that the healthchecking, route health
+injection and observability portions could be re-used with a non-DSR
+balancer such as Linux's virtual server. As such, I am currently
+modifying the code to allow switching out the eBPF/XDP portion so that
+a project using this library can bring its own implemention.
+
+Consequently, the old configuration schema needs updating and old
+versions will no longer work. For now I will maintain a backwards
+compatible v0.1 branch with bugfixes, etc., but the main branch will
+begin using a new updated config parser script.
+
 
 ## Quickstart
 
 It would be recommended to start out using a fresh virtual machine.
 
 First we need a development environment capable of building libbpf and
-Go binaries. Go 1.16 or later is needed due to using go:embed
-directives. On Ubuntu 20.04 this can be achieved with:
+Go binaries. On Ubuntu 20.04 this can be achieved
+with:
 
-  `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.16 libyaml-perl libjson-perl ethtool`
+  `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.20 libyaml-perl libjson-perl ethtool`
   
-  `ln -s /usr/lib/go-1.16/bin/go /usr/local/bin/go`
+  `ln -s /usr/lib/go-1.20/bin/go /usr/local/bin/go`
 
 Copy the [examples/config.yaml](examples/config.yaml) file to
 cmd/vc5.yaml and edit appropriately for your

@@ -5,7 +5,7 @@ export CGO_CFLAGS = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF_LIB)
 
 OBJ := kernel/bpf/bpf.o
-BIN := cmd/vc5ng
+BIN := cmd/vc5
 
 FLOW_STATE_TYPE ?= BPF_MAP_TYPE_LRU_PERCPU_HASH
 FLOW_STATE_SIZE ?= 1000000  # 1M
@@ -22,8 +22,8 @@ cmd/vc5.yaml:
 cmd/vc5.json: cmd/config.pl cmd/vc5.yaml
 	cmd/config.pl cmd/vc5.yaml >$@
 
-cmd/vc5ng: cmd/vc5ng.go cmd/stats.go $(OBJ)
-	go build -o $@ cmd/vc5ng.go cmd/stats.go
+cmd/vc5: cmd/vc5.go cmd/stats.go $(OBJ)
+	go build -o $@ cmd/vc5.go cmd/stats.go
 
 %.o: %.c bpf
 	clang -S \
@@ -65,5 +65,5 @@ tests:
 	cd kernel/maglev/ && go test -v
 
 wc:
-	find bgp4 cmd/vc5ng.go config kernel lb maglev monitor types -name \*.go | xargs wc
+	find bgp4 cmd/vc5.go config kernel lb maglev monitor types -name \*.go | xargs wc
 	wc kernel/bpf/*.c

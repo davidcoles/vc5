@@ -45,7 +45,7 @@ services:
   # iperf server with port/healthcheck and server list declared separately
   # If 'need' is not specified it will default to 1 by the Perl script
   # If need be, you can explicitly set it to 0. Use "sticky" selection -
-  # only considers Layer 3 data when when selecing backend.
+  # only considers Layer 3 data when when selecting a backend.
   - name: iperf
     description: bandwidth test
     virtual: 192.168.101.3
@@ -53,27 +53,16 @@ services:
     servers: iperf
     policy: iperf
 
-  # BIND DNS server - Both TCP and UDP services have the same checks
-  # There's no generic UDP checks yet, so make sure that BIND  is responding to SYN checks
-  # and that an HTTP 200 is returned for /inservice on port 80 - this allows servers to be
-  # gracefully taken out of service by removing the inservice file.
+  # BIND DNS server - both TCP and UDP services will be created.
+  # Healthchecks which look for a response to a CHAOS TXT query for
+  # the version.bind record will be to each service
   - name: bind
     description: BIND DNS server
     virtual: 192.168.101.4
     servers: bind
     path: /inservice
     policy:
-      53:
-        checks:
-          - type: syn
-          - type: http
-            port: 80
-      53/udp:
-        checks:
-          - type: syn
-          - type: http
-            port: 80
-
+      domain:
 
 # labelled sets of policies as referred to above
 policy:

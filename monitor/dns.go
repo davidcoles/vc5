@@ -84,7 +84,7 @@ func DNSUDP(addr string, port uint16) (bool, string) {
 	return true, ""
 }
 
-func getdialer() {
+func getdialer() *net.Dialer {
 	mu.Lock()
 	defer mu.Unlock()
 

@@ -10,6 +10,7 @@ use Getopt::Std;
 
 getopts('h', \my %opts);
 
+my $scheduler = "maglev";
 
 if(1) {
     my $conf = YAML::Load(join('', <>));
@@ -26,6 +27,8 @@ if(1) {
     $conf->{'rhi'}->{'as_number'}+= 0 if defined $conf->{'rhi'}->{'as_number'};
     $conf->{'rhi'}->{'hold_time'}+= 0 if defined $conf->{'rhi'}->{'hold_time'};    
 
+    $scheduler = $conf->{'scheduler'} if exists $conf->{'scheduler'};
+    
     my $out = {};
 
     foreach(qw(learn multicast rhi webserver interfaces vlans)) {
@@ -55,9 +58,10 @@ if(1) {
 
 	    $i{'name'} = $s->{_name};
 	    $i{'description'} = $s->{_desc};
-	    $i{'fallback'} = $s->{_fall} ? JSON::true : JSON::false;
+	    $i{'fallback'} = $s->{_fall} ? JSON::true : JSON::false;	    
 	    $i{'sticky'} = $s->{_sticky} ? JSON::true : JSON::false;
-	    $i{'leastconns'} = $s->{_leastconns} ? JSON::true : JSON::false;	    
+	    $i{'leastconns'} = $s->{_leastconns} ? JSON::true : JSON::false;
+	    $i{'scheduler'} = $scheduler;
 	    
 	    
 	    my @r;
@@ -141,7 +145,7 @@ sub httpchk {
     my($c) = @_;
     return {
 	'path' => $c->{_path},
-	    'port' => $c->{_port},
+	    'port' => 0, #$c->{_port},
 	    'host' => $c->{_host},
 	    'expect' => $c->{_expt},
 	    'method' => 'GET',
@@ -163,10 +167,10 @@ sub readconf {
 	my $name = $_->{'name'};
 	my $desc = $_->{'description'};
 	my $path = $_->{'path'};
-	my $need = $_->{'need'};	
-	my $sticky = $_->{'sticky'} ? JSON::true : JSON::false;
-	my $leastconns = $_->{'leastconns'} ? JSON::true : JSON::false;	
-	my $fall = $_->{'fallback'} =~ /^(yes|true|on|y)$/i ? JSON::true : JSON::false;
+	my $need = $_->{'need'};
+	my $sticky = yamlbool($_->{'sticky'}) ? JSON::true : JSON::false;
+	my $leastconns = yamlbool($_->{'leastconns'}) ? JSON::true : JSON::false;	
+	my $fall = yamlbool($_->{'fallback'}) ? JSON::true : JSON::false;
 	my %r;
 
 	if(ref($_->{'servers'}) eq 'HASH') {
@@ -312,4 +316,11 @@ sub check {
     }
     
     return @c;
+}
+
+sub yamlbool {
+    my($val) = @_;
+
+    return 1 if $val =~ /^(true|yes|on)$/i;
+    return 0;
 }
