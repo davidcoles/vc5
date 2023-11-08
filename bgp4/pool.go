@@ -19,11 +19,9 @@
 package bgp4
 
 import (
-	//"fmt"
+	"github.com/davidcoles/vc5/types"
 	"net"
 	"time"
-	//"github.com/davidcoles/vc5/bgp4"
-	"github.com/davidcoles/vc5/types"
 )
 
 type IP4 = types.IP4
@@ -41,6 +39,8 @@ type Pool struct {
 	Communities []uint32
 	Peers       []string
 	Listen      bool
+	LocalPref   uint32
+	MED         uint32
 }
 
 func (p *Pool) Open() bool {
@@ -75,7 +75,7 @@ func (p *Pool) Open() bool {
 	p.peer = make(chan []string)
 	p.wait = make(chan bool)
 
-	go p.manage(rid, p.ASN, p.HoldTime, p.Communities)
+	go p.manage(rid, p.ASN, p.HoldTime, p.LocalPref, p.MED, p.Communities)
 	p.peer <- p.Peers
 	return true
 }
@@ -87,7 +87,7 @@ func (p *Pool) Start() {
 	}
 }
 
-//func (b *Pool) NLRI(n map[IP4]bool) {
+// func (b *Pool) NLRI(n map[IP4]bool) {
 func (p *Pool) NLRI(n map[string]bool) {
 	m := map[IP4]bool{}
 
@@ -146,7 +146,7 @@ func bgpListen() {
 	}
 }
 
-func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32) {
+func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, lp uint32, med uint32, communities []uint32) {
 
 	nlri := map[IP4]bool{}
 	peer := map[string]*Peer{}
@@ -159,12 +159,8 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 				break
 			}
 
-			//fmt.Println("*******", n, peer)
-
 			for _, v := range peer {
 				for ip, up := range n {
-					//fmt.Println("NLRI", ip, up, "to", k)
-					//logger.NOTICE("peers", "NLRI", ip, up, "to", k)
 					v.NLRI(IP4(ip), up)
 				}
 				for ip, up := range nlri {
@@ -177,7 +173,6 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 			nlri = n
 
 		case p := <-b.peer:
-			//fmt.Println("************************************************** PEER", p)
 
 			m := map[string]*Peer{}
 
@@ -192,15 +187,11 @@ func (b *Pool) manage(rid [4]byte, asn uint16, hold uint16, communities []uint32
 						h = 4
 					}
 
-					v = Session(s, rid, rid, asn, h, communities, b.wait, nil)
+					v = Session(s, rid, rid, asn, h, lp, med, communities, b.wait, nil)
 					m[s] = v
-					//for k, v := range peer {
 					for ip, up := range nlri {
-						//fmt.Println("peers", "NLRI", ip, up, "to", s)
-						//logger.NOTICE("peers", "NLRI", ip, up, "to", s)
 						v.NLRI(IP4(ip), up)
 					}
-					//}
 				}
 			}
 

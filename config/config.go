@@ -183,6 +183,12 @@ type RHI struct {
 
 	// Listen for incoming connections on port 179
 	Listen bool `json:"listen,omitempty"`
+
+	// BGP LOCAL_PREF setting
+	Local_Pref uint32 `json:"local_pref,omitempty"`
+
+	// BGP MULTI_EXIT_DISC setting
+	MED uint32 `json:"med,omitempty"`
 }
 
 // Returns a list of uint32 values representing configured BGP community attributes
