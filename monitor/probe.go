@@ -34,6 +34,24 @@ var client *http.Client
 var dialer *net.Dialer
 var mu sync.Mutex
 
+func init() {
+	transport := &http.Transport{
+		Dial: (&net.Dialer{
+			Timeout: 2 * time.Second,
+		}).Dial,
+		TLSHandshakeTimeout: 1 * time.Second,
+		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	}
+
+	client = &http.Client{
+		Timeout:   time.Second * 3,
+		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+}
+
 type Probes struct {
 	syn *SynChecks
 }
@@ -62,8 +80,6 @@ func (c *Probes) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string
 	case "dnstcp":
 		return DNSTCP(rip.String(), check.Port)
 	case "syn":
-		//ok := c.syn.Probe(rip.String(), check.Port)
-		//return ok, ""
 		return c.syn.Check(rip, check.Port)
 	}
 
@@ -71,6 +87,10 @@ func (c *Probes) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string
 }
 
 func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
+
+	if check.Port == 0 {
+		return false, "Port is zero"
+	}
 
 	method := "GET"
 
@@ -80,42 +100,21 @@ func HTTPGet(scheme, ip string, check healthchecks.Check) (bool, string) {
 	default:
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	if client == nil {
-
-		transport := &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout: 2 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 1 * time.Second,
-			TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
-		}
-
-		client = &http.Client{
-			Timeout:   time.Second * 3,
-			Transport: transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-	}
-
 	defer client.CloseIdleConnections()
 
 	path := check.Path
+
 	if len(path) > 0 && path[0] == '/' {
 		path = path[1:]
 	}
 
-	port := check.Port
-	if port == 0 {
-		port = 80
+	url := fmt.Sprintf("%s://%s:%d/%s", scheme, ip, check.Port, path)
+	req, err := http.NewRequest(method, url, nil)
+
+	if err != nil {
+		return false, err.Error()
 	}
 
-	url := fmt.Sprintf("%s://%s:%d/%s", scheme, ip, port, path)
-	req, err := http.NewRequest(method, url, nil)
 	if check.Host != "" {
 		req.Host = check.Host
 	}

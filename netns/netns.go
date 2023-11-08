@@ -31,7 +31,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 
 	"github.com/davidcoles/vc5/monitor"
@@ -41,8 +40,10 @@ import (
 
 type Check = healthchecks.Check
 
-var client *http.Client
-var mu sync.Mutex
+type response struct {
+	OK      bool   `json:"ok"`
+	Message string `json:"message"`
+}
 
 type probe struct {
 	IP     types.IP4
@@ -50,12 +51,26 @@ type probe struct {
 	Check  Check
 }
 
-type response struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message"`
+func (p *probe) probe(syn *monitor.SynChecks) (bool, string) {
+
+	switch p.Scheme {
+	case "http":
+		return monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
+	case "https":
+		return monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
+	case "syn":
+		return syn.Check(p.IP, p.Check.Port)
+	case "dns":
+		return monitor.DNSUDP(p.IP.String(), p.Check.Port)
+	case "dnstcp":
+		return monitor.DNSTCP(p.IP.String(), p.Check.Port)
+	}
+
+	return false, "Unknown probe type"
 }
 
 func Spawn(netns string, args ...string) {
+
 	for {
 		cmd := exec.Command("ip", append([]string{"netns", "exec", netns}, args...)...)
 		_, _ = cmd.StdinPipe()
@@ -88,36 +103,36 @@ func Spawn(netns string, args ...string) {
 	}
 }
 
-func Probe(path string, ip types.IP4, check Check) (bool, string) {
+type Client struct {
+	path   string
+	client *http.Client
+}
 
-	scheme := check.Type
+func NewClient(path string) *Client {
+	c := &Client{path: path}
 
-	if path == "" {
-		return false, "No socket given"
-	}
-
-	//fmt.Println(path, ip, scheme)
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	if client == nil {
-		client = &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", path)
-				},
+	c.client = &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", path)
 			},
-		}
+		},
 	}
 
-	//defer client.CloseIdleConnections()
+	return c
+}
+
+func (c *Client) Path() string { return c.path }
+
+func (c *Client) Probe(ip types.IP4, check Check) (bool, string) {
+
+	defer c.client.CloseIdleConnections()
 
 	if check.Port == 0 {
-		panic("oops")
+		return false, "Port is zero"
 	}
 
-	p := probe{IP: ip, Scheme: scheme, Check: check}
+	p := probe{IP: ip, Scheme: check.Type, Check: check}
 
 	buff := new(bytes.Buffer)
 
@@ -127,7 +142,7 @@ func Probe(path string, ip types.IP4, check Check) (bool, string) {
 		return false, "Internal error marshalling probe: " + err.Error()
 	}
 
-	resp, err := client.Post("http://unix/", "application/octet-stream", buff)
+	resp, err := c.client.Post("http://unix/", "application/octet-stream", buff)
 
 	if err != nil {
 		return false, "Internal error contacting netns daemon: " + err.Error()
@@ -172,7 +187,6 @@ func Server(path string, ip string) {
 
 	os.Remove(path)
 
-	//syn := monitor.Syn(ip)
 	syn := monitor.SynServer(ip, true) // true: send RSTs
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -205,7 +219,8 @@ func Server(path string, ip string) {
 			return
 		}
 
-		resp := p.probe(syn)
+		ok, msg := p.probe(syn)
+		resp := response{OK: ok, Message: msg}
 
 		js, err := json.Marshal(&resp)
 
@@ -231,6 +246,7 @@ func Server(path string, ip string) {
 	log.Fatal(server.Serve(s))
 }
 
+/*
 func (p *probe) synprobe(syn *monitor.SynChecks) (bool, string) {
 
 	if p.Check.Port == 0 {
@@ -262,7 +278,6 @@ func (p *probe) dnstcp() (bool, string) {
 	return monitor.DNSTCP(addr, port)
 }
 
-// func tcpdial(foo probe) (bool, string) {
 func (p *probe) tcpdial() (bool, string) {
 	addr := p.IP.String()
 	port := p.Check.Port
@@ -279,11 +294,8 @@ func (p *probe) tcpdial() (bool, string) {
 
 	one := make([]byte, 1)
 	c.SetReadDeadline(time.Now().Add(1 * time.Second))
-	//c.SetReadDeadline(time.Now())
 	n, err := c.Read(one)
 	c.Close()
-
-	//log.Println(n, err)
 
 	if err == nil && n != 0 {
 		return true, ""
@@ -309,29 +321,28 @@ func (p *probe) httpget() (bool, string) {
 	return monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
 }
 
-// func (p *probe) probe(syn *SynChecks) (bool, string) {
+
 func (p *probe) probe(syn *monitor.SynChecks) response {
-	//fmt.Println(p)
 
 	var ok bool
 	var st string
 
 	switch p.Scheme {
 	case "http":
-		ok, st = p.httpget()
+		ok, st = monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
 	case "https":
-		ok, st = p.httpget()
+		ok, st = monitor.HTTPGet(p.Scheme, p.IP.String(), p.Check)
 	case "syn":
-		ok, st = p.synprobe(syn)
-	case "tcp":
-		ok, st = p.tcpdial()
+		ok, st = syn.Check(p.IP, p.Check.Port)
 	case "dns":
-		ok, st = p.dnsudp()
+		ok, st = monitor.DNSUDP(p.IP.String(), p.Check.Port)
 	case "dnstcp":
-		ok, st = p.dnstcp()
+		ok, st = monitor.DNSTCP(p.IP.String(), p.Check.Port)
 	default:
 		st = "Unknown probe type"
 	}
 
 	return response{OK: ok, Message: st}
 }
+
+*/
