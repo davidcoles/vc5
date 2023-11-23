@@ -1,0 +1,113 @@
+package bgp4
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"regexp"
+	"strconv"
+)
+
+type IPNet net.IPNet
+
+func (i *IPNet) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + (*net.IPNet)(i).String() + `"`), nil
+}
+
+func (i *IPNet) UnmarshalJSON(data []byte) error {
+
+	l := len(data)
+
+	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+		return errors.New("Badly formed CIDR address")
+	}
+
+	return i.UnmarshalText(data[1 : l-1])
+}
+
+func (i *IPNet) UnmarshalText(data []byte) error {
+
+	re := regexp.MustCompile(`^\d+\.\d+\.\d+\.\d+$`)
+
+	s := string(data)
+
+	if re.Match(data) {
+		s += "/32"
+	}
+
+	_, ipnet, err := net.ParseCIDR(s)
+
+	if err != nil {
+		return err
+	}
+
+	*i = IPNet(*ipnet)
+
+	return nil
+}
+
+type Community uint32
+
+func (c *Community) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + fmt.Sprintf("%d:%d", (*c>>16), (*c&0xffff)) + `"`), nil
+}
+
+func (c *Community) UnmarshalJSON(data []byte) error {
+	re := regexp.MustCompile(`^"(\d+):(\d+)"$`)
+
+	m := re.FindStringSubmatch(string(data))
+
+	if len(m) != 3 {
+		return errors.New("Badly formed community")
+	}
+
+	asn, err := strconv.Atoi(m[1])
+	if err != nil {
+		return err
+	}
+
+	val, err := strconv.Atoi(m[2])
+	if err != nil {
+		return err
+	}
+
+	if asn < 0 || asn > 65535 || val < 0 || val > 65535 {
+		return errors.New("Badly formed community")
+	}
+
+	*c = Community(uint32(asn)<<16 | uint32(val))
+
+	return nil
+}
+
+type Parameters struct {
+	// only used at session start
+	ASN      uint16 `json:"as_number"`
+	HoldTime uint16 `json:"hold_time"`
+	SourceIP IP4    `json:"source_ip"`
+
+	// can change during session
+	MED         uint32      `json:"med"`
+	LocalPref   uint32      `json:"local_pref"`
+	Communities []Community `json:"communities"`
+	Accept      []IPNet     `json:"accept"`
+	Reject      []IPNet     `json:"reject"`
+}
+
+func (a *Parameters) Diff(b Parameters) (r bool) {
+	r = true
+
+	if a.LocalPref != b.LocalPref ||
+		a.MED != b.MED ||
+		len(a.Communities) != len(b.Communities) {
+		return
+	}
+
+	for i, c := range a.Communities {
+		if b.Communities[i] != c {
+			return
+		}
+	}
+
+	return false
+}

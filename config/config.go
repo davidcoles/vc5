@@ -31,6 +31,7 @@ import (
 	"regexp"
 	"strconv"
 
+	"github.com/davidcoles/vc5/bgp"
 	"github.com/davidcoles/vc5/types"
 )
 
@@ -213,6 +214,9 @@ type Config struct {
 
 	// Route Health Injection parameters
 	RHI RHI `json:"rhi,omitempty"`
+
+	// Route Health Injection parameters
+	BGP map[types.IP4]bgp4.Parameters `json:"bgp,omitempty"`
 
 	// Length of time to wait for services to settle before
 	// advertising route (should perhaps move to RHI)
