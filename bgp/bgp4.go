@@ -22,6 +22,7 @@ package bgp4
 
 import (
 	"fmt"
+	"os"
 	//"io"
 	//"net"
 	//"time"
@@ -32,6 +33,20 @@ import (
 //func (i IP4) String() string {
 //	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
 //}
+
+func htonl(h uint32) []byte {
+	return []byte{byte(h >> 24), byte(h >> 16), byte(h >> 8), byte(h)}
+}
+func htons(h uint16) []byte {
+	return []byte{byte(h >> 8), byte(h)}
+}
+
+func _debug(args ...interface{}) {
+	_, ok := os.LookupEnv("DEBUG")
+	if ok {
+		fmt.Println(args...)
+	}
+}
 
 const (
 	IDLE = iota
@@ -100,7 +115,7 @@ const (
 // 0   1  0  1  0 0 0 0
 // W   N  C  R  0 0 0 0
 // O   T  P  E  0 0 0 0
-
+/*
 type Peer struct {
 	state       int
 	peer        string
@@ -115,7 +130,7 @@ type Peer struct {
 	med         uint32
 	lp          uint32
 }
-
+*/
 type open struct {
 	version byte
 	as      uint16
@@ -252,6 +267,7 @@ func headerise(t byte, d []byte) []byte {
 	return p
 }
 
+/*
 type logger interface {
 	EMERG(...interface{})
 	ALERT(...interface{})
@@ -275,25 +291,6 @@ func (l *Logger) NOTICE(e ...interface{})  { _debug(e...) }
 func (l *Logger) INFO(e ...interface{})    { _debug(e...) }
 func (l *Logger) DEBUG(e ...interface{})   { _debug(e...) }
 
-//	func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, wait chan bool) *Peer {
-//		return Session_(peer, myip, rid, asn, hold, wait, nil)
-//	}
-func Session(peer string, myip [4]byte, rid [4]byte, asn uint16, hold uint16, lp uint32, med uint32, communities []uint32, wait chan bool, logs logger) *Peer {
-	if rid == [4]byte{0, 0, 0, 0} {
-		rid = myip
-	}
-
-	if logs == nil {
-		logs = &Logger{}
-	}
-
-	b := Peer{nlri: make(chan nlri), peer: peer, port: 179, myip: myip, rid: rid, asn: asn, hold: hold, logs: logs, communities: communities, lp: lp, med: med}
-
-	go b.session(wait)
-
-	return &b
-}
-
 func (b *Peer) Close() {
 	close(b.nlri)
 }
@@ -301,6 +298,7 @@ func (b *Peer) Close() {
 func (b *Peer) NLRI(ip IP4, up bool) {
 	b.nlri <- nlri{ip: ip, up: up}
 }
+*/
 
 func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
 

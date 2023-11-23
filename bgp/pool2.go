@@ -1,5 +1,9 @@
 package bgp4
 
+import (
+	"github.com/davidcoles/vc5/types"
+)
+
 type Config struct {
 	RIB   []IP
 	Peers map[IP4]Parameters
@@ -17,11 +21,13 @@ func (p *Pool2) Close() {
 	close(p.c)
 }
 
-func NewPool(id IP4, c Config) *Pool2 {
+func NewPool(addr string, c Config) *Pool2 {
 
 	var nul IP4
 
-	if id == nul {
+	id, ok := types.ParseIP(addr)
+
+	if !ok || id == nul {
 		return nil
 	}
 

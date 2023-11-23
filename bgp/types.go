@@ -6,8 +6,11 @@ import (
 	"net"
 	"regexp"
 	"strconv"
+
+	"github.com/davidcoles/vc5/types"
 )
 
+type IP4 = types.IP4
 type IPNet net.IPNet
 
 func (i *IPNet) MarshalJSON() ([]byte, error) {
