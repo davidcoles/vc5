@@ -19,7 +19,7 @@
 package bgp4
 
 func updateMessage(ip IP, asn uint16, p *Parameters, external bool, m map[IP]bool) message {
-	return message{mtype: M_UPDATE, body: bgpupdate(p.SourceIP, p.ASN, external, p.LocalPref, p.MED, p.Communities, m)}
+	return message{mtype: M_UPDATE, body: bgpupdate(p.SourceIP, p.ASNumber, external, p.LocalPref, p.MED, p.Communities, m)}
 }
 
 func openMessage(as uint16, ht uint16, id IP) message {

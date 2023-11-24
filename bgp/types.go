@@ -124,7 +124,7 @@ func (c *Community) UnmarshalJSON(data []byte) error {
 
 type Parameters struct {
 	// only used at session start
-	ASN      uint16 `json:"as_number"`
+	ASNumber uint16 `json:"as_number"`
 	HoldTime uint16 `json:"hold_time"`
 	SourceIP IP     `json:"source_ip"`
 

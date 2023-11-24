@@ -99,7 +99,7 @@ func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool)
 	go func() {
 
 		ip := u.Parameters.SourceIP
-		asn := u.Parameters.ASN
+		asn := u.Parameters.ASNumber
 		ht := u.Parameters.HoldTime
 
 		if ht < 3 {
