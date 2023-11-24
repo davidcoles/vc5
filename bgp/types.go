@@ -65,6 +65,15 @@ func (i *IP4) UnmarshalJSON(d []byte) error {
 	return errors.New("Badly formated IPv4 address: " + string(d))
 }
 
+func (i *IP4) UnmarshalText(t []byte) error {
+	ip, ok := parseIP(string(t))
+	if !ok {
+		return errors.New("Bad: " + string(t))
+	}
+	*i = ip
+	return nil
+}
+
 func ip_string(i IP) string {
 	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
 }
