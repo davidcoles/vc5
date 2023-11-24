@@ -37,7 +37,7 @@ type myconn struct {
 	out   []message
 }
 
-func new_connection(local net.IP, peer IP) (*myconn, error) {
+func new_connection(local net.IP, peer string) (*myconn, error) {
 
 	dialer := net.Dialer{
 		Timeout: 10 * time.Second,
@@ -47,7 +47,7 @@ func new_connection(local net.IP, peer IP) (*myconn, error) {
 		},
 	}
 
-	conn, err := dialer.Dial("tcp", ip_string(peer)+":179")
+	conn, err := dialer.Dial("tcp", peer+":179")
 
 	if err != nil {
 		return nil, err

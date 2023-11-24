@@ -27,7 +27,8 @@ import (
 )
 
 type IP = [4]byte
-type IP4 [4]byte
+
+// type IP4 [4]byte
 type IPNet net.IPNet
 
 func parseIP(ip string) ([4]byte, bool) {
@@ -45,33 +46,6 @@ func parseIP(ip string) ([4]byte, bool) {
 		addr[n] = byte(a)
 	}
 	return addr, true
-}
-
-func (i *IP4) UnmarshalJSON(d []byte) error {
-	l := len(d)
-	if l < 2 || d[0] != '"' || d[l-1] != '"' {
-		return errors.New("Badly formated IPv4 address: " + string(d))
-	}
-
-	ip, ok := parseIP(string(d[1 : l-1]))
-
-	if ok {
-		i[0] = ip[0]
-		i[1] = ip[1]
-		i[2] = ip[2]
-		i[3] = ip[3]
-		return nil
-	}
-	return errors.New("Badly formated IPv4 address: " + string(d))
-}
-
-func (i *IP4) UnmarshalText(t []byte) error {
-	ip, ok := parseIP(string(t))
-	if !ok {
-		return errors.New("Bad: " + string(t))
-	}
-	*i = ip
-	return nil
 }
 
 func ip_string(i IP) string {
@@ -152,7 +126,7 @@ type Parameters struct {
 	// only used at session start
 	ASN      uint16 `json:"as_number"`
 	HoldTime uint16 `json:"hold_time"`
-	SourceIP IP4    `json:"source_ip"`
+	SourceIP IP     `json:"source_ip"`
 
 	// can change during session
 	MED         uint32      `json:"med"`

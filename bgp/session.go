@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-func session(id, peer IP, current Update) chan Update {
+func session(id IP, peer string, current Update) chan Update {
 
 	updates := make(chan Update)
 
@@ -92,7 +92,7 @@ func session(id, peer IP, current Update) chan Update {
 	return updates
 }
 
-func active(id IP, local net.IP, peer IP, u Update) (chan Update, chan bool) {
+func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool) {
 	updates := make(chan Update)
 	done := make(chan bool)
 

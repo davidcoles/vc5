@@ -22,12 +22,14 @@ import (
 	"fmt"
 )
 
+type Config map[string]Parameters
+
 type Pool struct {
-	c chan map[IP4]Parameters
+	c chan Config
 	r chan []IP
 }
 
-func (p *Pool) Configure(c map[IP4]Parameters) {
+func (p *Pool) Configure(c Config) {
 	p.c <- c
 }
 
@@ -46,11 +48,11 @@ func dup(i []IP) (o []IP) {
 	return
 }
 
-func NewPool(addr string, peers map[IP4]Parameters, rib_ []IP) *Pool {
+func NewPool(addr string, peers Config, rib_ []IP) *Pool {
 
 	rib := dup(rib_)
 
-	var nul IP4
+	var nul IP
 
 	//id, ok := types.ParseIP(addr)
 	id, ok := parseIP(addr)
@@ -61,11 +63,11 @@ func NewPool(addr string, peers map[IP4]Parameters, rib_ []IP) *Pool {
 
 	ip := id
 
-	p := &Pool{c: make(chan map[IP4]Parameters), r: make(chan []IP)}
+	p := &Pool{c: make(chan Config), r: make(chan []IP)}
 
 	go func() {
 
-		m := map[IP4]chan Update{}
+		m := map[string]chan Update{}
 
 		defer func() {
 			for _, v := range m {
