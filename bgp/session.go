@@ -203,8 +203,11 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 
 				if state == ESTABLISHED {
 
+					//nlris := r.updates(u)
+					//if len(nlris) != 0 {
+					//	conn.write(my_update(ip, asn, r.Parameters, external, nlris))
+					//}
 					nlris := r.updates(u)
-					//fmt.Println(">>>>>>", nlris)
 					if len(nlris) != 0 {
 						conn.write(my_update(ip, asn, r.Parameters, external, nlris))
 					}
@@ -228,6 +231,25 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 }
 
 func my_update(ip IP4, asn uint16, p *Parameters, external bool, n []nlri) message {
+
+	var communities []uint32
+
+	for _, c := range p.Communities {
+		communities = append(communities, uint32(c))
+	}
+
+	u := bgpupdate(p.SourceIP, p.ASN, external, p.LocalPref, p.MED, communities, n...)
+
+	return message{mtype: M_UPDATE, body: u}
+}
+
+func my_update2(ip IP4, asn uint16, p *Parameters, external bool, m map[IP]bool) message {
+
+	var n []nlri
+
+	for k, v := range nlris {
+		n = append(n, nlri{ip: k, up: v})
+	}
 
 	var communities []uint32
 
