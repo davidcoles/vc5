@@ -22,30 +22,14 @@ package bgp4
 
 import (
 	"fmt"
-	"os"
-	//"io"
-	//"net"
-	//"time"
+	//"os"
 )
-
-//type IP4 [4]byte
-
-//func (i IP4) String() string {
-//	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
-//}
 
 func htonl(h uint32) []byte {
 	return []byte{byte(h >> 24), byte(h >> 16), byte(h >> 8), byte(h)}
 }
 func htons(h uint16) []byte {
 	return []byte{byte(h >> 8), byte(h)}
-}
-
-func _debug(args ...interface{}) {
-	_, ok := os.LookupEnv("DEBUG")
-	if ok {
-		fmt.Println(args...)
-	}
 }
 
 const (
@@ -139,10 +123,10 @@ type open struct {
 	op      []byte
 }
 
-type community struct {
-	community_asn uint16
-	community_val uint16
-}
+//type community struct {
+//	community_asn uint16
+//	community_val uint16
+//}
 
 func (b open) String() string {
 	op := b.op
@@ -268,6 +252,15 @@ func headerise(t byte, d []byte) []byte {
 }
 
 /*
+
+func _debug(args ...interface{}) {
+	_, ok := os.LookupEnv("DEBUG")
+	if ok {
+		fmt.Println(args...)
+	}
+}
+
+
 type logger interface {
 	EMERG(...interface{})
 	ALERT(...interface{})
@@ -290,39 +283,14 @@ func (l *Logger) WARNING(e ...interface{}) { _debug(e...) }
 func (l *Logger) NOTICE(e ...interface{})  { _debug(e...) }
 func (l *Logger) INFO(e ...interface{})    { _debug(e...) }
 func (l *Logger) DEBUG(e ...interface{})   { _debug(e...) }
-
-func (b *Peer) Close() {
-	close(b.nlri)
-}
-
-func (b *Peer) NLRI(ip IP4, up bool) {
-	b.nlri <- nlri{ip: ip, up: up}
-}
 */
 
-func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
-	return _bgpupdate(myip, asn, external, local_pref, med, communities, nlri...)
-}
-func bgpupdate2(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlris map[IP]bool) []byte {
-	var n []nlri
-
-	for k, v := range nlris {
-		n = append(n, nlri{ip: k, up: v})
-	}
-
-	return _bgpupdate(myip, asn, external, local_pref, med, communities, n...)
-}
-func _bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
+// func _bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
+// func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, status map[IP]bool) []byte {
+func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []Community, status map[IP]bool) []byte {
 
 	var withdrawn []byte
 	var advertise []byte
-
-	status := make(map[IP4]bool)
-
-	// eliminate any bounces
-	for _, r := range nlri {
-		status[r.ip] = r.up
-	}
 
 	for k, v := range status {
 		if v {
@@ -371,7 +339,7 @@ func _bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint
 		comms := []byte{}
 		for k, v := range communities {
 			if k < 60 { // should implement extended length
-				c := htonl(v)
+				c := htonl(uint32(v))
 				comms = append(comms, c[:]...)
 			}
 		}

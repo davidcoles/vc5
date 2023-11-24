@@ -87,6 +87,16 @@ func (r *Update) full() []nlri {
 	return n
 }
 
+func (r *Update) full2() map[IP]bool {
+	n := map[IP]bool{}
+	//for _, ip := range r.RIB {
+	for _, ip := range r.adjRIBOut() {
+		n[ip] = true
+	}
+
+	return n
+}
+
 func (r Update) Copy() Update {
 	var rib []IP
 
@@ -97,41 +107,7 @@ func (r Update) Copy() Update {
 	return Update{RIB: rib, Parameters: r.Parameters}
 }
 
-// func (r *Update) updates(o *Update) (bool, []nlri) {
-func (c *Update) updates(p Update) []nlri {
-	var n []nlri
-
-	var vary bool = c.Parameters.Diff(p.Parameters)
-
-	curr := map[IP4]bool{}
-	prev := map[IP4]bool{}
-
-	for _, ip := range c.adjRIBOut() {
-		curr[ip] = true
-	}
-
-	for _, ip := range p.adjRIBOut() {
-		prev[ip] = true
-	}
-
-	for ip, _ := range curr {
-		_, ok := prev[ip] // if didn't exist in previous rib, or params have changed then need to advertise
-		if !ok || vary {
-			n = append(n, nlri{ip: ip, up: true})
-		}
-	}
-
-	for ip, _ := range prev {
-		_, ok := curr[ip] // if not in current rib then need to withdraw
-		if !ok {
-			n = append(n, nlri{ip: ip, up: false})
-		}
-	}
-
-	return n
-}
-
-func (c *Update) updates2(p Update) map[IP]bool {
+func (c *Update) updates(p Update) map[IP]bool {
 	n := map[IP]bool{}
 
 	var vary bool = c.Parameters.Diff(p.Parameters)
