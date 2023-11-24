@@ -18,8 +18,8 @@ func TestRIBs(t *testing.T) {
 		test{[]IP{}, []IP{}, false}, // two empty lists don't differ
 		test{[]IP{a}, []IP{}, true},
 		test{[]IP{}, []IP{a}, true},
-		test{[]IP{a, a}, []IP{a}, false},
-		test{[]IP{a}, []IP{a, a}, false},
+		test{[]IP{a, a}, []IP{a}, false}, // repeated elements are ignored
+		test{[]IP{a}, []IP{a, a}, false}, // repeated elements are ignored
 		test{[]IP{a}, []IP{b}, true},
 	}
 

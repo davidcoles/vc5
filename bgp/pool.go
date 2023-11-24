@@ -18,10 +18,6 @@
 
 package bgp4
 
-import (
-	"fmt"
-)
-
 type Config map[string]Parameters
 
 type Pool struct {
@@ -54,7 +50,6 @@ func NewPool(addr string, peers Config, rib_ []IP) *Pool {
 
 	var nul IP
 
-	//id, ok := types.ParseIP(addr)
 	id, ok := parseIP(addr)
 
 	if !ok || id == nul {
@@ -93,8 +88,6 @@ func NewPool(addr string, peers Config, rib_ []IP) *Pool {
 
 				for peer, x := range i {
 					v := x
-
-					fmt.Println(v)
 
 					if v.SourceIP == nul {
 						v.SourceIP = ip
