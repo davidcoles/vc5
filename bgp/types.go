@@ -28,10 +28,7 @@ import (
 
 type IP = [4]byte
 
-// type IP4 [4]byte
-type IPNet net.IPNet
-
-func parseIP(ip string) ([4]byte, bool) {
+func parseIP(ip string) (IP, bool) {
 	var addr [4]byte
 	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
 	m := re.FindStringSubmatch(ip)
@@ -51,6 +48,8 @@ func parseIP(ip string) ([4]byte, bool) {
 func ip_string(i IP) string {
 	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
 }
+
+type IPNet net.IPNet
 
 func (i *IPNet) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + (*net.IPNet)(i).String() + `"`), nil
