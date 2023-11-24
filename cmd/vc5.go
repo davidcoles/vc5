@@ -81,8 +81,6 @@ func ulimit(resource int) {
 
 func main() {
 
-	var rib []bgp4.IP
-
 	flag.Parse()
 	args := flag.Args()
 
@@ -161,9 +159,7 @@ func main() {
 		}
 	*/
 
-	bgp := bgp4.Config{Peers: conf.BGP}
-
-	pool := bgp4.NewPool(addr, bgp)
+	pool := bgp4.NewPool(addr, conf.BGP, nil)
 
 	if pool == nil {
 		log.Fatal("pool fail")
@@ -229,7 +225,7 @@ func main() {
 						//pool.Peer(conf.RHI.Peers)
 						director.Update(hc)
 
-						pool.Update(bgp4.Config{Peers: conf.BGP, RIB: rib})
+						pool.Configure(conf.BGP)
 
 					}
 				}
@@ -253,19 +249,17 @@ func main() {
 
 				rhi := s.RHI
 
-				var r []bgp4.IP
+				var rib []bgp4.IP
 				for k, v := range rhi {
 
 					var ip bgp4.IP4
 
 					if v && ip.UnmarshalText([]byte(k)) == nil {
-						r = append(r, ip)
+						rib = append(rib, ip)
 					}
 				}
 
-				rib = r
-
-				pool.Update(bgp4.Config{Peers: conf.BGP, RIB: rib})
+				pool.RIB(rib)
 			}
 			time.Sleep(1 * time.Second)
 		}

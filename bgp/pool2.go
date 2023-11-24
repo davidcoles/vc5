@@ -1,27 +1,42 @@
 package bgp4
 
 import (
+	"fmt"
 	"github.com/davidcoles/vc5/types"
 )
 
 type Config struct {
-	RIB   []IP
+	//RIB   []IP
 	Peers map[IP4]Parameters
 }
 
-type Pool2 struct {
-	c chan Config
+type Pool struct {
+	c chan map[IP4]Parameters
+	r chan []IP
 }
 
-func (p *Pool2) Update(c Config) {
+func (p *Pool) Configure(c map[IP4]Parameters) {
 	p.c <- c
 }
 
-func (p *Pool2) Close() {
+func (p *Pool) RIB(r []IP) {
+	p.r <- r
+}
+
+func (p *Pool) Close() {
 	close(p.c)
 }
 
-func NewPool(addr string, c Config) *Pool2 {
+func dup(i []IP) (o []IP) {
+	for _, x := range i {
+		o = append(o, x)
+	}
+	return
+}
+
+func NewPool(addr string, peers map[IP4]Parameters, rib_ []IP) *Pool {
+
+	rib := dup(rib_)
 
 	var nul IP4
 
@@ -33,7 +48,7 @@ func NewPool(addr string, c Config) *Pool2 {
 
 	ip := id
 
-	p := &Pool2{c: make(chan Config)}
+	p := &Pool{c: make(chan map[IP4]Parameters), r: make(chan []IP)}
 
 	go func() {
 
@@ -45,39 +60,51 @@ func NewPool(addr string, c Config) *Pool2 {
 			}
 		}()
 
-		for i := range p.c {
+		for {
+			select {
+			case r := <-p.r:
 
-			for peer, v := range i.Peers {
+				rib = dup(r)
 
-				if v.SourceIP == nul {
-					v.SourceIP = ip
+				for _, v := range m {
+					v <- Update{RIB: rib}
 				}
 
-				u := Update{RIB: i.RIB, Parameters: v}
+			case i, ok := <-p.c:
 
-				if d, ok := m[peer]; ok {
-					select {
-					case d <- u:
-					default: // stopped responding - start a new instance
-						close(d)
+				if !ok {
+					return
+				}
+
+				for peer, x := range i {
+					v := x
+
+					fmt.Println(v)
+
+					if v.SourceIP == nul {
+						v.SourceIP = ip
+					}
+
+					u := Update{RIB: rib, Parameters: &v}
+
+					if d, ok := m[peer]; ok {
+						d <- u
+					} else {
 						m[peer] = session(id, peer, u)
 					}
-				} else {
-					m[peer] = session(id, peer, u)
 				}
-			}
 
-			for peer, v := range m {
-				if _, ok := i.Peers[peer]; !ok {
-					close(v)
-					delete(m, peer)
+				for peer, v := range m {
+					if _, ok := i[peer]; !ok {
+						close(v)
+						delete(m, peer)
+					}
 				}
 			}
 		}
-
 	}()
 
-	p.c <- c
+	p.c <- peers
 
 	return p
 }

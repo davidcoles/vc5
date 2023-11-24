@@ -97,7 +97,7 @@ type Parameters struct {
 	Reject      []IPNet     `json:"reject"`
 }
 
-func (a *Parameters) Diff(b Parameters) (r bool) {
+func (a *Parameters) Diff(b *Parameters) (r bool) {
 	r = true
 
 	if a.LocalPref != b.LocalPref ||

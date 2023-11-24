@@ -6,15 +6,11 @@ import (
 )
 
 func session(id, peer IP4, current Update) chan Update {
+
 	updates := make(chan Update)
 
 	go func() {
-
-		//fmt.Println(id, peer, current)
-
-		p := current.Parameters
-
-		ip := p.SourceIP
+		ip := current.Parameters.SourceIP
 
 		local := net.ParseIP(ip.String())
 
@@ -25,7 +21,7 @@ func session(id, peer IP4, current Update) chan Update {
 
 		defer timer.Stop()
 
-		connection, done := active(id, local, peer, p, current)
+		connection, done := active(id, local, peer, current)
 
 		defer func() {
 			if connection != nil {
@@ -33,18 +29,22 @@ func session(id, peer IP4, current Update) chan Update {
 			}
 		}()
 
-		var ok bool
-
 		for {
 			if connection != nil { //active
 				select {
 				case <-done: // downstream closed - wait and re-establish
 					connection = nil
 					timer.Reset(retry_time)
-				case current, ok = <-updates:
+				case c, ok := <-updates:
 					if !ok {
 						return
 					}
+
+					current.RIB = c.RIB
+					if c.Parameters != nil {
+						current.Parameters = c.Parameters
+					}
+
 					select {
 					case connection <- current:
 					case <-done: // downstream closed - wait and re-establish
@@ -54,12 +54,18 @@ func session(id, peer IP4, current Update) chan Update {
 				}
 			} else { //idle
 				select {
-				case current, ok = <-updates:
+				case c, ok := <-updates:
 					if !ok {
 						return
 					}
+
+					current.RIB = c.RIB
+					if c.Parameters != nil {
+						current.Parameters = c.Parameters
+					}
+
 				case <-timer.C:
-					connection, done = active(id, local, peer, p, current)
+					connection, done = active(id, local, peer, current)
 				}
 			}
 		}
@@ -68,14 +74,19 @@ func session(id, peer IP4, current Update) chan Update {
 	return updates
 }
 
-func active(id IP4, local net.IP, peer IP4, p Parameters, rib Update) (chan Update, chan bool) {
+func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 	updates := make(chan Update)
 	done := make(chan bool)
 
 	go func() {
 
-		ip := p.SourceIP
-		asn := p.ASN
+		ip := u.Parameters.SourceIP
+		asn := u.Parameters.ASN
+		ht := u.Parameters.HoldTime
+
+		if ht < 3 {
+			ht = 10
+		}
 
 		defer close(done) // let upstream know that the connection has failed/closed
 
@@ -91,13 +102,7 @@ func active(id IP4, local net.IP, peer IP4, p Parameters, rib Update) (chan Upda
 
 		defer conn.Close()
 
-		var ht uint16 = p.HoldTime
-
-		if ht < 3 {
-			ht = 10
-		}
-
-		conn.write(my_open(p.ASN, ht, id))
+		conn.write(my_open(asn, ht, id))
 
 		state = OPEN_SENT
 
@@ -171,7 +176,7 @@ func active(id IP4, local net.IP, peer IP4, p Parameters, rib Update) (chan Upda
 					state = ESTABLISHED
 
 					conn.write(my_keepalive())
-					conn.write(my_update(ip, asn, rib.Parameters, external, rib.full()))
+					conn.write(my_update(ip, asn, u.Parameters, external, u.full()))
 
 				case M_UPDATE:
 					if state != ESTABLISHED {
@@ -185,22 +190,27 @@ func active(id IP4, local net.IP, peer IP4, p Parameters, rib Update) (chan Upda
 				}
 
 			case r, ok := <-updates:
+
 				if !ok {
 					//conn.write(my_notification(CEASE, ADMINISTRATIVE_SHUTDOWN))
 					conn.write(my_shutdown("That's all, folks!"))
 					return
 				}
 
+				if r.Parameters == nil {
+					r.Parameters = u.Parameters
+				}
+
 				if state == ESTABLISHED {
 
-					nlris := r.updates(rib)
+					nlris := r.updates(u)
 					//fmt.Println(">>>>>>", nlris)
 					if len(nlris) != 0 {
 						conn.write(my_update(ip, asn, r.Parameters, external, nlris))
 					}
 				}
 
-				rib = r.Copy()
+				u = r
 
 			case <-keepalive_timer.C:
 				if state == ESTABLISHED {
@@ -217,7 +227,7 @@ func active(id IP4, local net.IP, peer IP4, p Parameters, rib Update) (chan Upda
 	return updates, done
 }
 
-func my_update(ip IP4, asn uint16, p Parameters, external bool, n []nlri) message {
+func my_update(ip IP4, asn uint16, p *Parameters, external bool, n []nlri) message {
 
 	var communities []uint32
 

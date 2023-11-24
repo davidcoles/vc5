@@ -9,7 +9,7 @@ type IP = [4]byte
 
 type Update struct {
 	RIB        []IP
-	Parameters Parameters
+	Parameters *Parameters
 }
 
 func (r *Update) adjRIBOut() []IP4 {
