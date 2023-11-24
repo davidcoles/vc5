@@ -5,11 +5,6 @@ import (
 	"github.com/davidcoles/vc5/types"
 )
 
-type Config struct {
-	//RIB   []IP
-	Peers map[IP4]Parameters
-}
-
 type Pool struct {
 	c chan map[IP4]Parameters
 	r chan []IP

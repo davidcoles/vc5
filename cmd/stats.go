@@ -26,6 +26,8 @@ import (
 	"time"
 )
 
+type IP = [4]byte
+
 func getStats(lb Balancer) *Stats {
 
 	now := time.Now()
@@ -41,9 +43,11 @@ func getStats(lb Balancer) *Stats {
 		VIPs:    map[IP4]map[L4]Service{},
 		RHI:     map[string]bool{},
 		When:    map[IP4]int64{},
+		rhi:     map[IP]bool{},
 	}
 
 	for k, v := range status.Health() {
+		stats.rhi[k] = v.Up
 		stats.RHI[k.String()] = v.Up
 		stats.When[k] = int64(now.Sub(v.Time) / time.Second)
 	}
@@ -353,6 +357,7 @@ type Stats struct {
 	RHI        map[string]bool        `json:"rhi"`
 	When       map[IP4]int64          `json:"when"`
 	VIPs       map[IP4]map[L4]Service `json:"vips"`
+	rhi        map[IP]bool
 }
 
 type Service struct {
@@ -406,6 +411,51 @@ func (r Real) Sub(o Real, dur time.Duration) Real {
 	r.PacketsPS = (uint64(time.Second) * (r.Packets - o.Packets)) / uint64(dur)
 	r.FlowsPS = (uint64(time.Second) * (r.Flows - o.Flows)) / uint64(dur)
 	return r
+}
+
+func (s *Stats) RIB_() []IP {
+	var rib []IP
+	for k, v := range s.rhi {
+		if v {
+			rib = append(rib, k)
+		}
+	}
+	return rib
+}
+
+func (s *Stats) RIB() []IP {
+	var rib []IP
+	for k, v := range s.rhi {
+		if v {
+			rib = append(rib, k)
+		}
+	}
+
+	return rib
+}
+
+func (s *Stats) RIBChanged(old []IP) ([]IP, bool) {
+	rib := s.RIB()
+
+	r := map[IP]bool{}
+	for _, ip := range rib {
+		r[ip] = true
+	}
+
+	o := map[IP]bool{}
+	for _, ip := range old {
+		o[ip] = true
+	}
+
+	for ip, _ := range r {
+		_, ok := o[ip]
+		if !ok {
+			return rib, true
+		}
+		delete(o, ip)
+	}
+
+	return rib, len(o) != 0
 }
 
 func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
