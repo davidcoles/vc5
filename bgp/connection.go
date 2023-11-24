@@ -19,7 +19,6 @@
 package bgp4
 
 import (
-	//"fmt"
 	"io"
 	"net"
 	"sync"

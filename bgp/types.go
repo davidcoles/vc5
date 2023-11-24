@@ -24,14 +24,46 @@ import (
 	"net"
 	"regexp"
 	"strconv"
-
-	"github.com/davidcoles/vc5/types"
 )
 
 type IP = [4]byte
-
-type IP4 = types.IP4
+type IP4 [4]byte
 type IPNet net.IPNet
+
+func parseIP(ip string) ([4]byte, bool) {
+	var addr [4]byte
+	re := regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)\.(\d+)$`)
+	m := re.FindStringSubmatch(ip)
+	if len(m) != 5 {
+		return addr, false
+	}
+	for n, _ := range addr {
+		a, err := strconv.ParseInt(m[n+1], 10, 9)
+		if err != nil || a < 0 || a > 255 {
+			return addr, false
+		}
+		addr[n] = byte(a)
+	}
+	return addr, true
+}
+
+func (i *IP4) UnmarshalJSON(d []byte) error {
+	l := len(d)
+	if l < 2 || d[0] != '"' || d[l-1] != '"' {
+		return errors.New("Badly formated IPv4 address: " + string(d))
+	}
+
+	ip, ok := parseIP(string(d[1 : l-1]))
+
+	if ok {
+		i[0] = ip[0]
+		i[1] = ip[1]
+		i[2] = ip[2]
+		i[3] = ip[3]
+		return nil
+	}
+	return errors.New("Badly formated IPv4 address: " + string(d))
+}
 
 func ip_string(i IP) string {
 	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])

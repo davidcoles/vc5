@@ -20,7 +20,6 @@ package bgp4
 
 import (
 	"fmt"
-	"github.com/davidcoles/vc5/types"
 )
 
 type Pool struct {
@@ -53,7 +52,8 @@ func NewPool(addr string, peers map[IP4]Parameters, rib_ []IP) *Pool {
 
 	var nul IP4
 
-	id, ok := types.ParseIP(addr)
+	//id, ok := types.ParseIP(addr)
+	id, ok := parseIP(addr)
 
 	if !ok || id == nul {
 		return nil
