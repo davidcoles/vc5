@@ -130,3 +130,65 @@ func (c *Update) updates(p Update) []nlri {
 
 	return n
 }
+
+func (c *Update) updates2(p Update) map[IP]bool {
+	n := map[IP]bool{}
+
+	var vary bool = c.Parameters.Diff(p.Parameters)
+
+	curr := map[IP4]bool{}
+	prev := map[IP4]bool{}
+
+	for _, ip := range c.adjRIBOut() {
+		curr[ip] = true
+	}
+
+	for _, ip := range p.adjRIBOut() {
+		prev[ip] = true
+	}
+
+	for ip, _ := range curr {
+		_, ok := prev[ip] // if didn't exist in previous rib, or params have changed then need to advertise
+		if !ok || vary {
+			//n = append(n, nlri{ip: ip, up: true})
+			n[ip] = true
+		}
+	}
+
+	for ip, _ := range prev {
+		_, ok := curr[ip] // if not in current rib then need to withdraw
+		if !ok {
+			//n = append(n, nlri{ip: ip, up: false})
+			n[ip] = false
+		}
+	}
+
+	return n
+}
+
+func RIBSDiffer(a, b []IP) bool {
+
+	x := map[IP]bool{}
+	for _, i := range a {
+		x[i] = true
+	}
+
+	y := map[IP]bool{}
+	for _, i := range b {
+		y[i] = true
+	}
+
+	if len(y) != len(y) {
+		return true
+	}
+
+	for i, _ := range x {
+		_, ok := y[i]
+		if !ok {
+			return true
+		}
+		delete(y, i)
+	}
+
+	return len(y) != 0
+}

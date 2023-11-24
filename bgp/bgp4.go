@@ -301,6 +301,18 @@ func (b *Peer) NLRI(ip IP4, up bool) {
 */
 
 func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
+	return _bgpupdate(myip, asn, external, local_pref, med, communities, nlri...)
+}
+func bgpupdate2(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlris map[IP]bool) []byte {
+	var n []nlri
+
+	for k, v := range nlris {
+		n = append(n, nlri{ip: k, up: v})
+	}
+
+	return _bgpupdate(myip, asn, external, local_pref, med, communities, n...)
+}
+func _bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
 
 	var withdrawn []byte
 	var advertise []byte

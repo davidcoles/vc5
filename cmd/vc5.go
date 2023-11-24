@@ -81,6 +81,8 @@ func ulimit(resource int) {
 
 func main() {
 
+	var rib []IP
+
 	flag.Parse()
 	args := flag.Args()
 
@@ -245,8 +247,8 @@ func main() {
 			t = time.Now()
 			stats = s
 			if time.Now().Sub(start) > (time.Duration(conf.Learn) * time.Second) {
-				var changed bool
-				if rib, changed = s.RIBChanged(rib); changed {
+				var differ bool
+				if rib, differ = s.RIBDiffer(rib); differ {
 					pool.RIB(rib)
 				}
 			}

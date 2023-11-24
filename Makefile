@@ -63,6 +63,7 @@ distclean: clean
 tests:
 	cd kernel/        && go test -v
 	cd kernel/maglev/ && go test -v
+	cd bgp/           && go test -v
 
 wc:
 	find bgp4 cmd/vc5.go config kernel lb maglev monitor types -name \*.go | xargs wc

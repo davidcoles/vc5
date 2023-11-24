@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/davidcoles/vc5/bgp"
 )
 
 type IP = [4]byte
@@ -413,16 +415,6 @@ func (r Real) Sub(o Real, dur time.Duration) Real {
 	return r
 }
 
-func (s *Stats) RIB_() []IP {
-	var rib []IP
-	for k, v := range s.rhi {
-		if v {
-			rib = append(rib, k)
-		}
-	}
-	return rib
-}
-
 func (s *Stats) RIB() []IP {
 	var rib []IP
 	for k, v := range s.rhi {
@@ -434,28 +426,9 @@ func (s *Stats) RIB() []IP {
 	return rib
 }
 
-func (s *Stats) RIBChanged(old []IP) ([]IP, bool) {
+func (s *Stats) RIBDiffer(old []IP) ([]IP, bool) {
 	rib := s.RIB()
-
-	r := map[IP]bool{}
-	for _, ip := range rib {
-		r[ip] = true
-	}
-
-	o := map[IP]bool{}
-	for _, ip := range old {
-		o[ip] = true
-	}
-
-	for ip, _ := range r {
-		_, ok := o[ip]
-		if !ok {
-			return rib, true
-		}
-		delete(o, ip)
-	}
-
-	return rib, len(o) != 0
+	return rib, bgp4.RIBSDiffer(rib, old)
 }
 
 func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {
