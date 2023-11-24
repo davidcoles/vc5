@@ -1,3 +1,21 @@
+/*
+ * VC5 load balancer. Copyright (C) 2021-present David Coles
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 package bgp4
 
 import (
@@ -5,14 +23,14 @@ import (
 	"time"
 )
 
-func session(id, peer IP4, current Update) chan Update {
+func session(id, peer IP, current Update) chan Update {
 
 	updates := make(chan Update)
 
 	go func() {
 		ip := current.Parameters.SourceIP
 
-		local := net.ParseIP(ip.String())
+		local := net.ParseIP(ip_string(ip))
 
 		retry_time := 10 * time.Second
 
@@ -74,7 +92,7 @@ func session(id, peer IP4, current Update) chan Update {
 	return updates
 }
 
-func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
+func active(id IP, local net.IP, peer IP, u Update) (chan Update, chan bool) {
 	updates := make(chan Update)
 	done := make(chan bool)
 
@@ -102,7 +120,7 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 
 		defer conn.Close()
 
-		conn.write(my_open(asn, ht, id))
+		conn.write(openMessage(asn, ht, id))
 
 		state = OPEN_SENT
 
@@ -137,28 +155,28 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 
 				case M_KEEPALIVE:
 					if state == OPEN_SENT {
-						conn.write(my_notification(FSM_ERROR, 0))
+						conn.write(notificationMessage(FSM_ERROR, 0))
 						return
 					}
 
 				case M_OPEN:
 					if state != OPEN_SENT {
-						conn.write(my_notification(FSM_ERROR, 0))
+						conn.write(notificationMessage(FSM_ERROR, 0))
 						return
 					}
 
 					if m.open.version != 4 {
-						conn.write(my_notification(OPEN_ERROR, UNSUPPORTED_VERSION_NUMBER))
+						conn.write(notificationMessage(OPEN_ERROR, UNSUPPORTED_VERSION_NUMBER))
 						return
 					}
 
 					if m.open.ht < 3 {
-						conn.write(my_notification(OPEN_ERROR, UNNACEPTABLE_HOLD_TIME))
+						conn.write(notificationMessage(OPEN_ERROR, UNNACEPTABLE_HOLD_TIME))
 						return
 					}
 
 					if m.open.id == id {
-						conn.write(my_notification(OPEN_ERROR, BAD_BGP_ID))
+						conn.write(notificationMessage(OPEN_ERROR, BAD_BGP_ID))
 						return
 					}
 
@@ -175,25 +193,25 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 
 					state = ESTABLISHED
 
-					conn.write(my_keepalive())
-					conn.write(my_update(ip, asn, u.Parameters, external, u.full2()))
+					conn.write(keepaliveMessage())
+					conn.write(updateMessage(ip, asn, u.Parameters, external, u.full()))
 
 				case M_UPDATE:
 					if state != ESTABLISHED {
-						conn.write(my_notification(FSM_ERROR, 0))
+						conn.write(notificationMessage(FSM_ERROR, 0))
 						return
 					}
 					// we just ignore updates!
 
 				default:
-					conn.write(my_notification(MESSAGE_HEADER_ERROR, BAD_MESSAGE_TYPE))
+					conn.write(notificationMessage(MESSAGE_HEADER_ERROR, BAD_MESSAGE_TYPE))
 				}
 
 			case r, ok := <-updates:
 
 				if !ok {
-					//conn.write(my_notification(CEASE, ADMINISTRATIVE_SHUTDOWN))
-					conn.write(my_shutdown("That's all, folks!"))
+					//conn.write(notificationMessage(CEASE, ADMINISTRATIVE_SHUTDOWN))
+					conn.write(shutdownMessage("That's all, folks!"))
 					return
 				}
 
@@ -205,7 +223,7 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 
 					nlris := r.updates(u)
 					if len(nlris) != 0 {
-						conn.write(my_update(ip, asn, r.Parameters, external, nlris))
+						conn.write(updateMessage(ip, asn, r.Parameters, external, nlris))
 					}
 				}
 
@@ -213,46 +231,15 @@ func active(id IP4, local net.IP, peer IP4, u Update) (chan Update, chan bool) {
 
 			case <-keepalive_timer.C:
 				if state == ESTABLISHED {
-					conn.write(my_keepalive())
+					conn.write(keepaliveMessage())
 				}
 
 			case <-hold_timer.C:
-				conn.write(my_notification(HOLD_TIMER_EXPIRED, 0))
+				conn.write(notificationMessage(HOLD_TIMER_EXPIRED, 0))
 				return
 			}
 		}
 	}()
 
 	return updates, done
-}
-
-func my_update(ip IP4, asn uint16, p *Parameters, external bool, m map[IP]bool) message {
-	u := bgpupdate(p.SourceIP, p.ASN, external, p.LocalPref, p.MED, p.Communities, m)
-	return message{mtype: M_UPDATE, body: u}
-}
-
-func my_open(asn uint16, ht uint16, id IP4) message {
-	var m message
-	var o open
-	o.version = 4
-	o.as = asn
-	o.ht = ht
-	o.id = id
-	m.mtype = M_OPEN
-	m.open = o
-	return m
-}
-
-func my_keepalive() message {
-	return message{mtype: M_KEEPALIVE}
-}
-
-func my_notification(code, sub uint8) message {
-	return message{mtype: M_NOTIFICATION, notification: notification{code: code, sub: sub}}
-}
-
-func my_shutdown(d string) message {
-	return message{mtype: M_NOTIFICATION, notification: notification{
-		code: CEASE, sub: ADMINISTRATIVE_SHUTDOWN, data: []byte(d),
-	}}
 }

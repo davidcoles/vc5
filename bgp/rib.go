@@ -1,33 +1,29 @@
 package bgp4
 
 import (
-	//"fmt"
 	"net"
 )
-
-type IP = [4]byte
 
 type Update struct {
 	RIB        []IP
 	Parameters *Parameters
 }
 
-func (r *Update) adjRIBOut() []IP4 {
+func (r *Update) adjRIBOut() []IP {
 	return r.Parameters.Filter(r.RIB)
 }
 
-func (r *Update) Filter() []IP4 {
+func (r *Update) Filter() []IP {
 	return r.Parameters.Filter(r.RIB)
 }
 
-func (p *Parameters) Filter(dest []IP) []IP4 {
-	var pass []IP4
+func (p *Parameters) Filter(dest []IP) []IP {
+	var pass []IP
 
 filter:
 	for _, i := range dest {
-		ip4 := IP4(i)
 
-		ip := net.ParseIP(ip4.String())
+		ip := net.ParseIP(ip_string(i))
 
 		if ip == nil {
 			continue
@@ -54,9 +50,9 @@ filter:
 	return pass
 }
 
-func Filter(dest []IP4, filter []IP4) []IP4 {
+func Filter(dest []IP, filter []IP) []IP {
 
-	reject := map[IP4]bool{}
+	reject := map[IP]bool{}
 
 	if len(filter) == 0 {
 		return dest
@@ -66,7 +62,7 @@ func Filter(dest []IP4, filter []IP4) []IP4 {
 		reject[i] = true
 	}
 
-	var o []IP4
+	var o []IP
 
 	for _, i := range dest {
 		if _, rejected := reject[i]; !rejected {
@@ -77,23 +73,11 @@ func Filter(dest []IP4, filter []IP4) []IP4 {
 	return o
 }
 
-func (r *Update) full() []nlri {
-	var n []nlri
-	//for _, ip := range r.RIB {
-	for _, ip := range r.adjRIBOut() {
-		n = append(n, nlri{ip: ip, up: true})
-	}
-
-	return n
-}
-
-func (r *Update) full2() map[IP]bool {
+func (r *Update) full() map[IP]bool {
 	n := map[IP]bool{}
-	//for _, ip := range r.RIB {
 	for _, ip := range r.adjRIBOut() {
 		n[ip] = true
 	}
-
 	return n
 }
 
@@ -112,8 +96,8 @@ func (c *Update) updates(p Update) map[IP]bool {
 
 	var vary bool = c.Parameters.Diff(p.Parameters)
 
-	curr := map[IP4]bool{}
-	prev := map[IP4]bool{}
+	curr := map[IP]bool{}
+	prev := map[IP]bool{}
 
 	for _, ip := range c.adjRIBOut() {
 		curr[ip] = true
@@ -126,7 +110,6 @@ func (c *Update) updates(p Update) map[IP]bool {
 	for ip, _ := range curr {
 		_, ok := prev[ip] // if didn't exist in previous rib, or params have changed then need to advertise
 		if !ok || vary {
-			//n = append(n, nlri{ip: ip, up: true})
 			n[ip] = true
 		}
 	}
@@ -134,7 +117,6 @@ func (c *Update) updates(p Update) map[IP]bool {
 	for ip, _ := range prev {
 		_, ok := curr[ip] // if not in current rib then need to withdraw
 		if !ok {
-			//n = append(n, nlri{ip: ip, up: false})
 			n[ip] = false
 		}
 	}

@@ -99,34 +99,14 @@ const (
 // 0   1  0  1  0 0 0 0
 // W   N  C  R  0 0 0 0
 // O   T  P  E  0 0 0 0
-/*
-type Peer struct {
-	state       int
-	peer        string
-	port        uint16
-	myip        [4]byte
-	rid         [4]byte
-	asn         uint16
-	hold        uint16
-	nlri        chan nlri
-	logs        logger
-	communities []uint32
-	med         uint32
-	lp          uint32
-}
-*/
+
 type open struct {
 	version byte
 	as      uint16
 	ht      uint16
-	id      IP4
+	id      IP
 	op      []byte
 }
-
-//type community struct {
-//	community_asn uint16
-//	community_val uint16
-//}
 
 func (b open) String() string {
 	op := b.op
@@ -182,18 +162,6 @@ type message struct {
 	open         open
 	notification notification
 	body         []byte
-}
-
-type nlri struct {
-	ip IP4
-	up bool
-}
-
-func (n *nlri) updown() string {
-	if n.up {
-		return "UP"
-	}
-	return "DOWN"
 }
 
 func newopen(d []byte) open {
@@ -284,100 +252,3 @@ func (l *Logger) NOTICE(e ...interface{})  { _debug(e...) }
 func (l *Logger) INFO(e ...interface{})    { _debug(e...) }
 func (l *Logger) DEBUG(e ...interface{})   { _debug(e...) }
 */
-
-// func _bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, nlri ...nlri) []byte {
-// func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []uint32, status map[IP]bool) []byte {
-func bgpupdate(myip IP4, asn uint16, external bool, local_pref uint32, med uint32, communities []Community, status map[IP]bool) []byte {
-
-	var withdrawn []byte
-	var advertise []byte
-
-	for k, v := range status {
-		if v {
-			advertise = append(advertise, 32, k[0], k[1], k[2], k[3]) // 32 bit prefix
-		} else {
-			withdrawn = append(withdrawn, 32, k[0], k[1], k[2], k[3]) // 32 bit prefix
-		}
-	}
-
-	// <attribute type, attribute length, attribute value> [data ...]
-	// (Well-known, Transitive, Complete, Regular length), 1(ORIGIN), 1(byte), 0(IGP)
-	origin := []byte{WTCR, ORIGIN, 1, IGP}
-
-	// (Well-known, Transitive, Complete, Regular length). 2(AS_PATH), 0(bytes, if iBGP - may get updated)
-	as_path := []byte{WTCR, AS_PATH, 0}
-
-	if external {
-		// Each AS path segment is represented by a triple <path segment type, path segment length, path segment value>
-		as_sequence := []byte{AS_SEQUENCE, 1} // AS_SEQUENCE(2), 1 ASN
-		as_sequence = append(as_sequence, htons(asn)...)
-		as_path = append(as_path, as_sequence...)
-		as_path[2] = byte(len(as_sequence)) // update length field
-	}
-
-	// (Well-known, Transitive, Complete, Regular length), NEXT_HOP(3), 4(bytes)
-	next_hop := append([]byte{WTCR, NEXT_HOP, 4}, myip[:]...)
-
-	path_attributes := []byte{}
-	path_attributes = append(path_attributes, origin...)
-	path_attributes = append(path_attributes, as_path...)
-	path_attributes = append(path_attributes, next_hop...)
-
-	// rfc4271: A BGP speaker MUST NOT include this attribute in UPDATE messages it sends to external peers ...
-	if !external {
-
-		if local_pref == 0 {
-			local_pref = 100
-		}
-
-		// (Well-known, Transitive, Complete, Regular length), LOCAL_PREF(5), 4 bytes
-		attr := append([]byte{WTCR, LOCAL_PREF, 4}, htonl(local_pref)...)
-		path_attributes = append(path_attributes, attr...)
-	}
-
-	if len(communities) > 0 {
-		comms := []byte{}
-		for k, v := range communities {
-			if k < 60 { // should implement extended length
-				c := htonl(uint32(v))
-				comms = append(comms, c[:]...)
-			}
-		}
-
-		// (Optional, Transitive, Complete, Regular length), COMMUNITIES(8), n bytes
-		attr := append([]byte{OTCR, COMMUNITIES, uint8(len(comms))}, comms...)
-		path_attributes = append(path_attributes, attr...)
-	}
-
-	if med > 0 {
-		// (Optional, Non-transitive, Complete, Regular length), MULTI_EXIT_DISC(4), 4 bytes
-		attr := append([]byte{ONCR, MULTI_EXIT_DISC, 4}, htonl(uint32(med))...)
-		path_attributes = append(path_attributes, attr...)
-	}
-
-	//   +-----------------------------------------------------+
-	//   |   Withdrawn Routes Length (2 octets)                |
-	//   +-----------------------------------------------------+
-	//   |   Withdrawn Routes (variable)                       |
-	//   +-----------------------------------------------------+
-	//   |   Total Path Attribute Length (2 octets)            |
-	//   +-----------------------------------------------------+
-	//   |   Path Attributes (variable)                        |
-	//   +-----------------------------------------------------+
-	//   |   Network Layer Reachability Information (variable) |
-	//   +-----------------------------------------------------+
-
-	var update []byte
-	update = append(update, htons(uint16(len(withdrawn)))...)
-	update = append(update, withdrawn...)
-
-	if len(advertise) > 0 {
-		update = append(update, htons(uint16(len(path_attributes)))...)
-		update = append(update, path_attributes...)
-		update = append(update, advertise...)
-	} else {
-		update = append(update, 0, 0) // total path attribute length 0 as there is no nlri
-	}
-
-	return update
-}
