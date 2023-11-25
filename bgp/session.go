@@ -16,21 +16,74 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package bgp4
+package bgp
 
 import (
-	"net"
 	"time"
 )
 
-func session(id IP, peer string, current Update) chan Update {
+const (
+	IDLE         = "IDLE"
+	ACTIVE       = "ACTIVE"
+	CONNECT      = "CONNECT"
+	OPEN_SENT    = "OPEN_SENT"
+	OPEN_CONFIRM = "OPEN_CONFIRM"
+	ESTABLISHED  = "ESTABLISHED"
+)
 
-	updates := make(chan Update)
+type Status struct {
+	State             string
+	UpdateCalculation time.Duration `json:"update_calculation_ms"`
+	Advertised        uint64
+	Withdrawn         uint64
+	AdjRIBOut         []string
+	Prefixes          int
+	Attempts          uint64
+	Connections       uint64
+	Established       uint64
+	LastError         string
+	HoldTime          uint16
+	LocalASN          uint16
+	RemoteASN         uint16
+}
+
+type Session struct {
+	c      chan Update
+	p      Parameters
+	r      []IP
+	status Status
+}
+
+func NewSession(id IP, peer string, p Parameters, r []IP) *Session {
+	s := &Session{p: p, r: r}
+	s.c = session(id, peer, Update{RIB: r, Parameters: p}, &(s.status))
+	return s
+
+}
+
+func (s *Session) Status() Status {
+	return s.status
+}
+
+func (s *Session) RIB(r []IP) {
+	s.r = r
+	s.c <- Update{RIB: s.r, Parameters: s.p}
+}
+
+func (s *Session) Configure(p Parameters) {
+	s.p = p
+	s.c <- Update{RIB: s.r, Parameters: s.p}
+}
+
+func (s *Session) Close() {
+	close(s.c)
+}
+
+func session(id IP, peer string, update Update, status *Status) chan Update {
+
+	updates := make(chan Update, 100)
 
 	go func() {
-		ip := current.Parameters.SourceIP
-
-		local := net.ParseIP(ip_string(ip))
 
 		retry_time := 10 * time.Second
 
@@ -39,7 +92,7 @@ func session(id IP, peer string, current Update) chan Update {
 
 		defer timer.Stop()
 
-		connection, done := active(id, local, peer, current)
+		connection, done := active(id, peer, update, status)
 
 		defer func() {
 			if connection != nil {
@@ -47,43 +100,45 @@ func session(id IP, peer string, current Update) chan Update {
 			}
 		}()
 
+		var ok bool
+
 		for {
 			if connection != nil { //active
 				select {
 				case <-done: // downstream closed - wait and re-establish
+					close(connection)
 					connection = nil
 					timer.Reset(retry_time)
-				case c, ok := <-updates:
+					println(peer, status.LastError)
+
+				case update, ok = <-updates:
 					if !ok {
 						return
-					}
-
-					current.RIB = c.RIB
-					if c.Parameters != nil {
-						current.Parameters = c.Parameters
 					}
 
 					select {
-					case connection <- current:
+					case connection <- update:
 					case <-done: // downstream closed - wait and re-establish
+						close(connection)
 						connection = nil
-						timer.Reset(30 * retry_time)
+						timer.Reset(retry_time)
+						println(peer, status.LastError)
+					default: // updates have backed up channel (unlikely, but possible)
+						close(connection)
+						connection = nil
+						timer.Reset(retry_time)
+						status.LastError = "Technical difficulties"
 					}
 				}
-			} else { //idle
+			} else { // idle
 				select {
-				case c, ok := <-updates:
+				case update, ok = <-updates:
 					if !ok {
 						return
 					}
 
-					current.RIB = c.RIB
-					if c.Parameters != nil {
-						current.Parameters = c.Parameters
-					}
-
 				case <-timer.C:
-					connection, done = active(id, local, peer, current)
+					connection, done = active(id, peer, update, status)
 				}
 			}
 		}
@@ -92,41 +147,48 @@ func session(id IP, peer string, current Update) chan Update {
 	return updates
 }
 
-func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool) {
+func active(id IP, peer string, u Update, status *Status) (chan Update, chan bool) {
 	updates := make(chan Update)
 	done := make(chan bool)
 
 	go func() {
 
-		ip := u.Parameters.SourceIP
 		asn := u.Parameters.ASNumber
 		ht := u.Parameters.HoldTime
+		ip := u.Parameters.SourceIP
 
 		if ht < 3 {
 			ht = 10
 		}
 
-		defer close(done) // let upstream know that the connection has failed/closed
+		defer func() {
+			status.State = IDLE
+			status.AdjRIBOut = nil
+			status.Prefixes = 0
+			status.Advertised = 0
+			status.Withdrawn = 0
+			status.HoldTime = 0
+			close(done) // let upstream know that the connection has failed/closed
+		}()
 
-		state := ACTIVE
+		status.State = ACTIVE
 
-		conn, err := new_connection(local, peer)
+		status.Attempts++
+		conn, err := new_connection(u.Source(), peer)
 
 		if err != nil {
+			status.LastError = err.Error()
 			return
 		}
 
-		state = CONNECT
+		status.State = CONNECT
+		status.Connections++
 
 		defer conn.Close()
 
 		conn.write(openMessage(asn, ht, id))
 
-		state = OPEN_SENT
-
-		defer func() {
-			state = IDLE
-		}()
+		status.State = OPEN_SENT
 
 		hold_time_ns := time.Duration(ht) * time.Second
 		hold_timer := time.NewTimer(hold_time_ns)
@@ -138,11 +200,20 @@ func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool)
 
 		var external bool
 
+		update_stats := func(a, w uint64, d time.Duration, r []string) {
+			status.Advertised += a
+			status.Withdrawn += w
+			status.UpdateCalculation = d / time.Millisecond
+			status.AdjRIBOut = r
+			status.Prefixes = len(r)
+		}
+
 		for {
 			select {
 			case m, ok := <-conn.C:
 
 				if !ok {
+					status.LastError = conn.Error
 					return
 				}
 
@@ -151,32 +222,41 @@ func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool)
 				switch m.mtype {
 				case M_NOTIFICATION:
 					// note why
+					status.LastError = "NOTIFICATION" + m.notification.reason()
 					return
 
 				case M_KEEPALIVE:
-					if state == OPEN_SENT {
+					if status.State == OPEN_SENT {
 						conn.write(notificationMessage(FSM_ERROR, 0))
 						return
 					}
 
 				case M_OPEN:
-					if state != OPEN_SENT {
+					if status.State != OPEN_SENT {
+						n := notificationMessage(FSM_ERROR, 0)
 						conn.write(notificationMessage(FSM_ERROR, 0))
+						status.LastError = "OPEN" + n.notification.reason()
 						return
 					}
 
 					if m.open.version != 4 {
-						conn.write(notificationMessage(OPEN_ERROR, UNSUPPORTED_VERSION_NUMBER))
+						n := notificationMessage(OPEN_ERROR, UNSUPPORTED_VERSION_NUMBER)
+						conn.write(n)
+						status.LastError = "OPEN" + n.notification.reason()
 						return
 					}
 
 					if m.open.ht < 3 {
-						conn.write(notificationMessage(OPEN_ERROR, UNNACEPTABLE_HOLD_TIME))
+						n := notificationMessage(OPEN_ERROR, UNNACEPTABLE_HOLD_TIME)
+						conn.write(n)
+						status.LastError = "OPEN" + n.notification.reason()
 						return
 					}
 
 					if m.open.id == id {
-						conn.write(notificationMessage(OPEN_ERROR, BAD_BGP_ID))
+						n := notificationMessage(OPEN_ERROR, BAD_BGP_ID)
+						conn.write(n)
+						status.LastError = "OPEN" + n.notification.reason()
 						return
 					}
 
@@ -191,20 +271,33 @@ func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool)
 
 					external = m.open.as != asn
 
-					state = ESTABLISHED
+					status.State = ESTABLISHED
+					status.LastError = ""
+					status.Established++
+					status.HoldTime = ht
+					status.LocalASN = asn
+					status.RemoteASN = m.open.as
 
 					conn.write(keepaliveMessage())
-					conn.write(updateMessage(ip, asn, u.Parameters, external, u.full()))
+
+					t := time.Now()
+					aro := u.adjRIBOut()
+					conn.write(updateMessage(ip, asn, u.Parameters, external, advertise(aro)))
+					update_stats(uint64(len(aro)), 0, time.Now().Sub(t), to_string(aro))
 
 				case M_UPDATE:
-					if state != ESTABLISHED {
-						conn.write(notificationMessage(FSM_ERROR, 0))
+					if status.State != ESTABLISHED {
+						n := notificationMessage(FSM_ERROR, 0)
+						conn.write(n)
+						status.LastError = status.State + "/UPDATE" + n.notification.reason()
 						return
 					}
 					// we just ignore updates!
 
 				default:
-					conn.write(notificationMessage(MESSAGE_HEADER_ERROR, BAD_MESSAGE_TYPE))
+					n := notificationMessage(MESSAGE_HEADER_ERROR, BAD_MESSAGE_TYPE)
+					conn.write(n)
+					status.LastError = status.State + n.notification.reason()
 				}
 
 			case r, ok := <-updates:
@@ -212,30 +305,29 @@ func active(id IP, local net.IP, peer string, u Update) (chan Update, chan bool)
 				if !ok {
 					//conn.write(notificationMessage(CEASE, ADMINISTRATIVE_SHUTDOWN))
 					conn.write(shutdownMessage("That's all, folks!"))
+					status.LastError = "Local shutdown"
 					return
 				}
 
-				if r.Parameters == nil {
-					r.Parameters = u.Parameters
-				}
-
-				if state == ESTABLISHED {
-
-					nlris := r.updates(u)
+				if status.State == ESTABLISHED {
+					t := time.Now()
+					a, w, nlris := r.updates(u)
 					if len(nlris) != 0 {
 						conn.write(updateMessage(ip, asn, r.Parameters, external, nlris))
 					}
+					update_stats(a, w, time.Now().Sub(t), r.adjRIBOutString())
 				}
 
 				u = r
 
 			case <-keepalive_timer.C:
-				if state == ESTABLISHED {
+				if status.State == ESTABLISHED {
 					conn.write(keepaliveMessage())
 				}
 
 			case <-hold_timer.C:
 				conn.write(notificationMessage(HOLD_TIMER_EXPIRED, 0))
+				status.LastError = "Hold timer expired"
 				return
 			}
 		}

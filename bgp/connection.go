@@ -16,7 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package bgp4
+package bgp
 
 import (
 	"io"
@@ -26,7 +26,9 @@ import (
 )
 
 type myconn struct {
-	C           chan message
+	C     chan message
+	Error string
+
 	close       chan bool
 	writer_exit chan bool
 	reader_exit chan bool
@@ -129,6 +131,7 @@ func (c *myconn) writer() {
 
 			_, err := c.conn.Write(m.headerise())
 			if err != nil {
+				c.Error = err.Error()
 				return
 			}
 			goto drain
@@ -151,6 +154,7 @@ func (c *myconn) reader() {
 		n, e := io.ReadFull(c.conn, header[:])
 		if n != len(header) || e != nil {
 			//fmt.Println("********************", n, e)
+			c.Error = e.Error()
 			return
 		}
 
@@ -174,6 +178,7 @@ func (c *myconn) reader() {
 		n, e = io.ReadFull(c.conn, body[:])
 		if n != len(body) || e != nil {
 			//fmt.Println("********************", n, e)
+			c.Error = e.Error()
 			return
 		}
 
@@ -193,6 +198,7 @@ func (c *myconn) reader() {
 		select {
 		case c.C <- m:
 		case <-c.close: // user wants to close the connection
+			c.Error = "Closed"
 			return
 		case <-c.writer_exit:
 			return

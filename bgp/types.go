@@ -16,7 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package bgp4
+package bgp
 
 import (
 	"errors"
@@ -123,19 +123,19 @@ func (c *Community) UnmarshalJSON(data []byte) error {
 
 type Parameters struct {
 	// only used at session start
-	ASNumber uint16 `json:"as_number"`
-	HoldTime uint16 `json:"hold_time"`
-	SourceIP IP     `json:"source_ip"`
+	ASNumber uint16 `json:"as_number,omitempty"`
+	HoldTime uint16 `json:"hold_time,omitempty"`
+	SourceIP IP4    `json:"source_ip,omitempty"`
 
 	// can change during session
-	MED         uint32      `json:"med"`
-	LocalPref   uint32      `json:"local_pref"`
-	Communities []Community `json:"communities"`
-	Accept      []IPNet     `json:"accept"`
-	Reject      []IPNet     `json:"reject"`
+	MED         uint32      `json:"med,omitempty"`
+	LocalPref   uint32      `json:"local_pref,omitempty"`
+	Communities []Community `json:"communities,omitempty"`
+	Accept      []IPNet     `json:"accept,omitempty"`
+	Reject      []IPNet     `json:"reject,omitempty"`
 }
 
-func (a *Parameters) Diff(b *Parameters) (r bool) {
+func (a *Parameters) Diff(b Parameters) (r bool) {
 	r = true
 
 	if a.LocalPref != b.LocalPref ||
@@ -151,4 +151,36 @@ func (a *Parameters) Diff(b *Parameters) (r bool) {
 	}
 
 	return false
+}
+
+type IP4 [4]byte
+
+func (i *IP4) UnmarshalJSON(d []byte) error {
+	l := len(d)
+	if l < 2 || d[0] != '"' || d[l-1] != '"' {
+		return errors.New("Badly formated IPv4 address: " + string(d))
+	}
+
+	ip, ok := parseIP(string(d[1 : l-1]))
+
+	if ok {
+		i[0] = ip[0]
+		i[1] = ip[1]
+		i[2] = ip[2]
+		i[3] = ip[3]
+		return nil
+	}
+	return errors.New("Badly formated IPv4 address: " + string(d))
+}
+
+func (i IP4) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + i.String() + `"`), nil
+}
+
+func (i IP4) string() string {
+	return fmt.Sprintf("%d.%d.%d.%d", i[0], i[1], i[2], i[3])
+}
+
+func (i IP4) String() string {
+	return i.string()
 }

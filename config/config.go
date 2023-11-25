@@ -216,7 +216,7 @@ type Config struct {
 	RHI RHI `json:"rhi,omitempty"`
 
 	// Route Health Injection parameters
-	BGP bgp4.Config `json:"bgp,omitempty"`
+	BGP map[string]bgp.Parameters `json:"bgp,omitempty"`
 
 	// Length of time to wait for services to settle before
 	// advertising route (should perhaps move to RHI)

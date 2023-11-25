@@ -360,6 +360,7 @@ type Stats struct {
 	When       map[IP4]int64          `json:"when"`
 	VIPs       map[IP4]map[L4]Service `json:"vips"`
 	rhi        map[IP]bool
+	BGPStatus  map[string]bgp.Status `json:"bgp_status"`
 }
 
 type Service struct {
@@ -428,7 +429,7 @@ func (s *Stats) RIB() []IP {
 
 func (s *Stats) RIBDiffer(old []IP) ([]IP, bool) {
 	rib := s.RIB()
-	return rib, bgp4.RIBSDiffer(rib, old)
+	return rib, bgp.RIBSDiffer(rib, old)
 }
 
 func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {

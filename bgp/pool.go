@@ -16,16 +16,23 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package bgp4
+package bgp
 
-type Config map[string]Parameters
+type status = map[string]Status
 
 type Pool struct {
-	c chan Config
+	c chan map[string]Parameters
 	r chan []IP
+	s chan chan status
 }
 
-func (p *Pool) Configure(c Config) {
+func (p *Pool) Status() status {
+	c := make(chan status)
+	p.s <- c
+	return <-c
+}
+
+func (p *Pool) Configure(c map[string]Parameters) {
 	p.c <- c
 }
 
@@ -44,7 +51,7 @@ func dup(i []IP) (o []IP) {
 	return
 }
 
-func NewPool(addr string, peers Config, rib_ []IP) *Pool {
+func NewPool(addr string, peers map[string]Parameters, rib_ []IP) *Pool {
 
 	rib := dup(rib_)
 
@@ -58,26 +65,33 @@ func NewPool(addr string, peers Config, rib_ []IP) *Pool {
 
 	ip := id
 
-	p := &Pool{c: make(chan Config), r: make(chan []IP)}
+	p := &Pool{c: make(chan map[string]Parameters), r: make(chan []IP), s: make(chan chan status)}
 
 	go func() {
 
-		m := map[string]chan Update{}
+		m := map[string]*Session{}
 
 		defer func() {
 			for _, v := range m {
-				close(v)
+				v.Close()
 			}
 		}()
 
 		for {
 			select {
+			case c := <-p.s:
+				s := map[string]Status{}
+				for peer, session := range m {
+					s[peer] = session.Status()
+				}
+				c <- s
+
 			case r := <-p.r:
 
 				rib = dup(r)
 
 				for _, v := range m {
-					v <- Update{RIB: rib}
+					v.RIB(rib)
 				}
 
 			case i, ok := <-p.c:
@@ -86,25 +100,23 @@ func NewPool(addr string, peers Config, rib_ []IP) *Pool {
 					return
 				}
 
-				for peer, x := range i {
-					v := x
+				for peer, params := range i {
 
-					if v.SourceIP == nul {
-						v.SourceIP = ip
+					if params.SourceIP == nul {
+						params.SourceIP = ip
 					}
 
-					u := Update{RIB: rib, Parameters: &v}
-
-					if d, ok := m[peer]; ok {
-						d <- u
+					if session, ok := m[peer]; ok {
+						session.Configure(params)
 					} else {
-						m[peer] = session(id, peer, u)
+						m[peer] = NewSession(id, peer, params, rib)
 					}
 				}
 
-				for peer, v := range m {
+				// if any sessions don't appear in the config map then close and remove them
+				for peer, session := range m {
 					if _, ok := i[peer]; !ok {
-						close(v)
+						session.Close()
 						delete(m, peer)
 					}
 				}

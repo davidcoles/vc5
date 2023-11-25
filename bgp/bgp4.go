@@ -18,7 +18,13 @@
 
 // A really stupid BGP4 implementation for avertising /32 addresses for load balancing
 
-package bgp4
+// https://datatracker.ietf.org/doc/html/rfc4271 - A Border Gateway Protocol 4 (BGP-4)
+// https://datatracker.ietf.org/doc/html/rfc8203 - BGP Administrative Shutdown Communication
+// https://datatracker.ietf.org/doc/html/rfc4486 - Subcodes for BGP Cease Notification Message
+
+// https://datatracker.ietf.org/doc/html/rfc2918 - Route Refresh Capability for BGP-4
+
+package bgp
 
 import (
 	"fmt"
@@ -31,15 +37,6 @@ func htonl(h uint32) []byte {
 func htons(h uint16) []byte {
 	return []byte{byte(h >> 8), byte(h)}
 }
-
-const (
-	IDLE = iota
-	ACTIVE
-	CONNECT
-	OPEN_SENT
-	OPEN_CONFIRM
-	ESTABLISHED
-)
 
 const (
 	M_OPEN         = 1
@@ -93,6 +90,55 @@ const (
 	ONCR = 128 // (Optional, Non-transitive, Complete, Regular length)
 	OTCR = 192 // (Optional, Transitive, Complete, Regular length)
 )
+
+func note(code, sub uint8) string {
+	var s string
+	switch code {
+	case MESSAGE_HEADER_ERROR:
+		s = "MESSAGE_HEADER_ERROR"
+		switch sub {
+		case BAD_MESSAGE_TYPE:
+			s += " - BAD_MESSAGE_TYPE"
+		}
+	case OPEN_ERROR:
+		s = "OPEN_ERROR"
+		switch sub {
+		case UNSUPPORTED_VERSION_NUMBER:
+			s += " - UNSUPPORTED_VERSION_NUMBER"
+		case BAD_BGP_ID:
+			s += " - BAD_BGP_ID"
+		case UNNACEPTABLE_HOLD_TIME:
+			s += " - UNNACEPTABLE_HOLD_TIME"
+		}
+
+	case FSM_ERROR:
+		s = "FSM_ERROR"
+	case HOLD_TIMER_EXPIRED:
+		s = "HOLD_TIMER_EXPIRED"
+
+	case CEASE:
+		s = "CEASE"
+		switch sub {
+		case MAXIMUM_PREFIXES_REACHED:
+			s += " - MAXIMUM_PREFIXES_REACHED"
+		case ADMINISTRATIVE_SHUTDOWN:
+			s += " - ADMINISTRATIVE_SHUTDOWN"
+		case PEER_DECONFIGURED:
+			s += " - PEER_DECONFIGURED"
+		case ADMINISTRATIVE_RESET:
+			s += " - ADMINISTRATIVE_RESET"
+		case CONNECTION_REJECTED:
+			s += " - CONNECTION_REJECTED"
+		case OTHER_CONFIGURATION_CHANGE:
+			s += " - OTHER_CONFIGURATION_CHANGE"
+		case CONNECTION_COLLISION_RESOLUTION:
+			s += " - CONNECTION_COLLISION_RESOLUTION"
+		case OUT_OF_RESOURCES:
+			s += " - OUT_OF_RESOURCES"
+		}
+	}
+	return s
+}
 
 // Optional/Well-known, Non-transitive/Transitive Complete/Partial Regular/Extended-length
 // 128 64 32 16 8 4 2 1
@@ -217,6 +263,21 @@ func headerise(t byte, d []byte) []byte {
 	copy(p[19:], d)
 
 	return p
+}
+
+func (n notification) reason() string {
+	r := fmt.Sprintf("[%d:%d]", n.code, n.sub)
+	s := note(n.code, n.sub)
+
+	if s != "" {
+		r += " " + s
+	}
+
+	if len(n.data) > 0 {
+		r += " (" + string(n.data) + ")"
+	}
+
+	return r
 }
 
 /*

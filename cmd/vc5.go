@@ -146,22 +146,7 @@ func main() {
 
 	logger = &Logger{Level: uint8(*level)}
 
-	/*
-		pool := bgp4.Pool{
-			Address:     addr,
-			ASN:         conf.RHI.AS_Number,
-			HoldTime:    conf.RHI.Hold_Time,
-			Communities: conf.RHI.Communities(),
-			Peers:       conf.RHI.Peers,
-			Listen:      conf.RHI.Listen,
-		}
-
-		if !pool.Open() {
-			log.Fatal("BGP peer initialisation failed")
-		}
-	*/
-
-	pool := bgp4.NewPool(addr, conf.BGP, nil)
+	pool := bgp.NewPool(addr, conf.BGP, nil)
 
 	if pool == nil {
 		log.Fatal("pool fail")
@@ -224,11 +209,8 @@ func main() {
 						log.Println(err)
 					} else {
 						hc = h
-						//pool.Peer(conf.RHI.Peers)
 						director.Update(hc)
-
 						pool.Configure(conf.BGP)
-
 					}
 				}
 			}
