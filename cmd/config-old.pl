@@ -23,18 +23,13 @@ if(1) {
     my $scheduler = $conf->{'scheduler'} if exists $conf->{'scheduler'};
     
     $json->{'services'} = services($scheduler, $services, \%defaults, $servers, $policy);
-    $json->{'bgp'} = new_rhi($conf->{'rhi'}, $conf->{'prefixes'});
-    
-    $conf->{'learn'}+=0 if defined $conf->{'learn'};
-    #$conf->{'rhi'}->{'listen'} = $conf->{'rhi'}->{'listen'} =~ /^(yes|true|on|y)$/i ? JSON::true : JSON::false;
-    #$conf->{'rhi'}->{'as_number'}+= 0 if defined $conf->{'rhi'}->{'as_number'};
-    #$conf->{'rhi'}->{'hold_time'}+= 0 if defined $conf->{'rhi'}->{'hold_time'};
-    #$conf->{'rhi'}->{'local_pref'}+= 0 if defined $conf->{'rhi'}->{'local_pref'};        
-    #$conf->{'rhi'}->{'med'}+= 0 if defined $conf->{'rhi'}->{'med'};
-    
 
-    #foreach(qw(learn multicast rhi webserver interfaces vlans)) {
-    foreach(qw(learn multicast  webserver interfaces vlans)) {
+    $conf->{'learn'}+=0 if defined $conf->{'learn'};
+    $conf->{'rhi'}->{'listen'} = $conf->{'rhi'}->{'listen'} =~ /^(yes|true|on|y)$/i ? JSON::true : JSON::false;
+    $conf->{'rhi'}->{'as_number'}+= 0 if defined $conf->{'rhi'}->{'as_number'};
+    $conf->{'rhi'}->{'hold_time'}+= 0 if defined $conf->{'rhi'}->{'hold_time'};    
+    
+    foreach(qw(learn multicast rhi webserver interfaces vlans)) {
 	$json->{$_} = $conf->{$_} if exists $conf->{$_};
     }
     
@@ -274,7 +269,7 @@ sub check() {
     
     if(scalar(@checks) == 0) {
 	# defaults
-
+	
 	my $http = {
 	    _type => $type,
 	    _host => $d{_host},
@@ -287,7 +282,6 @@ sub check() {
 	given ($type) {
 	    when ('http')  { push @c, $http }
 	    when ('https') { push @c, $http }
-	    when ('dnstcp') { push @c, { _type => 'dnstcp' } }
 	    when ('dns')   {
 		given ($protocol) {
 		    when ('udp') { push @c, { _type => 'dns' } }
@@ -312,16 +306,13 @@ sub check() {
 		    when("http") {}
 		    when("https") {}
 		    when("dns") {}
-		    when("dnsudp") { $test = "dns" }
-		    when("dnstcp") { $test = "dnstcp" }		
+		    when("dnstcp") {}		
 		    when("tcp") { $test = "syn" }
 		    default { die "no default test type defined for '$test'\n" }
 		}
 	    }
 
-	    die "uknown test type '$test'\n" unless $test =~ /^(http|https|dns|dnstcp|dnsudp|syn)$/;
-
-	    $test = "dns" if $test eq "dnsudp";
+	    die "uknown test type '$test'\n" unless $test =~ /^(http|https|dns|dnstcp|syn)$/;
 	    
 	    push @c, {
 	        _type => $test,
@@ -340,16 +331,7 @@ sub check() {
 
 sub key {
     my($a, $k, $d) = @_;
-
-    my $ret = defined $a->{$k} ? $a->{$k} : $d;
-
-    return undef unless defined $ret;
-
-    die "Name '$ret' isn't valid\n" if $k eq 'name' && $ret !~ /^[a-z0-9][-a-z0-9]*$/i;
-    die "Expect '$ret' isn't valid\n" if $k eq 'expect' && $ret !~ /^[1-9][0-9][0-9]$/;
-    die "Method '$ret' isn't valid\n" if $k eq 'method' && $ret !~ /^(HEAD|GET)$/;        
-    
-    return $ret;
+    return defined $a->{$k} ? $a->{$k} : $d;
 }
 
 sub jsonbool {
@@ -360,55 +342,4 @@ sub jsonbool {
 sub yamlbool {
     my($v) = @_;
     return $v =~ /^(true|yes|on)$/i ? JSON::true : JSON::false;
-}
-
-
-######################################################################
-
-sub filter {
-    my($m, $n) = @_;
-    return "0.0.0.0/0" if $n eq 'any';
-    return $n unless defined $m && exists $m->{$n};
-    return @{$m->{$n}};
-}
-
-
-sub new_rhi {
-    my($rhi, $map) = @_;
-
-    my $default = params($rhi);
-    my %peers = map { $_ => $default } @{$rhi->{'peers'}} if defined $rhi->{'peers'};
-    
-
-    if(defined $rhi->{'groups'}) {
-	foreach my $g (@{$rhi->{'groups'}}) {
-	    my @accept = map { filter($map, $_) } @{$g->{'accept'}} if defined $g->{'accept'};
-	    my @reject = map { filter($map, $_) } @{$g->{'reject'}} if defined $g->{'reject'};
-	    
-	    my $d = params($g, %$default);
-	    
-	    if(defined $g->{'peers'}) {
-		foreach my $p (@{$g->{'peers'}}) {
-		    die "ASN not set for $p\n" unless $d->{'as_number'} > 0;
-		    $d->{'accept'} = \@accept;
-		    $d->{'reject'} = \@reject;
-		    $peers{$p} = $d;
-		}
-	    }
-	}
-    }
-
-    return \%peers;
-}
-
-sub params {
-    my($o, %p) = @_;
-    
-    $p{'communities'} = $o->{'communities'} if defined $o->{'communities'};    
-    $p{'source_ip'} = $o->{'source_ip'} if defined $o->{'source_ip'};
-    $p{'as_number'} = $o->{'as_number'}+0 if defined $o->{'as_number'};
-    $p{'hold_time'} = $o->{'hold_time'}+0 if defined $o->{'hold_time'};
-    $p{'local_pref'} = $o->{'local_pref'}+0 if defined $o->{'local_pref'};
-    $p{'med'} = $o->{'med'}+0 if defined $o->{'med'};
-    return \%p;
 }
