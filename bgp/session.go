@@ -81,11 +81,11 @@ func (s *Session) Close() {
 
 func session(id IP, peer string, update Update, status *Status) chan Update {
 
-	updates := make(chan Update, 100)
+	updates := make(chan Update, 10)
 
 	go func() {
 
-		retry_time := 10 * time.Second
+		retry_time := 30 * time.Second
 
 		timer := time.NewTimer(retry_time)
 		timer.Stop()

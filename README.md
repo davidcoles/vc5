@@ -1,11 +1,14 @@
 # VC5
 
-Primarily a distributed Layer 2 Direct Server Return (L2DSR) Layer 4 load
+Primarily a distributed Layer 2 Direct Server Return (DSR) Layer 4 load
 balancer (L4LB) for Linux using XDP/eBPF.
 
 It is currently undergoing modification to work with other balancing
 solutions, such as the Linux Virtual Server/IPVS implementation (see
 https://github.com/davidcoles/stayinalived).
+
+Currently you would be best advised to use the binary/code from the
+latest release rather than HEAD.
 
 If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or raise a GitHub issue.
@@ -18,23 +21,24 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 
 See below for build instructions.
 
-## Goals
+## Goals/status
 
-* Simple deployment with a single binary
-* Stable backend selection with Maglev hashing algorithm
-* Route health injection handled automatically; no need to run other software such as ExaBGP
-* Minimally invasive; does not require any modification of iptables rules on server
-* No modification of backend servers beyond adding the VIP to a loopback device
-* Health-checks run against the VIP on backend servers, not their real addresses
-* HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks supported
-* As close as possible to line-rate 10Gbps performance
-* In-kernel code execution with XDP/eBGP - native mode drivers bypass sk_buff allocation
-* (D)DoS mitigation with fast early drop rules (filtering at /20 granularity - in progress)
-* Multiple VLAN support (also multiple NICs for developement/lower bandwidth applications)
-* Bonded network device support to provide high-availibility with LAG/MLAG
-* Observability via a web console and Prometheus metrics
-* Simple API to enable embedding into your own project
-* Extention to support LVS/IPVS for non-DRS operation
+* ✅  Simple deployment with a single binary
+* ✅ Stable backend selection with Maglev hashing algorithm
+* ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
+* ✅ Minimally invasive; does not require any modification of iptables rules on server
+* ✅ No modification of backend servers beyond adding the VIP to a loopback device
+* ✅ Health-checks run against the VIP on backend servers, not their real addresses
+* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks
+* ✅ As close as possible to line-rate 10Gbps performance
+* ✅ In-kernel code execution with XDP/eBGP; native mode drivers bypass sk_buff allocation
+* ✅ (D)DoS mitigation with fast early drop rules
+* ✅ Multiple VLAN support
+* ✅ Multiple NIC support for lower bandwidth/development applications
+* ✅ Works with bonded network devices to support high-availibility/high-bandwidth
+* ✅ Observability via a web console and Prometheus metrics
+* 🚧 Simple API to enable embedding into your own project
+* 🚧 Extension to support LVS/IPVS for non-DRS operation
 
 ## About
 
