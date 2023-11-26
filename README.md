@@ -1,7 +1,8 @@
 # VC5
 
-Primarily a distributed Layer 2 Direct Server Return (DSR) Layer 4 load
-balancer (L4LB) for Linux using XDP/eBPF.
+Primarily a distributed Layer 2 Direct Server Return
+([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
+Layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
 It is currently undergoing modification to work with other balancing
 solutions, such as the Linux Virtual Server/IPVS implementation (see
@@ -55,7 +56,7 @@ One server with a 10Gbit/s network interface should be capable of
 supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
 to the asymmetric nature of most internet traffic. For smaller
 services a modest virtual machine or two will likely handle a service
-generating a few Gbit/s of traffic.
+generating a number of Gbit/s of egress traffic.
 
 If one instance is not sufficient then more servers may be added to
 horizontally scale capacity (and provide redundancy) using your

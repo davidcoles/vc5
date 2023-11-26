@@ -38,6 +38,10 @@ func (r *Update) adjRIBOut() []IP {
 	return r.Parameters.Filter(r.RIB)
 }
 
+func (r *Update) adjRIBOutP() ([]IP, Parameters) {
+	return r.Parameters.Filter(r.RIB), r.Parameters
+}
+
 func (r *Update) Filter() []IP {
 	return r.Parameters.Filter(r.RIB)
 }

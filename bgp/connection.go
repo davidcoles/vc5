@@ -76,7 +76,7 @@ func (c *myconn) Close() {
 
 func (c *myconn) shift() (message, bool) {
 	c.mutex.Lock()
-	c.mutex.Unlock()
+	defer c.mutex.Unlock()
 
 	var m message
 
@@ -97,7 +97,7 @@ func (c *myconn) shift() (message, bool) {
 
 func (c *myconn) write(m message) {
 	c.mutex.Lock()
-	c.mutex.Unlock()
+	defer c.mutex.Unlock()
 
 	c.out = append(c.out, m)
 
