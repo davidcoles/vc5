@@ -46,21 +46,21 @@ rhi:
       reject:
         - 192.168.101.1
         - 192.168.101.2
-		- foo
-		- bar
+        - foo
+        - bar
       communities:
         - 65304:100
         - 65304:200
 
     - name: group-b
       as_number: 65123
-	  source_ip: 10.100.200.10
-	  hold_time: 20
-	  med: 200
+      source_ip: 10.100.200.10
+      hold_time: 20
+      med: 200
       peers:
         - 10.100.200.1
         - 10.100.200.2
-	  accept:
+      accept:
         - 192.168.101.1
         - 192.168.101.2
       reject:
@@ -68,16 +68,14 @@ rhi:
       communities:
         - 65123:300
         - 65123:400
-		
+                
 prefixes:
   foo:
     - 192.168.102/24
     - 192.168.103/24
   bar:
     - 192.168.101.3
-    - 192.168.101.4	
-
-		
+    - 192.168.101.4
 ```
 
 Here, peers 10.1.2.1 and 10.1.2.2 will receive advertisements for all
