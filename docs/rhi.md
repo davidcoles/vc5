@@ -7,6 +7,8 @@ provides services.
 VC5 uses [BGP](https://en.wikipedia.org/wiki/Border_Gateway_Protocol)
 to advertise VIPs as /32 prefixes to BGP enabled routers.
 
+## Examples
+
 A minimal example of the RHI configuration would be:
 
 ```yaml
@@ -31,7 +33,7 @@ is filtered out. If neither set of rules matches then the default
 behaviour is to accept the VIP for advertisement.
 
 
-```
+```yaml
 rhi:
   as_number: 65000
   hold_time: 8
@@ -91,3 +93,18 @@ the connection will be sourced from the local address of
 10.100.200.10, and this will be the advertised next hop. A Multi Exit
 Discriminator of 200 and communities 65123:300 and 65123:400 will be
 present in the UPDATE messages.
+
+
+## Reconfiguration
+
+When the RHI configuration is changed and the reload signal sent to
+the daemon any new peers are started and peers no longer confgured are
+sent a cease message and are removed.
+
+Any configuration changes to extant peers are made immediately and
+network layer reachability information is sent in an UPDATE message to
+update local preference, MED, communities, etc.
+
+Currnely, AS number (in AS_SEQUENCE) and NEXT_HOP address (from
+source_ip) are not changed in any established connection. When the
+session is re-established the new values will be used.
