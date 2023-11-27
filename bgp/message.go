@@ -18,8 +18,6 @@
 
 package bgp
 
-import "fmt"
-
 func updateMessage(ip IP, asn uint16, p Parameters, external bool, m map[IP]bool) message {
 	return message{mtype: M_UPDATE, body: bgpupdate(p.SourceIP, p.ASNumber, external, p.LocalPref, p.MED, p.Communities, m)}
 }
@@ -138,8 +136,6 @@ func bgpupdate(myip IP, asn uint16, external bool, local_pref uint32, med uint32
 	} else {
 		update = append(update, 0, 0) // total path attribute length 0 as there is no nlri
 	}
-
-	fmt.Println("BGP UPDATE: ", len(update))
 
 	return update
 }

@@ -92,49 +92,62 @@ const (
 )
 
 func note(code, sub uint8) string {
-	var s string
+	var s string = "<unrecognised>"
 	switch code {
+	case 0:
+		switch sub {
+		case CONNECTION_FAILED:
+			s = "Connection failed"
+		case REMOTE_SHUTDOWN:
+			s = "Remote shutdown"
+		case LOCAL_SHUTDOWN:
+			s = "Local shutdown"
+		default:
+			s = "Unknown"
+		}
+
 	case MESSAGE_HEADER_ERROR:
-		s = "MESSAGE_HEADER_ERROR"
+		s = "Message header error"
 		switch sub {
 		case BAD_MESSAGE_TYPE:
-			s += " - BAD_MESSAGE_TYPE"
+			s += "; Bad message type"
 		}
 	case OPEN_ERROR:
 		s = "OPEN_ERROR"
 		switch sub {
 		case UNSUPPORTED_VERSION_NUMBER:
-			s += " - UNSUPPORTED_VERSION_NUMBER"
+			s += "; Unsupported version number"
 		case BAD_BGP_ID:
-			s += " - BAD_BGP_ID"
+			s += "; Bad BGP identifier"
 		case UNNACEPTABLE_HOLD_TIME:
-			s += " - UNNACEPTABLE_HOLD_TIME"
+			s += "; Unnaceptable hold time"
 		}
 
 	case FSM_ERROR:
-		s = "FSM_ERROR"
+		s = "Finite state machine error"
+
 	case HOLD_TIMER_EXPIRED:
-		s = "HOLD_TIMER_EXPIRED"
+		s = "Hold timer expired"
 
 	case CEASE:
-		s = "CEASE"
+		s = "Cease"
 		switch sub {
 		case MAXIMUM_PREFIXES_REACHED:
-			s += " - MAXIMUM_PREFIXES_REACHED"
+			s += "; Maximum prefixes reached"
 		case ADMINISTRATIVE_SHUTDOWN:
-			s += " - ADMINISTRATIVE_SHUTDOWN"
+			s += "; Administrative shutdown"
 		case PEER_DECONFIGURED:
-			s += " - PEER_DECONFIGURED"
+			s += "; Peer deconfigured"
 		case ADMINISTRATIVE_RESET:
-			s += " - ADMINISTRATIVE_RESET"
+			s += "; Administrative reset"
 		case CONNECTION_REJECTED:
-			s += " - CONNECTION_REJECTED"
+			s += "; Connection rejected"
 		case OTHER_CONFIGURATION_CHANGE:
-			s += " - OTHER_CONFIGURATION_CHANGE"
+			s += "; Other configuration change"
 		case CONNECTION_COLLISION_RESOLUTION:
-			s += " - CONNECTION_COLLISION_RESOLUTION"
+			s += ": Connection collision resolution"
 		case OUT_OF_RESOURCES:
-			s += " - OUT_OF_RESOURCES"
+			s += "; Out of resources"
 		}
 	}
 	return s
