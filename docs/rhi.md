@@ -92,6 +92,8 @@ the connection will be sourced from the local address of
 Discriminator of 200 and communities 65123:300 and 65123:400 will be
 present in the UPDATE messages.
 
+Prefix lists can be declared in a `prefixes` block and referred to by
+name. The value of `any` is pre-declared as 0.0.0.0/0.
 
 ## Reconfiguration
 
