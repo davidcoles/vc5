@@ -84,6 +84,7 @@ type VC5 struct {
 	report   *monitor.Report
 	mutex    sync.Mutex
 	update   chan *healthchecks.Healthchecks
+	checker  monitor.Checker
 }
 
 // Submit an array of bool elements, each corresponding to a /20 IPv4
@@ -136,6 +137,15 @@ func (v *VC5) DEFCON(d uint8) uint8 {
 // If all of the backend servers are in VLANs specified in the
 // healthchecks configuration then address will not be used.
 func (v *VC5) start(address string, hc *healthchecks.Healthchecks) error {
+
+	if v.Socket == "" {
+		return errors.New("No socket given")
+	}
+
+	//client := &netns.Client{Path: v.Socket}
+	client := netns.NewClient(v.Socket)
+
+	v.checker = &checker{client: client}
 
 	ip := net.ParseIP(address)
 
@@ -306,7 +316,8 @@ func (v *VC5) Configure(h *healthchecks.Healthchecks) {
 }
 
 func (v *VC5) Checker() monitor.Checker {
-	return &checker{socket: v.Socket}
+	//return &checker{socket: v.Socket}
+	return v.checker
 }
 
 func (v *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
@@ -315,13 +326,16 @@ func (v *VC5) Start(address string, hc *healthchecks.Healthchecks) error {
 
 /********************************************************************************/
 type checker struct {
-	socket string
-	nat    *kernel.NAT
+	//nat    *kernel.NAT
+	client *netns.Client
 }
 
-func (c *checker) Socket() string { return c.socket }
+// func (c *checker) Socket() string { return c.socket }
+func (c *checker) Socket() string { return c.client.Path() }
 func (c *checker) Check(vip IP4, rip IP4, check healthchecks.Check) (bool, string) {
-	return netns.Probe(c.socket, kernel.LookupNAT(vip, rip), check)
+	//	return netns.Probe(c.socket, kernel.LookupNAT(vip, rip), check)
+	ip := kernel.LookupNAT(vip, rip)
+	return c.client.Probe(ip, check)
 }
 
 // Start a healthcheck server which will listen for requests via the

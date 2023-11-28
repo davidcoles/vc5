@@ -24,7 +24,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/davidcoles/vc5/bgp"
 )
+
+type IP = [4]byte
 
 func getStats(lb Balancer) *Stats {
 
@@ -41,9 +45,11 @@ func getStats(lb Balancer) *Stats {
 		VIPs:    map[IP4]map[L4]Service{},
 		RHI:     map[string]bool{},
 		When:    map[IP4]int64{},
+		rhi:     map[IP]bool{},
 	}
 
 	for k, v := range status.Health() {
+		stats.rhi[k] = v.Up
 		stats.RHI[k.String()] = v.Up
 		stats.When[k] = int64(now.Sub(v.Time) / time.Second)
 	}
@@ -353,6 +359,8 @@ type Stats struct {
 	RHI        map[string]bool        `json:"rhi"`
 	When       map[IP4]int64          `json:"when"`
 	VIPs       map[IP4]map[L4]Service `json:"vips"`
+	rhi        map[IP]bool
+	BGPStatus  map[string]bgp.Status `json:"bgp_status"`
 }
 
 type Service struct {
@@ -406,6 +414,22 @@ func (r Real) Sub(o Real, dur time.Duration) Real {
 	r.PacketsPS = (uint64(time.Second) * (r.Packets - o.Packets)) / uint64(dur)
 	r.FlowsPS = (uint64(time.Second) * (r.Flows - o.Flows)) / uint64(dur)
 	return r
+}
+
+func (s *Stats) RIB() []IP {
+	var rib []IP
+	for k, v := range s.rhi {
+		if v {
+			rib = append(rib, k)
+		}
+	}
+
+	return rib
+}
+
+func (s *Stats) RIBDiffer(old []IP) ([]IP, bool) {
+	rib := s.RIB()
+	return rib, bgp.RIBSDiffer(rib, old)
 }
 
 func (n *Stats) Sub(o *Stats, dur time.Duration) *Stats {

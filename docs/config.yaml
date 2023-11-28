@@ -1,6 +1,8 @@
 # VC5 L2DSR Load Balancer config
 ---
 
+# This *might* be out of data and need checking/updating
+
 # 'rhi' (route health injection) specifies BGP peers and ASN to use to avertise VIPs 
 # 'learn' specifies how long to wait in seconds before adverising rhi to peers
 # 'multicast' is the address to use to announce/listen for flow state information

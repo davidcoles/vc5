@@ -39,7 +39,7 @@ import (
 	"time"
 
 	"github.com/davidcoles/vc5"
-	"github.com/davidcoles/vc5/bgp4"
+	"github.com/davidcoles/vc5/bgp"
 )
 
 var logger *Logger
@@ -80,6 +80,8 @@ func ulimit(resource int) {
 }
 
 func main() {
+
+	var rib []IP
 
 	flag.Parse()
 	args := flag.Args()
@@ -144,17 +146,10 @@ func main() {
 
 	logger = &Logger{Level: uint8(*level)}
 
-	pool := bgp4.Pool{
-		Address:     addr,
-		ASN:         conf.RHI.AS_Number,
-		HoldTime:    conf.RHI.Hold_Time,
-		Communities: conf.RHI.Communities(),
-		Peers:       conf.RHI.Peers,
-		Listen:      conf.RHI.Listen,
-	}
+	pool := bgp.NewPool(addr, conf.BGP, nil)
 
-	if !pool.Open() {
-		log.Fatal("BGP peer initialisation failed")
+	if pool == nil {
+		log.Fatal("pool fail")
 	}
 
 	balancer := &vc5.VC5{
@@ -179,11 +174,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	go func() {
-		time.Sleep(time.Duration(conf.Learn) * time.Second)
-		pool.Start()
-	}()
 
 	if *kill > 0 {
 		// auto kill switch
@@ -219,8 +209,8 @@ func main() {
 						log.Println(err)
 					} else {
 						hc = h
-						pool.Peer(conf.RHI.Peers)
 						director.Update(hc)
+						pool.Configure(conf.BGP)
 					}
 				}
 			}
@@ -239,7 +229,10 @@ func main() {
 			t = time.Now()
 			stats = s
 			if time.Now().Sub(start) > (time.Duration(conf.Learn) * time.Second) {
-				pool.NLRI(s.RHI)
+				var differ bool
+				if rib, differ = s.RIBDiffer(rib); differ {
+					pool.RIB(rib)
+				}
 			}
 			time.Sleep(1 * time.Second)
 		}
