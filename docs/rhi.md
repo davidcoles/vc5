@@ -118,7 +118,7 @@ client machine pointing to the load balancer, or run BIRD/Quagga on
 the client and add the client's IP address to the BGP section of the
 YAML config.
 
-Sample bird.conf snippet:
+Sample bird.conf snippet (BIRD v2):
 
 ```
 protocol bgp loadbalancers {

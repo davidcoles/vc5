@@ -103,17 +103,13 @@ struct bpf_object *load_bpf_object_file(const char *filename, int ifindex)
 
 static int xdp_link_detach(int ifindex, __u32 xdp_flags)
 {
-        /* Next assignment this will move into ../common/
-         * (in more generic version)
-         */
-        int err;
-
-        if ((err = bpf_set_link_xdp_fd(ifindex, -1, xdp_flags)) < 0) {
-                fprintf(stderr, "ERR: link set xdp unload failed (err=%d):%s\n",
-                        err, strerror(-err));
-                return EXIT_FAIL_XDP;
-        }
-        return EXIT_OK;
+    int err;
+    
+    if ((err = bpf_set_link_xdp_fd(ifindex, -1, xdp_flags)) < 0) {
+	/*fprintf(stderr, "ERR: link set xdp unload failed (err=%d):%s\n", err, strerror(-err));*/
+	return EXIT_FAIL_XDP;
+    }
+    return EXIT_OK;
 }
 
 void *load_bpf_file(char *interface, char *filename, char *section) {
