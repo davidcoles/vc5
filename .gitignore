@@ -1,4 +1,4 @@
-cmd/vc5.yaml
+cmd/vc5.json
 cmd/vc5
 cmd/vc5ng
 **/*.o
