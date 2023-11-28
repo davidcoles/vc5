@@ -71,3 +71,4 @@ wc:
 
 ubuntu-dependencies:
 	apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.20 libyaml-perl libjson-perl ethtool
+	ln -s /usr/lib/go-1.20/bin/go /usr/local/bin/go
