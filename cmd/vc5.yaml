@@ -1,20 +1,18 @@
-# VC5 minimal load balancer config
 ---
-webserver: 8080
+webserver: :8080
 rhi:
-  hold_time: 10
-  as_number: 6500
+  as_number: 65000
   peers:
     - 10.10.100.1
 
 services:
 
   - name: web
-    description: 
+    description: web server
     virtual:
       - 192.168.101.1
     servers:
-      - 10.10.100.120
-      - 10.10.100.121
+      - 10.10.100.10
+      - 10.10.100.11
     policy:
       http:
