@@ -19,10 +19,10 @@ rhi:
     - 10.1.2.2
 ```
 
-The above will advertise all healthy VIPs to suitably configured peer
-routers at 10.1.2.1 and 10.1.2.2. There is no need to specify the
-remote AS number; VC5 does not accept incoming BGP sessions and it
-ignores any UPDATE messages from the peer.
+The above will advertise all healthy VIPs to suitably configured peers
+at 10.1.2.1 and 10.1.2.2. There is no need to specify the remote AS
+number; VC5 does not accept incoming BGP sessions and it ignores any
+UPDATE messages from the peer.
 
 Should you need a more complex setup, VC5 has settings for standard
 BGP parameters, route filters and groups of peers.
@@ -105,6 +105,43 @@ Any configuration changes to extant peers are made immediately and
 network layer reachability information is sent in an UPDATE message to
 update local preference, MED, communities, etc.
 
-Currnely, AS number (in AS_SEQUENCE) and NEXT_HOP address (from
+Currently, AS number (in AS_SEQUENCE) and NEXT_HOP address (from
 source_ip) are not changed in any established connection. When the
 session is re-established the new values will be used.
+
+
+## BIRD sample configuration
+
+If you don't have control over your routers then you can test with a
+client machine on the same VLAN. Either add a static route on the
+client machine pointing to the load balancer, or run BIRD/Quagga on
+the client and add the client's IP address to the BGP section of the
+YAML config.
+
+Sample bird.conf snippet:
+
+```
+protocol bgp loadbalancers {
+     description "loadbalancers";
+     local as 65000;
+     neighbor range 10.10.100.0/24 as 65000;
+     passive on;
+     direct;
+
+     ipv4 {
+          export none;
+          import filter {
+                 if net ~ 192.168.101.0/24 then accept;
+                 else reject;
+          };
+          next hop self;
+     };
+}
+```
+
+This will allow any load balancers in the 10.10.100.0/24 subnet to
+connect as AS 65000 and advertise VIPs in 192.168.101.0/24 range;
+
+If you enable ECMP on your router/client (`merge paths on;` in BIRD's
+kernel protocol) then you can distribute traffic to multiple load
+balancers.
