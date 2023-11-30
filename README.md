@@ -4,9 +4,20 @@ Primarily a distributed Layer 2 Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 Layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
-It is currently undergoing modification to work with other balancing
-solutions, such as the Linux Virtual Server/IPVS implementation (see
-https://github.com/davidcoles/stayinalived).
+Consists of:
+
+* A kernel-level load balancing scheduler (using eBPF/XDP) and userland library API to manipulate entries (data-plane).
+* A library to perform checks on backend servers and mark nodes/VIPs as healthy, used to control the data-plane.
+* A BGP implementation to advertise healthy VIPs to routers.
+* A commannd line application which uses the above services to provide a redundant load balancing solution.
+
+Currently, the main target is the command line application which can be used to create an out-of-the-box appliance: the `vc5` binary.
+
+The BGP and health check libraries could be used with a separate
+balancing solution such as IPVS to create a NAT-based balancer (see
+https://github.com/davidcoles/stayinalived and
+[docs/integration.md](docs/integration.md)) and development should
+proceed to make this easier.
 
 Currently you would be best advised to use the binary/code from the
 latest release rather than HEAD.
@@ -30,7 +41,7 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 * ✅ Minimally invasive; does not require any modification of iptables rules on server
 * ✅ No modification of backend servers beyond adding the VIP to a loopback device
 * ✅ Health-checks run against the VIP on backend servers, not their real addresses
-* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks
+* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks built in
 * ✅ As close as possible to line-rate 10Gbps performance
 * ✅ In-kernel code execution with XDP/eBGP; native mode drivers bypass sk_buff allocation
 * ✅ (D)DoS mitigation with fast early drop rules
@@ -131,37 +142,6 @@ VLANs are not easily supported on VMWare as there is an all-or-nothing
 approach, which may not be practical/desirable in a large installation.
 
 
-## Development
-
-Ultimately, it would be good to be able to use this as a library such
-that the frontend can be controlled by the user. The configuration
-could be generated from a dynamic source such as nodes that want to
-participate in a pool for a service subscribing to a ZooKeeper
-cluster, or pulled as JSON from an HTTP endpoint. A minimal code
-snippet for getting a loadbalancer up and running (after obtaining an
-initial config) could look like:
-
-```
-lb := &vc5.LoadBalancer{
-  Native:          true,
-  Socket:          "/run/vc5socket",
-  NetnsCommand:    []string{os.Args[0], "-s", "/run/vc5socket"},
-  Interfaces:      []string{"enp130s0f0", "enp130s0f1"},
-  EgressInterface: "bond0",
-}
-
-err = lb.Start("10.1.2.3", healthchecks)
-
-if err != nil {
-  log.Fatal(err)
-}
-```
-
-With subsequent configuration updates communicated with
-`lb.Update(healthchecks)`. Status and statistics can be obtained from
-the `lb` object.
-
-
 ## Performance
 
 This has mostly been tested using Icecast backend servers with clients
@@ -220,3 +200,11 @@ Latencies - 120K clents virtual LB:
 https://yhbt.net/lore/xdp-newbies/CANLN0e5_HtYC1XQ=Z=JRLe-+3bTqoEWdbHJEGhbF7ZT=gz=ynQ@mail.gmail.com/T/
 
 
+# use percpu hash - don't use LACP:
+550K 1.5Gbps 3Mpps    1190ns 36Gbps
+600K 1.7Gbps 3.25Mpps 1177ns 40Gbps   >90% idle
+650K 1.8Gbps 3.4Mpps  1145ns 42.7Gbps >90% idle
+675K 1.9Gbps 3.6Mpps  1303ns 44.7Gbps >90% idle
+700K 2.0Gbps 3.8Mpps  1295ns 46.5Gbps >90% idle
+Intel(R) Xeon(R) Gold 6314U CPU @ 2.30GHz
+Intel(R) Ethernet 10G 4P X710-T4L-t OCP
