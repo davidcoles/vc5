@@ -4,7 +4,7 @@
 
 From a freshly created VM to a fully functional load balancer in under three minutes:
 
- [![Load balancer from scratch](https://davidcoles.github.io/pages/videos/vc5-install-20231128.webm)](https://davidcoles.github.io/pages/videos/vc5-install-20231128.webm)
+ [![Load balancer from scratch](https://davidcoles.github.io/pages/videos/vc5-install-20231128.png)](https://davidcoles.github.io/pages/videos/vc5-install-20231128.webm)
 
 ## Detailed steps
 
