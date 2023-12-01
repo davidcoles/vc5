@@ -21,7 +21,7 @@ with:
 (or run `make ubuntu-dependencies` which will do this for you).
 
 
-Edit the [cmd/vc5.yaml](cmd/vc5.yaml) file appropriately for your
+Edit the [cmd/vc5.yaml](../cmd/vc5.yaml) file appropriately for your
 routers/services/backends. Remember to configure the VIP on the
 loopback interface on real servers.
 
