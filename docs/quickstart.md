@@ -23,7 +23,13 @@ with:
 
 Edit the [cmd/vc5.yaml](../cmd/vc5.yaml) file appropriately for your
 routers/services/backends. Remember to configure the VIP on the
-loopback interface on real servers.
+loopback interface on real servers. The beckend servers will need to
+be on the same VLAN as the load balancer. This is because the load
+balancer operates at layer 2 (MAC address switching). Layer 3
+balancing is planned for a later release. Multiple VLANs can be
+handled if the load balancer has a tagged interface and an IP address
+configured in each VLAN (and the are VLANs declared in the config
+file).
 
 Run `make`. This will pull a copy of
 [libbpf](https://github.com/libbpf/libbpf), build the binary and
