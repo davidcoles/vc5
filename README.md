@@ -31,7 +31,7 @@ The code is hosted at GitHub, https://github.com/davidcoles/vc5
 
 Clone with `git clone https://github.com/davidcoles/vc5.git`
 
-[Documentation and quick start guide](docs/README.md)
+[Documentation and quick start guide](docs/README.md) with a video demonstration.
 
 ## Goals/status
 
@@ -43,7 +43,7 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 * ✅ Health-checks run against the VIP on backend servers, not their real addresses
 * ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks built in
 * ✅ As close as possible to line-rate 10Gbps performance
-* ✅ In-kernel code execution with XDP/eBGP; native mode drivers bypass sk_buff allocation
+* ✅ In-kernel code execution with XDP/eBGP; native mode drivers avoid sk_buff allocation
 * ✅ (D)DoS mitigation with fast early drop rules
 * ✅ Multiple VLAN support
 * ✅ Multiple NIC support for lower bandwidth/development applications
@@ -51,6 +51,23 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 * ✅ Observability via a web console and Prometheus metrics
 * 🚧 Simple API to enable embedding into your own project
 * 🚧 Extension to support LVS/IPVS for non-DRS operation
+
+## Performance
+
+This has mostly been tested using Icecast backend servers with clients
+pulling a mix of low and high bitrate streams (48kbps - 192kbps).
+
+It seems that a VMWare guest (4 core, 8GB) using the XDP generic
+driver will support 100K concurrent clients, 380Mbps/700Kpps through
+the load balancer and 8Gbps of traffic from the backends directly to
+the clients.
+
+On a single (non-virtualised) Intel Xeon Gold 6314U CPU (2.30GHz 32
+physical cores, with hyperthreading enabled for 64 logical cores) and
+an Intel 10G 4P X710-T4L-t ethernet card, I was able to run 700K
+streams at 2Gbps/3.8Mpps ingress traffic and 46.5Gbps egress. The
+server was more than 90% idle. Unfortunately I did not have the
+resources available to create more clients/servers.
 
 ## About
 
@@ -108,7 +125,6 @@ versions will no longer work. For now I will maintain a backwards
 compatible v0.1 branch with bugfixes, etc., but the main branch will
 begin using a new updated config parser script.
 
-
 ## Operation
 
 There are three modes of operation, simple, VLAN, and multi-NIC
@@ -142,22 +158,6 @@ VLANs are not easily supported on VMWare as there is an all-or-nothing
 approach, which may not be practical/desirable in a large installation.
 
 
-## Performance
-
-This has mostly been tested using Icecast backend servers with clients
-pulling a mix of low and high bitrate streams (48kbps - 192kbps).
-
-It seems that a VMWare guest (4 core, 8GB) using the XDP generic
-driver will support 100K concurrent clients, 380Mbps/700Kpps through
-the load balancer and 8Gbps of traffic from the backends directly to
-the clients.
-
-A bare-metal server with an Intel Xeon CPU (E52620 @ 2.40GHz) with 6
-physical cores and an Intel 10Gbps NIC (ixgbe driver) in native mode
-will support upwards of 500K clients, 2Gbps/3.5Mpps and 40Gbps traffic
-back to clients. This was at a load of ~25% on the CPU - clearly it
-can do significantly more than this, but resources for running more
-client and backend servers were not available at the time.
 
 
 ## TODOs
@@ -189,22 +189,15 @@ https://github.com/xdp-project/xdp-tutorial.git
 
 https://lpc.events/event/2/contributions/71/attachments/17/9/presentation-lpc2018-xdp-tutorial.pdf
 
-
-Latencies - 120K clents virtual LB:
-802069 pps, 140 ns avg. latency, DEFCON 1
-794173 pps, 185 ns avg. latency, DEFCON 2
-795669 pps, 315 ns avg. latency, DEFCON 3
-801284 pps, 313 ns avg. latency, DEFCON 4
-801062 pps, 320 ns avg. latency, DEFCON 5
-
 https://yhbt.net/lore/xdp-newbies/CANLN0e5_HtYC1XQ=Z=JRLe-+3bTqoEWdbHJEGhbF7ZT=gz=ynQ@mail.gmail.com/T/
 
 
-# use percpu hash - don't use LACP:
-550K 1.5Gbps 3Mpps    1190ns 36Gbps
-600K 1.7Gbps 3.25Mpps 1177ns 40Gbps   >90% idle
-650K 1.8Gbps 3.4Mpps  1145ns 42.7Gbps >90% idle
-675K 1.9Gbps 3.6Mpps  1303ns 44.7Gbps >90% idle
-700K 2.0Gbps 3.8Mpps  1295ns 46.5Gbps >90% idle
-Intel(R) Xeon(R) Gold 6314U CPU @ 2.30GHz
-Intel(R) Ethernet 10G 4P X710-T4L-t OCP
+Intel Xeon Gold 6314U CPU @ 2.30GHz
+Intel Ethernet 10G 4P X710-T4L-t OCP
+using percpu hash - not using LACP:
+
+* 550K 1.5Gbps 3Mpps    1190ns 36Gbps
+* 600K 1.7Gbps 3.25Mpps 1177ns 40Gbps   >90% idle
+* 650K 1.8Gbps 3.4Mpps  1145ns 42.7Gbps >90% idle
+* 675K 1.9Gbps 3.6Mpps  1303ns 44.7Gbps >90% idle
+* 700K 2.0Gbps 3.8Mpps  1295ns 46.5Gbps >90% idle

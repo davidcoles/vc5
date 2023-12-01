@@ -1,5 +1,5 @@
 ---
-webserver: :8080
+webserver: :80
 rhi:
   as_number: 65000
   peers:

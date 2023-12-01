@@ -1,5 +1,13 @@
 # Quickstart
 
+## Demonstration
+
+From a freshly created VM to a fully functional load balancer in under thress minutes:
+
+ [![Load balancer from scratch](https://davidcoles.github.io//videos/vc5-install-20231128.webm)](https://davidcoles.github.io//videos/vc5-install-20231128.webm)
+
+## Detailed steps
+
 It would be recommended to start out using a fresh virtual machine.
 
 First we need a development environment capable of building libbpf and
@@ -9,9 +17,11 @@ with:
   `apt-get install git build-essential libelf-dev clang libc6-dev libc6-dev-i386 llvm golang-1.20 libyaml-perl libjson-perl ethtool`
   
   `ln -s /usr/lib/go-1.20/bin/go /usr/local/bin/go`
+  
+(or run `make ubuntu-dependencies` which will do this for you).
 
-Copy the [examples/config.yaml](../examples/config.yaml) file to
-cmd/vc5.yaml and edit appropriately for your
+
+Edit the [cmd/vc5.yaml](cmd/vc5.yaml) file appropriately for your
 routers/services/backends. Remember to configure the VIP on the
 loopback interface on real servers.
 
@@ -33,10 +43,9 @@ endpoint for collecting statistics.
 
 To dynamically alter the services running on the load balancer, change
 the YAML file appropriately and regenerate the JSON file (`make
-cmd/vc5.json`). Sending a USR2 signal (or, for now, SIGQUIT - Ctrl-\
-in a terminal) to the main process will cause it to reload the JSON
-configuration file and apply any changes. The new configuration will
-be reflected in the web console.
+cmd/vc5.json`). Sending a USR2 signal to the main process will cause
+it to reload the JSON configuration file and apply any changes. The
+new configuration will be reflected in the web console.
 
 VC5 uses multicast to share a flow state table so peers
 will learn about each other's connections and take over in the case of
