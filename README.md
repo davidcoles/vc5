@@ -31,7 +31,7 @@ The code is hosted at GitHub, https://github.com/davidcoles/vc5
 
 Clone with `git clone https://github.com/davidcoles/vc5.git`
 
-[Documentation and quick start guide](docs/README.md) with a video demonstration.
+[Documentation and quick start guide](docs/README.md) with a [video demonstration](docs/quickstart.md).
 
 ## Goals/status
 
