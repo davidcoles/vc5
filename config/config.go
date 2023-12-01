@@ -63,7 +63,6 @@ func (c *Check) Unzero(p uint16) {
 }
 
 type Real struct {
-	//Checks   Checks `json:"checks,omitempty"`
 	Checks   []Check `json:"checks,omitempty"`
 	Disabled bool    `json:"disabled,omitempty"`
 	Weight   uint16  `json:"weight,omitempty"`
@@ -71,9 +70,8 @@ type Real struct {
 
 // Inventory of healthchecks required to pass to consider backend as healthy
 type Checks struct {
-	HTTP  []Check `json:"http,omitempty"`  // L7 HTTP checks
-	HTTPS []Check `json:"https,omitempty"` // L7 HTTPS checks - certificate is not validated
-	//TCP    []Check `json:"tcp,omitempty"`    // L4 SYN, SYN/ACK, ACK checks
+	HTTP   []Check `json:"http,omitempty"`   // L7 HTTP checks
+	HTTPS  []Check `json:"https,omitempty"`  // L7 HTTPS checks - certificate is not validated
 	SYN    []Check `json:"syn,omitempty"`    // L4 SYN, SYN-ACK half-open checks
 	DNS    []Check `json:"dns,omitempty"`    // L7 UDP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
 	DNSTCP []Check `json:"dnstcp,omitempty"` // L7 TCP DNS queries: CHAOS TXT version.bind - only response transaction ID is checked
@@ -97,10 +95,6 @@ func (c *Checks) DefaultPort(p uint16) {
 	for i, v := range c.HTTPS {
 		c.HTTPS[i] = u(v, p)
 	}
-
-	//for i, v := range c.TCP {
-	//	c.TCP[i] = u(v, p)
-	//}
 
 	for i, v := range c.SYN {
 		c.SYN[i] = u(v, p)
@@ -128,32 +122,6 @@ type Service struct {
 
 	// The set of backend server addresses and corresponding healthchecks which comprise this service
 	//RIPs map[string]Checks `json:"rips,omitempty"`
-	RIPs map[ipd]Checks `json:"rips,omitempty"`
-
-	// If set to true, the backend selection algorithm will not include layer 4 port numbers
-	Sticky bool `json:"sticky,omitempty"`
-
-	// Experimental/Unimplemented
-	Leastconns bool `json:"leastconns,omitempty"`
-
-	Scheduler types.Scheduler `json:"scheduler"`
-
-	DSR bool `json:"dsr,omitempty"`
-}
-
-// Describes a Layer 4 service
-type Service2 struct {
-	// The service name - should be a short identifier, suitable for using as a Prometheus label value
-	Name string `json:"name,omitempty"`
-
-	// A short description of the service
-	Description string `json:"description,omitempty"`
-
-	// The minimum number of real servers which need to be health to consider this service viable
-	Need uint16 `json:"need,omitempty"`
-
-	// The set of backend server addresses and corresponding healthchecks which comprise this service
-	//RIPs map[string]Checks `json:"rips,omitempty"`
 	Reals map[ipport]Real `json:"reals,omitempty"`
 
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
@@ -162,61 +130,19 @@ type Service2 struct {
 	Scheduler types.Scheduler `json:"scheduler"`
 }
 
-// Route Health Injection configration. Describes BGP peers and
-// parameters to advertise healthy virtual IP addresses to network
-// infrastructure
-type RHI struct {
-	// The local Autonomous sytem number to use when forming a BGP
-	// session
-	AS_Number uint16 `json:"as_number,omitempty"`
-
-	// The desired hold timer
-	Hold_Time uint16 `json:"hold_time,omitempty"`
-
-	// A list of host names or addresses to form BGP sessions with
-	Peers []string `json:"peers,omitempty"`
-
-	// A list of community attributes to announce along with VIPs in
-	// network layer reachability information updates. represented as
-	// <asn>:<value pairs>, eg.: "100:80", "65000:1234"
-
-	Communities_ []community `json:"communities,omitempty"`
-
-	// Listen for incoming connections on port 179
-	Listen bool `json:"listen,omitempty"`
-
-	// BGP LOCAL_PREF setting
-	Local_Pref uint32 `json:"local_pref,omitempty"`
-
-	// BGP MULTI_EXIT_DISC setting
-	MED uint32 `json:"med,omitempty"`
-}
-
-// Returns a list of uint32 values representing configured BGP community attributes
-func (r *RHI) Communities() []uint32 {
-	var c []uint32
-	for _, v := range r.Communities_ {
-		c = append(c, uint32(v))
-	}
-	return c
-}
-
 // Load balancer configuration
 type Config struct {
 	// Two level dictionary of virual IP addresses and Layer 4
 	// protocol/port number of services provided by the balancer
 	//VIPs map[string]map[string]Service `json:"vips,omitempty"`
 
-	Services map[ipp]Service2 `json:"services,omitempty"`
+	Services map[ipp]Service `json:"services,omitempty"`
 
 	// VLAN ID to subnet mappings
 	VLANs map[uint16]string `json:"vlans,omitempty"`
 
 	// Route Health Injection parameters
-	RHI RHI `json:"rhi,omitempty"`
-
-	// Route Health Injection parameters
-	BGP map[string]bgp.Parameters `json:"bgp,omitempty"`
+	RHI map[string]bgp.Parameters `json:"bgp,omitempty"`
 
 	// Length of time to wait for services to settle before
 	// advertising route (should perhaps move to RHI)
@@ -257,40 +183,6 @@ func Load(file string) (*Config, error) {
 	}
 
 	return &config, nil
-}
-
-type community uint32
-
-func (c *community) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("%d:%d", (*c>>16), (*c&0xffff)) + `"`), nil
-}
-
-func (c *community) UnmarshalJSON(data []byte) error {
-	re := regexp.MustCompile(`^"(\d+):(\d+)"$`)
-
-	m := re.FindStringSubmatch(string(data))
-
-	if len(m) != 3 {
-		return errors.New("Badly formed community")
-	}
-
-	asn, err := strconv.Atoi(m[1])
-	if err != nil {
-		return err
-	}
-
-	val, err := strconv.Atoi(m[2])
-	if err != nil {
-		return err
-	}
-
-	if asn < 0 || asn > 65535 || val < 0 || val > 65535 {
-		return errors.New("Badly formed community")
-	}
-
-	*c = community(uint32(asn)<<16 | uint32(val))
-
-	return nil
 }
 
 type ipport struct {

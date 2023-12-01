@@ -146,7 +146,7 @@ func main() {
 
 	logger = &Logger{Level: uint8(*level)}
 
-	pool := bgp.NewPool(addr, conf.BGP, nil)
+	pool := bgp.NewPool(addr, conf.RHI, nil)
 
 	if pool == nil {
 		log.Fatal("pool fail")
@@ -210,7 +210,7 @@ func main() {
 					} else {
 						hc = h
 						director.Update(hc)
-						pool.Configure(conf.BGP)
+						pool.Configure(conf.RHI)
 					}
 				}
 			}
