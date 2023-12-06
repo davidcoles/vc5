@@ -107,6 +107,25 @@ func (c *myconn) write(m message) {
 	}
 }
 
+func (c *myconn) drain() bool {
+
+	for {
+		m, ok := c.shift()
+
+		if !ok {
+			return true
+		}
+
+		c.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
+
+		_, err := c.conn.Write(m.headerise())
+		if err != nil {
+			c.Error = err.Error()
+			return false
+		}
+	}
+}
+
 func (c *myconn) writer() {
 	defer close(c.writer_exit)
 	defer c.conn.Close()
@@ -117,24 +136,15 @@ func (c *myconn) writer() {
 
 		select {
 		case <-c.close:
+			c.drain()
 			return
 		case <-c.reader_exit:
+			c.drain()
 			return
-		case <-c.pending: // continue
-		}
-
-	drain:
-		m, ok := c.shift()
-
-		if ok {
-			c.conn.SetWriteDeadline(time.Now().Add(3 * time.Second))
-
-			_, err := c.conn.Write(m.headerise())
-			if err != nil {
-				c.Error = err.Error()
+		case <-c.pending:
+			if !c.drain() {
 				return
 			}
-			goto drain
 		}
 	}
 }
@@ -153,7 +163,6 @@ func (c *myconn) reader() {
 
 		n, e := io.ReadFull(c.conn, header[:])
 		if n != len(header) || e != nil {
-			//fmt.Println("********************", n, e)
 			c.Error = e.Error()
 			return
 		}
@@ -177,7 +186,6 @@ func (c *myconn) reader() {
 
 		n, e = io.ReadFull(c.conn, body[:])
 		if n != len(body) || e != nil {
-			//fmt.Println("********************", n, e)
 			c.Error = e.Error()
 			return
 		}
@@ -192,8 +200,6 @@ func (c *myconn) reader() {
 		default:
 			m = message{mtype: mtype, body: body}
 		}
-
-		//fmt.Println(m)
 
 		select {
 		case c.C <- m:
