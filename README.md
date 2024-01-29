@@ -1,8 +1,8 @@
 # VC5
 
-A horizontally scalable Layer 2 Direct Server Return
+A horizontally scalable layer 2 Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
-Layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
+layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
 The Go module included here is now deprecated and will be removed
 shortly - the v0.1 branch is still available if you need it.
@@ -47,15 +47,15 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 * ✅ Simple deployment with a single binary
 * ✅ Stable backend selection with Maglev hashing algorithm
 * ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
-* ✅ Minimally invasive; does not require any modification of iptables rules on server
+* ✅ Minimally invasive; does not require any modification of iptables rules on balancer
 * ✅ No modification of backend servers beyond adding the VIP to a loopback device
-* ✅ Health-checks run against the VIP on backend servers, not their real addresses
-* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks built in
-* ✅ In-kernel code execution with XDP/eBGP; native mode drivers avoid sk_buff allocation
+* ✅ Health checks are run against the VIP on backend servers, not their real addresses
+* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS health checks built in
+* ✅ In-kernel code execution with eBPF/XDP; native mode drivers avoid sk_buff allocation
 * ✅ Multiple VLAN support
 * ✅ Multiple NIC support for lower bandwidth/development applications
 * ✅ Works with bonded network devices to support high-availibility/high-bandwidth
-* ✅ Observability via a web console, Elasticsearch logging  and Prometheus metrics
+* ✅ Observability via a web console, Elasticsearch logging and Prometheus metrics
 
 ## Performance
 
