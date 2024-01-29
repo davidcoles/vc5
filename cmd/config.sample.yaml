@@ -1,0 +1,34 @@
+---
+
+rhi:
+  as_number: 65000
+  peers:
+    - 10.1.2.200
+
+vlans:
+  10: 10.1.10.0/24
+  20: 10.1.20.0/24
+
+services:
+  
+  - name: nginx
+    virtual:
+      - 192.168.101.1
+    servers:
+      - 10.1.10.1
+      - 10.1.10.2
+      - 10.1.10.3            
+    need: 1
+    path: /alive
+    policy:
+      http:
+        
+  - name: bind
+    virtual:
+      - 192.168.101.2
+    servers:
+      - 10.1.20.1
+      - 10.1.20.2
+      - 10.1.20.3
+    policy:
+      dns:
