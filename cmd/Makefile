@@ -2,11 +2,11 @@
 # specify the path like so:
 # CGO_CFLAGS=-I/path/to/libbpf CGO_LDFLAGS=-L/path/to/libbpf go build
 
-BPFVER ?= v1.3.0
-LIBBPF ?= $(PWD)/libbpf/src
+BPFVER = v1.3.0
+LIBBPF = $(PWD)/libbpf/src
 
-export CGO_CFLAGS  ?= -I$(LIBBPF)
-export CGO_LDFLAGS ?= -L$(LIBBPF)
+export CGO_CFLAGS  = -I$(LIBBPF)
+export CGO_LDFLAGS = -L$(LIBBPF)
 
 default: libbpf/src/libbpf.a vc5
 

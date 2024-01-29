@@ -1,29 +1,34 @@
 # VC5
 
-Primarily a distributed Layer 2 Direct Server Return
+A horizontally scalable Layer 2 Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 Layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
-Consists of:
+The Go module included here is now deprecated and will be removed
+shortly - the v0.1 branch is still available if you need it.
 
-* A kernel-level load balancing scheduler (using eBPF/XDP) and userland library API to manipulate entries (data-plane).
-* A library to perform checks on backend servers and mark nodes/VIPs as healthy, used to control the data-plane.
-* A BGP implementation to advertise healthy VIPs to routers.
-* A commannd line application which uses the above services to provide a redundant load balancing solution.
+The repository will be for the `vc5` binary (in the [cmd/](cmd/) directory).
 
-Currently, the main target is the command line application which can be used to create an out-of-the-box appliance: the `vc5` binary.
+The code for eBPF/XDP has been split out into the
+[xvs](https://github.com/davidcoles/xvs) repository - the object file
+is now committed to the repository and so does not need to be built as a seperate step.
 
-The BGP and health check libraries could be used with a separate
-balancing solution such as IPVS to create a NAT-based balancer (see
-https://github.com/davidcoles/stayinalived and
-[docs/integration.md](docs/integration.md)) and development should
-proceed to make this easier.
+The code for managing services, carrying out health checks and
+speaking to BGP peers has been split out to the
+[cue](https://github.com/davidcoles/cue) repository, which allows it
+to be reused by other projects which use a different load balancing
+implementation
+(eg., [LVS/IPVS](https://en.wikipedia.org/wiki/IP_Virtual_Server)).
 
-Currently you would be best advised to use the binary/code from the
-latest release rather than HEAD.
+This README is currently out of date and is in the process of being
+updated. It's broadly applicable, but some specifics are wrong.
+
+Basically, to build it you should install dependencies (see the
+`ubuntu-dependencies` Makefile rule) and then `make`
 
 If you think that this may be useful and have any
-questions/suggestions, feel free to contact me at vc5lb@proton.me or raise a GitHub issue.
+questions/suggestions, feel free to contact me at vc5lb@proton.me or
+raise a GitHub issue.
 
 ## Homepage
 
@@ -42,15 +47,11 @@ Clone with `git clone https://github.com/davidcoles/vc5.git`
 * ✅ No modification of backend servers beyond adding the VIP to a loopback device
 * ✅ Health-checks run against the VIP on backend servers, not their real addresses
 * ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS healthchecks built in
-* ✅ As close as possible to line-rate 10Gbps performance
 * ✅ In-kernel code execution with XDP/eBGP; native mode drivers avoid sk_buff allocation
-* ✅ (D)DoS mitigation with fast early drop rules
 * ✅ Multiple VLAN support
 * ✅ Multiple NIC support for lower bandwidth/development applications
 * ✅ Works with bonded network devices to support high-availibility/high-bandwidth
-* ✅ Observability via a web console and Prometheus metrics
-* 🚧 Simple API to enable embedding into your own project
-* 🚧 Extension to support LVS/IPVS for non-DRS operation
+* ✅ Observability via a web console, Elasticsearch logging  and Prometheus metrics
 
 ## Performance
 

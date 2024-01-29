@@ -31,4 +31,4 @@ services:
       - 10.1.20.2
       - 10.1.20.3
     policy:
-      dns:
+      domain:

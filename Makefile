@@ -12,7 +12,15 @@ FLOW_STATE_SIZE ?= 1000000  # 1M
 FLOW_SHARE_SIZE ?= 1000000  # 1M
 FLOW_QUEUE_SIZE ?= 10000
 
-all: clean cmd/vc5.json $(BIN) $(OBJ)
+all: cmd/vc5 cmd/config.json
+
+cmd/vc5:
+	cd cmd && $(MAKE) vc5
+
+cmd/config.json:
+	cd cmd && $(MAKE) config.json
+
+#all: clean cmd/vc5.json $(BIN) $(OBJ)
 
 bin:  $(BIN)
 
@@ -22,8 +30,8 @@ cmd/vc5.yaml:
 cmd/vc5.json: cmd/config.pl cmd/vc5.yaml
 	cmd/config.pl cmd/vc5.yaml >$@
 
-cmd/vc5: cmd/vc5.go cmd/stats.go $(OBJ)
-	go build -o $@ cmd/vc5.go cmd/stats.go
+#cmd/vc5: cmd/vc5.go cmd/stats.go $(OBJ)
+#	go build -o $@ cmd/vc5.go cmd/stats.go
 
 %.o: %.c bpf
 	clang -S \
@@ -55,10 +63,12 @@ bpf: libbpf/src/libbpf.a
 
 clean:
 	rm -f $(BIN) $(OBJ) cmd/vc5.json bpf
+	cd cmd && $(MAKE) clean
 
 distclean: clean
 	rm -rf libbpf
 	mkdir libbpf
+	cd cmd && $(MAKE) distclean
 
 tests:
 	cd kernel/        && go test -v
