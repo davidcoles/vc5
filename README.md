@@ -24,7 +24,11 @@ This README is currently out of date and is in the process of being
 updated. It's broadly applicable, but some specifics are wrong.
 
 Basically, to build it you should install dependencies (see the
-`ubuntu-dependencies` Makefile rule) and then `make`
+`ubuntu-dependencies` Makefile rule) and then `make`.
+
+The process will checkout and build the
+[libbpf](https://github.com/libbpf/libbpf) library which the binary
+needs to link against.
 
 If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
