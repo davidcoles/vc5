@@ -20,7 +20,10 @@ package main
 
 import (
 	"net/netip"
+	"sort"
 	"time"
+
+	"github.com/davidcoles/cue"
 )
 
 type Serv struct {
@@ -105,4 +108,82 @@ func (s *Stats) add(x Stats) {
 	s.OctetsPerSecond += x.OctetsPerSecond
 	s.PacketsPerSecond += x.PacketsPerSecond
 	s.FlowsPerSecond += x.FlowsPerSecond
+}
+
+type VIP = netip.Addr
+type VIPStats struct {
+	VIP   VIP   `json:"vip"`
+	Up    bool  `json:"up"`
+	Stats Stats `json:"stats"`
+}
+
+func vipStatus(in map[VIP][]Serv, rib []netip.Addr) (out []VIPStats) {
+
+	up := map[VIP]bool{}
+
+	for _, r := range rib {
+		up[r] = true
+	}
+
+	for vip, list := range in {
+		var stats Stats
+		for _, s := range list {
+			stats.add(s.Stats)
+		}
+
+		out = append(out, VIPStats{VIP: vip, Stats: stats, Up: up[vip]})
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].VIP.Compare(out[j].VIP) < 0
+	})
+
+	return
+}
+
+func vipState(services []cue.Service, old map[netip.Addr]State, logs *logger) map[netip.Addr]State {
+	F := "vips"
+
+	rib := map[netip.Addr]bool{}
+	new := map[netip.Addr]State{}
+
+	for _, v := range cue.HealthyVIPs(services) {
+		rib[v] = true
+	}
+
+	for _, v := range cue.AllVIPs(services) {
+
+		if o, ok := old[v]; ok {
+			up, _ := rib[v]
+
+			if o.up != up {
+				new[v] = State{up: up, time: time.Now()}
+				logs.NOTICE(F, KV{"vip": v, "state": updown(up), "event": "vip"})
+			} else {
+				new[v] = o
+			}
+
+		} else {
+			logs.NOTICE(F, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
+			new[v] = State{up: rib[v], time: time.Now()}
+		}
+	}
+
+	return new
+}
+
+func adjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
+	for v, s := range vip {
+		if initialised && s.up && time.Now().Sub(s.time) > time.Second*5 {
+			r = append(r, v)
+		}
+	}
+	return
+}
+
+func updown(b bool) string {
+	if b {
+		return "up"
+	}
+	return "down"
 }

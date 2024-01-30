@@ -4,14 +4,16 @@ A horizontally scalable layer 2 Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
-The Go module included here is now deprecated and will be removed
-shortly - the v0.1 branch is still available if you need it.
+The repository is for the `vc5` binary (in the [cmd/](cmd/)
+directory).
 
-The repository will be for the `vc5` binary (in the [cmd/](cmd/) directory).
+The Go module that was included here has now been removed - the v0.1
+branch is still available if you need it.
 
 The code for eBPF/XDP has been split out into the
 [xvs](https://github.com/davidcoles/xvs) repository - the object file
-is now committed to the repository and so does not need to be built as a seperate step.
+is now committed to this repository and so does not need to be built
+as a seperate step.
 
 The code for managing services, carrying out health checks and
 speaking to BGP peers has been split out to the
