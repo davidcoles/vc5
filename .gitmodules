@@ -1,3 +1,0 @@
-[submodule "libbpf"]
-	path = old/libbpf
-	url = https://github.com/libbpf/libbpf
