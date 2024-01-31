@@ -8,7 +8,7 @@ LIBBPF = $(PWD)/libbpf/src
 export CGO_CFLAGS  = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF)
 
-default: libbpf/src/libbpf.a vc5
+default: libbpf/src/libbpf.a vc5 config.json
 
 vc5: *.go static/* libbpf/src/libbpf.a
 	go build -race -o $@
@@ -32,6 +32,6 @@ libbpf:
 libbpf/src/libbpf.a: libbpf
 	cd libbpf/src && $(MAKE)
 
-# need to ass a hook to git
+# need to pass a hook to git
 pre-commit:
 	if grep '^replace' go.mod; then false; fi

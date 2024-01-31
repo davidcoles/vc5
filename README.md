@@ -26,7 +26,8 @@ This README is currently out of date and is in the process of being
 updated. It's broadly applicable, but some specifics are wrong.
 
 Basically, to build it you should install dependencies (see the
-`ubuntu-dependencies` Makefile rule) and then `make`.
+`ubuntu-dependencies` Makefile rule) and run `make` in the `cmd/`
+directory.
 
 The process will checkout and build the
 [libbpf](https://github.com/libbpf/libbpf) library which the binary
@@ -109,11 +110,11 @@ Shuff's "Building a Billion User Load Balancer"
 talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
 Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
 
-A basic web console and Prometheus metrics server is included: ![Console screenshot](docs/console.jpg)
+A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
 
 A sample utility to render traffic from /20 prefixes going through the
 load-balancer is in the [cmd/hilbert/](cmd/hilbert/) directory:
-![cmd/hilbert/hilbert.png](cmd/hilbert/hilbert.png)
+![cmd/hilbert/hilbert.png](old/cmd/hilbert/hilbert.png)
 
 A good use for the traffic stats would be to track which prefixes are
 usually active and to generate a table of which /20s to early drop
