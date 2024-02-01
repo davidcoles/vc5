@@ -113,7 +113,7 @@ Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
 A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
 
 A sample utility to render traffic from /20 prefixes going through the
-load-balancer is in the [cmd/hilbert/](cmd/hilbert/) directory:
+load-balancer is in the [old/cmd/hilbert/](cmd/hilbert/) directory:
 ![cmd/hilbert/hilbert.png](old/cmd/hilbert/hilbert.png)
 
 A good use for the traffic stats would be to track which prefixes are

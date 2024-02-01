@@ -29,6 +29,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	//"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -51,6 +52,8 @@ type Client = xvs.Client
 
 func main() {
 	F := "vc5"
+
+	//fmt.Println(debug.ReadBuildInfo())
 
 	var mutex sync.Mutex
 
