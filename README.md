@@ -88,6 +88,13 @@ offload). The only requirement being that the VIP needs to be
 configured on a loopback device on real server, eg.: `ip a add
 192.168.101.1/32 dev lo`
 
+Currently only layer 2 load balancing is performed. This means that
+the load balancer instance needs to have an interface configured for
+each subnet where backend servers are present. This can be achieved
+with seperate untagged physical NICs, or a trunked/tagged NIC or bond
+device with VLAN subinterfaces. For performance reasons, the tagged
+VLAN model is preferable.
+
 One server with a 10Gbit/s network interface should be capable of
 supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
 to the asymmetric nature of most internet traffic. For smaller

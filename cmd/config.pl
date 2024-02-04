@@ -14,7 +14,15 @@ no warnings qw(experimental::smartmatch);
 my $TRUE  = JSON::true;
 my $FALSE = JSON::false;
 
-getopts('nh', \my %opt);
+getopts('nhx', \my %opt);
+
+# -n NAT mode (allow port mappings)
+# -x Dump example config on stdout
+
+if($opt{'x'}) {
+    print <DATA>;
+    exit;
+}
 
 my $conf = YAML::Load(join('', <>));
 my $json = {};
@@ -472,3 +480,40 @@ sub params {
     $p{'med'} = $o->{'med'}+0 if defined $o->{'med'};
     return \%p;
 }
+
+
+__END__;
+---
+
+rhi:
+  as_number: 65000
+  peers:
+    - 10.1.2.200
+
+vlans:
+  10: 10.1.10.0/24
+  20: 10.1.20.0/24
+
+services:
+  
+  - name: nginx
+    virtual:
+      - 192.168.101.1
+    servers:
+      - 10.1.10.1
+      - 10.1.10.2
+      - 10.1.10.3            
+    need: 1
+    path: /alive
+    policy:
+      http:
+        
+  - name: bind
+    virtual:
+      - 192.168.101.2
+    servers:
+      - 10.1.20.1
+      - 10.1.20.2
+      - 10.1.20.3
+    policy:
+      domain:
