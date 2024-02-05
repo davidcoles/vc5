@@ -128,91 +128,20 @@ usually active and to generate a table of which /20s to early drop
 traffic from in the case of a DoS/DDoS (particularly spoofed source
 addresses).
 
-Initially this began as self-contained director/balancer
-project. Recently, it seems that the healthchecking, route health
-injection and observability portions could be re-used with a non-DSR
-balancer such as Linux's virtual server. As such, I am currently
-modifying the code to allow switching out the eBPF/XDP portion so that
-a project using this library can bring its own implemention.
-
-Consequently, the old configuration schema needs updating and old
-versions will no longer work. For now I will maintain a backwards
-compatible v0.1 branch with bugfixes, etc., but the main branch will
-begin using a new updated config parser script.
-
 ## Operation
 
 There are three modes of operation, simple, VLAN, and multi-NIC
 based. In simple mode all hosts must be on the same subnet as the
 primary address of the load balancer. In VLAN mode (enabled by
 declaring entries under the "vlans" section of the YAML/JSON config
-file), server entries should match a VLAN/CIDR subnet entry. VLAN
-tagged interfaces need to be created in the OS and have an IP address
-assigned within the subnet. In multi-NIC mode subnets are tagged in
+file), server entries must match a VLAN/CIDR subnet entry. VLAN tagged
+interfaces need to be created in the OS and have an IP address
+assigned within the subnet. In multi-NIC mode subnets are given IDs in
 the same manner as VLANs, but bpf_redirect() is used to send traffic
-out of the appropriate interface (rather than changing the VLAN ID and
-using XDP_TX).
+out of the appropriately configured interface (rather than changing
+the VLAN ID and using XDP_TX).
 
-In VLAN mode, traffic into the load balancer needs to be on a tagged VLAN (no
-pushing or popping of 802.1Q is done - yet). The IP address specified on the
-command line will be used to bind the connection to BGP peers, and so
-should be on one of the VLAN tagged interfaces (with appropriate
-routing for BGP egress if the router is not on the same subnet,
-eg. route reflectors).
-
-Sample netplan and VC5 configurations are in the
-[examples/](examples/) directory.
-
-A Multi-NIC mode has been added (-m flag) to `vc5ng`. Subnets matching
-each (untagged) NIC should be declared with an arbitrary "VLAN ID" in
-the config file. The code will discover the IP address/interface
-bindings and use bpf_redirect() to forward packets out the correct
-interface. This makes it possible to have multiple VLANs supported on
-a VMWare virtual machine with multiple network interfaces - trunked
-VLANs are not easily supported on VMWare as there is an all-or-nothing
-approach, which may not be practical/desirable in a large installation.
+In VLAN mode, all traffic for the load balancer needs to be on a tagged VLAN (no
+pushing or popping of 802.1Q is done - yet).
 
 
-
-
-## TODOs
-
-* IPIP/GRE/DSCP L3 support
-* Multicast status to help last conns check
-* More complete BGP4 implementation
-* BFD implementation (maybe no need for this with 3s hold time)
-
-
-## Notes
-
-My scribblings - likely not useful to anyone else ...
-
-https://wiki.nftables.org/wiki-nftables/index.php/Performing_Network_Address_Translation_(NAT)
-
-https://unix.stackexchange.com/questions/429077/how-to-do-nat-based-on-port-number-in-stateless-nat
-
-
-Set destination IP address on real server by DSCP - for L3 DSR
-
-* `nft add table raw`
-* `nft add chain raw prerouting { type filter hook prerouting priority raw \; }`
-* `nft add rule raw prerouting ip dscp 0x04 ip daddr set 192.168.101.4 notrack`
-
-https://lpc.events/event/11/contributions/950/attachments/889/1704/lpc_from_xdp_to_socket_fb.pdf
-
-https://github.com/xdp-project/xdp-tutorial.git
-
-https://lpc.events/event/2/contributions/71/attachments/17/9/presentation-lpc2018-xdp-tutorial.pdf
-
-https://yhbt.net/lore/xdp-newbies/CANLN0e5_HtYC1XQ=Z=JRLe-+3bTqoEWdbHJEGhbF7ZT=gz=ynQ@mail.gmail.com/T/
-
-
-Intel Xeon Gold 6314U CPU @ 2.30GHz
-Intel Ethernet 10G 4P X710-T4L-t OCP
-using percpu hash - not using LACP:
-
-* 550K 1.5Gbps 3Mpps    1190ns 36Gbps
-* 600K 1.7Gbps 3.25Mpps 1177ns 40Gbps   >90% idle
-* 650K 1.8Gbps 3.4Mpps  1145ns 42.7Gbps >90% idle
-* 675K 1.9Gbps 3.6Mpps  1303ns 44.7Gbps >90% idle
-* 700K 2.0Gbps 3.8Mpps  1295ns 46.5Gbps >90% idle
