@@ -40,15 +40,14 @@ import (
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/cue/mon"
-	"github.com/davidcoles/xvs"
+
+	lb "github.com/davidcoles/xvs"
 )
 
 // TODO:
 
 //go:embed static/*
 var STATIC embed.FS
-
-type Client = xvs.Client
 
 func main() {
 	F := "vc5"
@@ -107,7 +106,7 @@ func main() {
 		*webserver = config.Webserver
 	}
 
-	client := &Client{
+	client := &lb.Client{
 		Interfaces: nics,
 		Address:    addr,
 		Redirect:   *redirect,
@@ -171,7 +170,7 @@ func main() {
 		defer ticker.Stop()
 		for {
 			mutex.Lock()
-			summary.update(client.Info(), uint64(time.Now().Sub(start)/time.Second))
+			summary.update(client, uint64(time.Now().Sub(start)/time.Second))
 			services, old, summary.Current = serviceStatus(config, client, director, old)
 			mutex.Unlock()
 			select {
@@ -259,11 +258,34 @@ func main() {
 		w.Write([]byte("\n"))
 	})
 
+	// Remove this if migrating to a different load balancing engine
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
 		t := time.Now()
 		p := client.Prefixes()
 		fmt.Println(time.Now().Sub(t))
 		js, _ := json.Marshal(&p)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	// Remove this if migrating to a different load balancing engine
+	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
+		var ret []interface{}
+		type status struct {
+			Service      lb.ServiceExtended
+			Destinations []lb.DestinationExtended
+		}
+		svcs, _ := client.Services()
+		for _, se := range svcs {
+			dsts, _ := client.Destinations(se.Service)
+			ret = append(ret, status{Service: se, Destinations: dsts})
+		}
+		js, err := json.MarshalIndent(&ret, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -286,27 +308,6 @@ func main() {
 
 	http.HandleFunc("/cue.json", func(w http.ResponseWriter, r *http.Request) {
 		js, err := json.MarshalIndent(director.Status(), " ", " ")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
-
-	http.HandleFunc("/xvs.json", func(w http.ResponseWriter, r *http.Request) {
-		var ret []interface{}
-		type status struct {
-			Service      xvs.ServiceExtended
-			Destinations []xvs.DestinationExtended
-		}
-		svcs, _ := client.Services()
-		for _, se := range svcs {
-			dsts, _ := client.Destinations(se.Service)
-			ret = append(ret, status{Service: se, Destinations: dsts})
-		}
-		js, err := json.MarshalIndent(&ret, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -385,61 +386,7 @@ func main() {
 	}
 }
 
-func (s *Stats) update(x xvs.Stats) Stats {
-	o := *s
-
-	s.Octets = x.Octets
-	s.Packets = x.Packets
-	s.Flows = x.Flows
-	s.Current = x.Current
-	s.time = time.Now()
-
-	if o.time.Unix() != 0 {
-		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
-
-		if diff != 0 {
-			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
-			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
-			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
-		}
-	}
-
-	return *s
-}
-
-func (s *Summary) update(i xvs.Info, t uint64) Summary {
-	o := *s
-
-	s.Uptime = t
-
-	s.Latency = i.Latency
-	s.Dropped = i.Dropped
-	s.Blocked = i.Blocked
-	s.NotQueued = i.NotQueued
-
-	s.Octets = i.Octets
-	s.Packets = i.Packets
-	s.Flows = i.Flows
-	s.time = time.Now()
-
-	if o.time.Unix() != 0 {
-		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
-
-		if diff != 0 {
-			s.DroppedPerSecond = (1000 * (s.Dropped - o.Dropped)) / diff
-			s.BlockedPerSecond = (1000 * (s.Blocked - o.Blocked)) / diff
-			s.NotQueuedPerSecond = (1000 * (s.NotQueued - o.NotQueued)) / diff
-
-			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
-			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
-			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
-		}
-	}
-
-	return *s
-}
-
-func serviceStatus(config *Config, client *Client, director *cue.Director, old map[Key]Stats) (map[VIP][]Serv, map[Key]Stats, uint64) {
+func serviceStatus(config *Config, client Client, director *cue.Director, old map[Key]Stats) (map[VIP][]Serv, map[Key]Stats, uint64) {
 
 	var current uint64
 
@@ -448,7 +395,7 @@ func serviceStatus(config *Config, client *Client, director *cue.Director, old m
 
 	for _, svc := range director.Status() {
 
-		xs := xvs.Service{Address: svc.Address, Port: svc.Port, Protocol: xvs.Protocol(svc.Protocol)}
+		xs := lb.Service{Address: svc.Address, Port: svc.Port, Protocol: lb.Protocol(svc.Protocol)}
 		xse, _ := client.Service(xs)
 
 		t := Tuple{Addr: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
@@ -471,12 +418,12 @@ func serviceStatus(config *Config, client *Client, director *cue.Director, old m
 		}
 		stats[key] = serv.Stats.update(xse.Stats)
 
-		xvs := map[netip.Addr]xvs.Stats{}
+		lbs := map[netip.Addr]lb.Stats{}
 		mac := map[netip.Addr]string{}
 
 		xd, _ := client.Destinations(xs)
 		for _, d := range xd {
-			xvs[d.Destination.Address] = d.Stats
+			lbs[d.Destination.Address] = d.Stats
 			mac[d.Destination.Address] = d.MAC.String()
 			current += d.Stats.Current
 		}
@@ -500,7 +447,7 @@ func serviceStatus(config *Config, client *Client, director *cue.Director, old m
 				MAC:        mac[dst.Address],
 				Stats:      old[key],
 			}
-			stats[key] = dest.Stats.update(xvs[dst.Address])
+			stats[key] = dest.Stats.update(lbs[dst.Address])
 
 			serv.Destinations = append(serv.Destinations, dest)
 		}
@@ -513,4 +460,37 @@ func serviceStatus(config *Config, client *Client, director *cue.Director, old m
 	}
 
 	return status, stats, current
+}
+
+func (s *Summary) summary(c Client) {
+	u := c.Info()
+	s.Latency = u.Latency
+	s.Dropped = u.Dropped
+	s.Blocked = u.Blocked
+	s.NotQueued = u.NotQueued
+	s.Octets = u.Octets
+	s.Packets = u.Packets
+	s.Flows = u.Flows
+}
+
+func (s *Stats) update(u lb.Stats) Stats {
+	o := *s
+
+	s.Octets = u.Octets
+	s.Packets = u.Packets
+	s.Flows = u.Flows
+	s.Current = u.Current
+	s.time = time.Now()
+
+	if o.time.Unix() != 0 {
+		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
+
+		if diff != 0 {
+			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
+			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
+			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
+		}
+	}
+
+	return *s
 }

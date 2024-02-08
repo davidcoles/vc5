@@ -253,3 +253,5 @@ func (l *sub) WARNING(s string, a ...any) { l.log(WARNING, s, a...) }
 func (l *sub) NOTICE(s string, a ...any)  { l.log(NOTICE, s, a...) }
 func (l *sub) INFO(s string, a ...any)    { l.log(INFO, s, a...) }
 func (l *sub) DEBUG(s string, a ...any)   { l.log(DEBUG, s, a...) }
+
+type Logger = *sub

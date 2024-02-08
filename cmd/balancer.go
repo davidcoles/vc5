@@ -26,6 +26,8 @@ import (
 	"github.com/davidcoles/xvs"
 )
 
+type Client = *xvs.Client
+
 type tuple struct {
 	addr netip.Addr
 	port uint16
@@ -34,9 +36,12 @@ type tuple struct {
 
 type Balancer struct {
 	Client    *xvs.Client
-	ProbeFunc func(vip, rip, nat netip.Addr, check cue.Check) (bool, string)
+	ProbeFunc func(vip, rip, nat netip.Addr, check cue.Check) (bool, string) // see Probe() below
 }
 
+// Only needed if you need to override the built in monitoring health checking mechanism
+// Here we use it to run checks against the NAT address in the network namespace.
+// ProbeFunc method in Balancer not needed if you don't require this functionality
 func (b *Balancer) Probe(vip netip.Addr, rip netip.Addr, check cue.Check) (bool, string) {
 
 	f := b.ProbeFunc

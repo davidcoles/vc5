@@ -187,3 +187,28 @@ func updown(b bool) string {
 	}
 	return "down"
 }
+
+func (s *Summary) update(c Client, t uint64) Summary {
+	o := *s
+
+	s.summary(c)
+
+	s.Uptime = t
+	s.time = time.Now()
+
+	if o.time.Unix() != 0 {
+		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
+
+		if diff != 0 {
+			s.DroppedPerSecond = (1000 * (s.Dropped - o.Dropped)) / diff
+			s.BlockedPerSecond = (1000 * (s.Blocked - o.Blocked)) / diff
+			s.NotQueuedPerSecond = (1000 * (s.NotQueued - o.NotQueued)) / diff
+
+			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
+			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
+			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
+		}
+	}
+
+	return *s
+}

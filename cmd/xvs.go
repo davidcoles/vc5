@@ -41,7 +41,7 @@ import (
 
 const maxDatagramSize = 1500
 
-func multicast_send(client *Client, address string) {
+func multicast_send(client Client, address string) {
 
 	addr, err := net.ResolveUDPAddr("udp", address)
 
@@ -85,7 +85,7 @@ func multicast_send(client *Client, address string) {
 	}
 }
 
-func multicast_recv(client *Client, address string) {
+func multicast_recv(client Client, address string) {
 	udp, err := net.ResolveUDPAddr("udp", address)
 
 	if err != nil {
