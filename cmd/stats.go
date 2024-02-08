@@ -78,6 +78,11 @@ type Stats struct {
 	PacketsPerSecond uint64 `json:"packets_per_second"`
 	FlowsPerSecond   uint64 `json:"flows_per_second"`
 	time             time.Time
+
+	EgressOctets           uint64 `json:"egress_octets"`
+	EgressPackets          uint64 `json:"egress_packets"`
+	EgressOctetsPerSecond  uint64 `json:"egress_octets_per_second"`
+	EgressPacketsPerSecond uint64 `json:"egress_packets_per_second"`
 }
 
 type Summary struct {
@@ -90,14 +95,21 @@ type Summary struct {
 	BlockedPerSecond   uint64 `json:"blocked_per_second"`
 	NotQueuedPerSecond uint64 `json:"notqueued_per_second"`
 
-	Octets           uint64 `json:"octets"`
-	Packets          uint64 `json:"packets"`
-	Flows            uint64 `json:"flows"`
-	Current          uint64 `json:"current"`
-	OctetsPerSecond  uint64 `json:"octets_per_second"`
-	PacketsPerSecond uint64 `json:"packets_per_second"`
-	FlowsPerSecond   uint64 `json:"flows_per_second"`
-	time             time.Time
+	Octets                 uint64 `json:"octets"`
+	Packets                uint64 `json:"packets"`
+	Flows                  uint64 `json:"flows"`
+	Current                uint64 `json:"current"`
+	OctetsPerSecond        uint64 `json:"octets_per_second"`
+	PacketsPerSecond       uint64 `json:"packets_per_second"`
+	FlowsPerSecond         uint64 `json:"flows_per_second"`
+	EgressOctets           uint64 `json:"egress_octets"`
+	EgressPackets          uint64 `json:"egress_packets"`
+	EgressOctetsPerSecond  uint64 `json:"egress_octets_per_second"`
+	EgressPacketsPerSecond uint64 `json:"egress_packets_per_second"`
+	DSR                    bool   `json:"dsr"`
+	VC5                    bool   `json:"vc5"`
+
+	time time.Time
 }
 
 func (s *Stats) add(x Stats) {
@@ -108,6 +120,12 @@ func (s *Stats) add(x Stats) {
 	s.OctetsPerSecond += x.OctetsPerSecond
 	s.PacketsPerSecond += x.PacketsPerSecond
 	s.FlowsPerSecond += x.FlowsPerSecond
+
+	s.EgressOctets += x.EgressOctets
+	s.EgressPackets += x.EgressPackets
+	s.EgressOctetsPerSecond += x.EgressOctetsPerSecond
+	s.EgressPacketsPerSecond += x.EgressPacketsPerSecond
+
 }
 
 type VIP = netip.Addr
@@ -206,6 +224,8 @@ func (s *Summary) update(c Client, t uint64) Summary {
 
 			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
 			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
+			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
+			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
 			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
 		}
 	}

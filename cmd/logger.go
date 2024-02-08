@@ -42,7 +42,17 @@ const (
 
 var mutex sync.Mutex
 
-type KV = map[string]any
+type KV map[string]any
+
+func (kv KV) error(e error) KV {
+	kv["error"] = e.Error()
+	return kv
+}
+
+func (kv KV) add(k string, v any) KV {
+	kv[k] = v
+	return kv
+}
 
 type entry struct {
 	Indx index  `json:"indx"`

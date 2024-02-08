@@ -108,7 +108,7 @@ function updateStatus(url) {
             console.log('Something went wrong: ' + err)
         } else {
 
-	    var summary = summary_t(data.summary)
+	    var summary = summary_t(data.summary, data.bgp)
 
 	    var services = document.createElement("div");
 	    
@@ -122,12 +122,12 @@ function updateStatus(url) {
 		}
 	    }
 	    
-	    vips.appendChild(vips_t(data.vip))
+	    vips.appendChild(vips_t(data.vip, data.summary.dsr))
 	    
             //for(var vip in data.services) {
             for(var v of data.vip) {
 		var vip = v.vip
-		services.appendChild(serv(v, vip, data.services[vip], rib[vip] ? true : false))
+		services.appendChild(serv(v, vip, data.services[vip], rib[vip] ? true : false, data.summary.dsr))
 		append(services, "div", "&nbsp;")
 	    }
 	    
@@ -143,13 +143,13 @@ function updateStatus(url) {
     })    
 }
 
-function vips_t(vips) {
+function vips_t(vips, dsr) {
     var t = document.createElement("table");
     var th = append(t, "tr", null, "hd")
     append(th, "th", "VIP")
     append(th, "th", "State")
-    append(th, "th", "Traffic")
-    append(th, "th", "Packets")
+    append(th, "th", "Traffic").setAttribute("colspan", dsr ? 1 : 2)
+    append(th, "th", "Packets").setAttribute("colspan", dsr ? 1 : 2)
     append(th, "th", "Rate")
     append(th, "th", "Active")
 
@@ -158,8 +158,10 @@ function vips_t(vips) {
 	var tr = append(t, "tr", null, v.up ? "up" : "dn")
 	append(tr, "td", `<a href="#`+v.vip+`">`+v.vip+`</a>`)
 	append(tr, "td", v.up ? "UP" : "DOWN")
-	append(tr, "td", tsf(v.stats.octets_per_second*8)+"bits/s")
-	append(tr, "td", tsf(v.stats.packets_per_second)+"packets/s")
+	append(tr, "td", tsf(v.stats.octets_per_second*8)+"bits/s in")
+	if(!dsr) append(tr, "td", tsf(v.stats.egress_octets_per_second*8)+"bits/s out")
+	append(tr, "td", tsf(v.stats.packets_per_second)+"packets/s in")
+	if(!dsr) append(tr, "td", tsf(v.stats.packets_per_second)+"packets/s out")
 	append(tr, "td", tsf(v.stats.flows_per_second)+"conns/s")
 	append(tr, "td", spc(v.stats.current), "ar")
     }
@@ -175,14 +177,16 @@ function vips_t(vips) {
     return t
 }
 
-function summary_t(s) {
+function summary_t(s, bgp) {
     var div = document.createElement("div");
     var t = append(div, "table")
     var hd = append(t, "tr", null, "hd")
     var tr = append(t, "tr", null, "up")
     
-    append(hd, "th", "Latency")
-    append(tr, "td", s.latency_ns+"ns")
+    if(s.vc5) {
+	append(hd, "th", "Latency")
+	append(tr, "td", s.latency_ns+"ns")
+    }
     
     //append(hd, "th", "Dropped")
     //append(tr, "td", tsf(s.dropped_per_second)+"packets/s")
@@ -190,22 +194,41 @@ function summary_t(s) {
     //append(hd, "th", "Blocked")
     //append(tr, "td", tsf(s.blocked_per_second)+"packets/s")
 
-    append(hd, "th", "Bandwidth")
-    append(tr, "td", tsf(s.octets_per_second*8)+"bits/s")
+    if(s.dsr) {
+	append(hd, "th", "Traffic")
+	append(tr, "td", tsf(s.octets_per_second*8)+"bits/s in")
+	
+	append(hd, "th", "Packets")
+	append(tr, "td", tsf(s.packets_per_second)+"packets/s in")
+    } else {
+	append(hd, "th", "Traffic").setAttribute("colspan", 2)
+	append(tr, "td", tsf(s.octets_per_second*8)+"bits/s in")
+	append(tr, "td", tsf(s.egress_octets_per_second*8)+"bits/s out")
+	
+	append(hd, "th", "Packets").setAttribute("colspan", 2)
+	append(tr, "td", tsf(s.packets_per_second)+"packets/s in")
+	append(tr, "td", tsf(s.egress_packets_per_second)+"packets/s out")
+    }
 
-    append(hd, "th", "Packets")
-    append(tr, "td", tsf(s.packets_per_second)+"packets/s")
 
     append(hd, "th", "Connection rate")
     append(tr, "td", tsf(s.flows_per_second)+"conns/s")
 
     append(hd, "th", "Active connections")
     append(tr, "td", spc(s.current), "ar")
-    
+
+    var peers = Object.keys(bgp).sort()
+
+    for(var peer of peers) {
+	var conn = bgp[peer];
+	append(hd, "th", peer)
+	append(tr, "td", conn.State, conn.State == "ESTABLISHED" ? "up" : "dn")
+    }
+			
     return div
 }
 
-function serv(v, _vip, list, up) {
+function serv(v, _vip, list, up, dsr) {
     var vip = v.vip
     
     var div = document.createElement("div");
@@ -214,8 +237,13 @@ function serv(v, _vip, list, up) {
 
     append(tr, "th", v.vip, "ip")
     append(tr, "th", v.up ? "UP" : "DOWN")
-    append(tr, "th", tsf(v.stats.octets_per_second*8)+"bits/s")
-    append(tr, "th", tsf(v.stats.packets_per_second)+"packets/s")
+    
+    append(tr, "th", tsf(v.stats.octets_per_second*8)+"bits/s in")
+    if(!dsr) append(tr, "th", tsf(v.stats.egress_octets_per_second*8)+"bits/s out")
+
+    append(tr, "th", tsf(v.stats.packets_per_second)+"packets/s in")
+    if(!dsr) append(tr, "th", tsf(v.stats.egress_packets_per_second)+"packets/s out")
+
     append(tr, "th", tsf(v.stats.flows_per_second)+"conns/s")
     append(tr, "th", spc(v.stats.current), "ar")
     
@@ -230,15 +258,17 @@ function serv(v, _vip, list, up) {
 	var title = esc(s.description) + " [" + s.available + "/" +s.destinations.length + " available - " + s.required + " required]"
 	
 	append(tr, "th", esc(s.name))
-	append(tr, "th", esc(title)).setAttribute("colspan", 4)
+	append(tr, "th", esc(title)).setAttribute("colspan", dsr ? 4 : 6)
 	append(tr, "th", "Active")
 
 
 	tr = append(t, "tr", null, s.available >= s.required ? "up" : "dn")
 	append(tr, "th", s.address+":"+s.port+":"+s.protocol)
 	append(tr, "th",  dhms(s.for) + " " + (s.up ? "UP" : "DOWN"))
-	append(tr, "th", tsf(s.stats.octets_per_second*8)+"bits/s")
-	append(tr, "th", tsf(s.stats.packets_per_second)+"packets/s")
+	append(tr, "th", tsf(s.stats.octets_per_second*8)+"bits/s in")
+	if(!dsr) append(tr, "th", tsf(s.stats.egress_octets_per_second*8)+"bits/s out")
+	append(tr, "th", tsf(s.stats.packets_per_second)+"packets/s in")
+	if(!dsr) append(tr, "th", tsf(s.stats.egress_packets_per_second)+"packets/s out")
 	append(tr, "th", tsf(s.stats.flows_per_second)+"conns/s")
 	append(tr, "th", spc(s.stats.current), "ar")
 
@@ -257,7 +287,9 @@ function serv(v, _vip, list, up) {
 	    append(tr, "td").appendChild(address)
 	    append(tr, "td").appendChild(status)	    
 	    append(tr, "td", spc(d.stats.octets_per_second*8), "ar")
+	    if(!dsr) append(tr, "td", spc(d.stats.egress_octets_per_second*8), "ar")
 	    append(tr, "td", spc(d.stats.packets_per_second), "ar")
+	    if(!dsr) append(tr, "td", spc(d.stats.egress_packets_per_second), "ar")
 	    append(tr, "td", spc(d.stats.flows_per_second), "ar")
 	    append(tr, "td", spc(d.stats.current), "ar")	    
 	}
@@ -310,15 +342,18 @@ function updateLogs(url) {
         if (err !== null) {
             //alert('Something went wrong: ' + err);
         } else {
-            data.forEach(function(item, index) {
-                //console.log(index);
-                //if(item.Level < 7) {
-                    lastlog = item.indx;
-                    var date = new Date(item.time*1000);
-                    var time = date.toLocaleString();
+	    if(data !== null ) {
+               data.forEach(function(item, index) {
+                   //console.log(index);
+                   //if(item.Level < 7) {
+                   lastlog = item.indx;
+                   var date = new Date(item.time*1000);
+                   var time = date.toLocaleString();
                     addMessage(time + ": " + item.text);
-                //}
-            })
+                   //}
+	       })
+	    }
+		
         }
     })
 }

@@ -471,6 +471,12 @@ func (s *Summary) summary(c Client) {
 	s.Octets = u.Octets
 	s.Packets = u.Packets
 	s.Flows = u.Flows
+
+	s.DSR = true
+	s.VC5 = true
+
+	//s.EgressOctets = u.EgressOctets
+	//s.EgressPackets = u.EgressPackets
 }
 
 func (s *Stats) update(u lb.Stats) Stats {
@@ -482,10 +488,15 @@ func (s *Stats) update(u lb.Stats) Stats {
 	s.Current = u.Current
 	s.time = time.Now()
 
+	//s.EgressOctets = u.EgressOctets
+	//s.EgressPackets = u.EgressPackets
+
 	if o.time.Unix() != 0 {
 		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
 
 		if diff != 0 {
+			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
+			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
 			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
 			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
 			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
