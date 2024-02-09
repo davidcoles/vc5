@@ -70,19 +70,19 @@ type State struct {
 }
 
 type Stats struct {
-	Octets           uint64 `json:"octets"`
-	Packets          uint64 `json:"packets"`
-	Flows            uint64 `json:"flows"`
-	Current          uint64 `json:"current"`
-	OctetsPerSecond  uint64 `json:"octets_per_second"`
-	PacketsPerSecond uint64 `json:"packets_per_second"`
-	FlowsPerSecond   uint64 `json:"flows_per_second"`
-	time             time.Time
+	IngressOctets  uint64 `json:"octets"`
+	IngressPackets uint64 `json:"packets"`
+	EgressOctets   uint64 `json:"egress_octets"`
+	EgressPackets  uint64 `json:"egress_packets"`
+	Flows          uint64 `json:"flows"`
+	Current        uint64 `json:"current"`
 
-	EgressOctets           uint64 `json:"egress_octets"`
-	EgressPackets          uint64 `json:"egress_packets"`
-	EgressOctetsPerSecond  uint64 `json:"egress_octets_per_second"`
-	EgressPacketsPerSecond uint64 `json:"egress_packets_per_second"`
+	IngressOctetsPerSecond  uint64 `json:"octets_per_second"`
+	IngressPacketsPerSecond uint64 `json:"packets_per_second"`
+	EgressOctetsPerSecond   uint64 `json:"egress_octets_per_second"`
+	EgressPacketsPerSecond  uint64 `json:"egress_packets_per_second"`
+	FlowsPerSecond          uint64 `json:"flows_per_second"`
+	time                    time.Time
 }
 
 type Summary struct {
@@ -95,30 +95,30 @@ type Summary struct {
 	BlockedPerSecond   uint64 `json:"blocked_per_second"`
 	NotQueuedPerSecond uint64 `json:"notqueued_per_second"`
 
-	Octets                 uint64 `json:"octets"`
-	Packets                uint64 `json:"packets"`
-	Flows                  uint64 `json:"flows"`
-	Current                uint64 `json:"current"`
-	OctetsPerSecond        uint64 `json:"octets_per_second"`
-	PacketsPerSecond       uint64 `json:"packets_per_second"`
-	FlowsPerSecond         uint64 `json:"flows_per_second"`
-	EgressOctets           uint64 `json:"egress_octets"`
-	EgressPackets          uint64 `json:"egress_packets"`
-	EgressOctetsPerSecond  uint64 `json:"egress_octets_per_second"`
-	EgressPacketsPerSecond uint64 `json:"egress_packets_per_second"`
-	DSR                    bool   `json:"dsr"`
-	VC5                    bool   `json:"vc5"`
+	IngressOctets           uint64 `json:"octets"`
+	IngressPackets          uint64 `json:"packets"`
+	Flows                   uint64 `json:"flows"`
+	Current                 uint64 `json:"current"`
+	IngressOctetsPerSecond  uint64 `json:"octets_per_second"`
+	IngressPacketsPerSecond uint64 `json:"packets_per_second"`
+	FlowsPerSecond          uint64 `json:"flows_per_second"`
+	EgressOctets            uint64 `json:"egress_octets"`
+	EgressPackets           uint64 `json:"egress_packets"`
+	EgressOctetsPerSecond   uint64 `json:"egress_octets_per_second"`
+	EgressPacketsPerSecond  uint64 `json:"egress_packets_per_second"`
+	DSR                     bool   `json:"dsr"`
+	VC5                     bool   `json:"vc5"`
 
 	time time.Time
 }
 
 func (s *Stats) add(x Stats) {
-	s.Octets += x.Octets
-	s.Packets += x.Packets
+	s.IngressOctets += x.IngressOctets
+	s.IngressPackets += x.IngressPackets
 	s.Flows += x.Flows
 	s.Current += x.Current
-	s.OctetsPerSecond += x.OctetsPerSecond
-	s.PacketsPerSecond += x.PacketsPerSecond
+	s.IngressOctetsPerSecond += x.IngressOctetsPerSecond
+	s.IngressPacketsPerSecond += x.IngressPacketsPerSecond
 	s.FlowsPerSecond += x.FlowsPerSecond
 
 	s.EgressOctets += x.EgressOctets
@@ -222,8 +222,8 @@ func (s *Summary) update(c Client, t uint64) Summary {
 			s.BlockedPerSecond = (1000 * (s.Blocked - o.Blocked)) / diff
 			s.NotQueuedPerSecond = (1000 * (s.NotQueued - o.NotQueued)) / diff
 
-			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
-			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
+			s.IngressPacketsPerSecond = (1000 * (s.IngressPackets - o.IngressPackets)) / diff
+			s.IngressOctetsPerSecond = (1000 * (s.IngressOctets - o.IngressOctets)) / diff
 			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
 			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
 			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff

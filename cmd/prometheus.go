@@ -35,8 +35,8 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 	r = append(r, fmt.Sprintf(`vc5_latency %d`, summary.Latency))
 	r = append(r, fmt.Sprintf(`vc5_sessions %d`, summary.Current))
 	r = append(r, fmt.Sprintf(`vc5_session_total %d`, summary.Flows))
-	r = append(r, fmt.Sprintf(`vc5_rx_packets %d`, summary.Packets))
-	r = append(r, fmt.Sprintf(`vc5_rx_octets %d`, summary.Octets))
+	r = append(r, fmt.Sprintf(`vc5_rx_packets %d`, summary.IngressPackets))
+	r = append(r, fmt.Sprintf(`vc5_rx_octets %d`, summary.IngressOctets))
 
 	zeroone := func(u bool) uint8 {
 		if u {
@@ -71,8 +71,8 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 
 			r = metric(r, `vc5_service_sessions{service="%s",name="%s"} %d`, serv, name, stat.Current)
 			r = metric(r, `vc5_service_sessions_total{service="%s",name="%s"} %d`, serv, name, stat.Flows)
-			r = metric(r, `vc5_service_rx_packets{service="%s",name="%s"} %d`, serv, name, stat.Packets)
-			r = metric(r, `vc5_service_rx_octets{service="%s",name="%s"} %d`, serv, name, stat.Octets)
+			r = metric(r, `vc5_service_rx_packets{service="%s",name="%s"} %d`, serv, name, stat.IngressPackets)
+			r = metric(r, `vc5_service_rx_octets{service="%s",name="%s"} %d`, serv, name, stat.IngressOctets)
 			r = metric(r, `vc5_service_status{service="%s",name="%s"} %d`, serv, name, up)
 			r = metric(r, `vc5_service_status_duration{service="%s",name="%s"} %d`, serv, name, s.For)
 			r = metric(r, `vc5_service_reserves_used{service="%s",name="%s"} %d`, serv, name, 666)
@@ -83,8 +83,8 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 
 				r = metric(r, `vc5_backend_sessions{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.Current)
 				r = metric(r, `vc5_backend_sessions_total{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.Flows)
-				r = metric(r, `vc5_backend_rx_packets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.Packets)
-				r = metric(r, `vc5_backend_rx_octets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.Octets)
+				r = metric(r, `vc5_backend_rx_packets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.IngressPackets)
+				r = metric(r, `vc5_backend_rx_octets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.IngressOctets)
 				r = metric(r, `vc5_backend_status{service="%s",name="%s",backend="%s"} %d`, serv, name, real, up)
 				r = metric(r, `vc5_backend_status_duration{service="%s",name="%s",backend="%s"} %d`, serv, name, real, d.For)
 				r = metric(r, `vc5_backend_reserves_used{service="%s",name="%s",backend="%s"} %d`, serv, name, real, 666)

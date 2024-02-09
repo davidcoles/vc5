@@ -468,8 +468,8 @@ func (s *Summary) summary(c Client) {
 	s.Dropped = u.Dropped
 	s.Blocked = u.Blocked
 	s.NotQueued = u.NotQueued
-	s.Octets = u.Octets
-	s.Packets = u.Packets
+	s.IngressOctets = u.Octets
+	s.IngressPackets = u.Packets
 	s.Flows = u.Flows
 
 	s.DSR = true
@@ -482,8 +482,8 @@ func (s *Summary) summary(c Client) {
 func (s *Stats) update(u lb.Stats) Stats {
 	o := *s
 
-	s.Octets = u.Octets
-	s.Packets = u.Packets
+	s.IngressOctets = u.Octets
+	s.IngressPackets = u.Packets
 	s.Flows = u.Flows
 	s.Current = u.Current
 	s.time = time.Now()
@@ -497,8 +497,8 @@ func (s *Stats) update(u lb.Stats) Stats {
 		if diff != 0 {
 			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
 			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
-			s.PacketsPerSecond = (1000 * (s.Packets - o.Packets)) / diff
-			s.OctetsPerSecond = (1000 * (s.Octets - o.Octets)) / diff
+			s.IngressPacketsPerSecond = (1000 * (s.IngressPackets - o.IngressPackets)) / diff
+			s.IngressOctetsPerSecond = (1000 * (s.IngressOctets - o.IngressOctets)) / diff
 			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
 		}
 	}
