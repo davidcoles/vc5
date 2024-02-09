@@ -79,6 +79,7 @@ type Config struct {
 	BGP map[string]bgp.Parameters `json:"bgp,omitempty"`
 
 	Learn     time.Duration `json:"learn,omitempty"`
+	Listen    bool          `json:"listen,omitempty"`
 	Multicast string        `json:"multicast,omitempty"`
 	Webserver string        `json:"webserver,omitempty"`
 }

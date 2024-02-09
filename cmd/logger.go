@@ -29,6 +29,8 @@ import (
 	"time"
 )
 
+const INDEX = "vc5"
+
 const (
 	EMERG   = 0
 	ALERT   = 1
@@ -126,19 +128,6 @@ func null() chan string {
 
 func (l *logger) log(lev uint8, f string, a ...any) {
 
-	l.mutex.Lock()
-	if l.out == nil {
-		if l.elastic {
-			l.out = elastic(HOSTNAME)
-		} else {
-			l.out = null()
-		}
-		if l.out == nil {
-			log.Fatal("Couldn't start logger")
-		}
-	}
-	l.mutex.Unlock()
-
 	text := fmt.Sprintln(a...)
 
 	//log.Println(text)
@@ -199,12 +188,26 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		l.console(level(lev) + " " + f + " " + text)
 	}
 
+	if !l.elastic {
+		return
+	}
+
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.out == nil {
+		if l.out = elastic(INDEX, HOSTNAME); l.out == nil {
+			log.Println("Unable to start logging")
+		}
+	}
+
 	select {
 	case l.out <- string(js):
 	default:
-		log.Fatal("Logging stuffed")
+		close(l.out)
+		l.out = nil
+		log.Println("Logging stuffed - restarting")
 	}
-
 }
 
 func (l *logger) get(start index) (s []entry) {

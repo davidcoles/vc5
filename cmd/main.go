@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -104,6 +105,23 @@ func main() {
 
 	if config.Webserver != "" {
 		*webserver = config.Webserver
+	}
+
+	var listener net.Listener
+
+	if *webserver != "" {
+		listener, err = net.Listen("tcp", *webserver)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if config.Listen {
+		l, err := net.Listen("tcp", ":179")
+		if err != nil {
+			log.Fatal("Couldn't listen on BGP port", err)
+		}
+		go bgpListener(l, logs)
 	}
 
 	client := &lb.Client{
@@ -354,7 +372,8 @@ func main() {
 	})
 
 	go func() {
-		log.Fatal(http.ListenAndServe(*webserver, nil))
+		server := http.Server{}
+		log.Fatal(server.Serve(listener))
 	}()
 
 	sig := make(chan os.Signal)
@@ -502,4 +521,21 @@ func (s *Stats) update(u lb.Stats) Stats {
 	}
 
 	return *s
+}
+
+func bgpListener(l net.Listener, logs *logger) {
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			logs.ERR("listner", "Failed to accept connection", err)
+		} else {
+			go func(c net.Conn) {
+				logs.DEBUG("listner", "Accepted connection")
+				defer c.Close()
+				time.Sleep(time.Minute)
+			}(conn)
+		}
+	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -11,7 +10,9 @@ import (
 	"github.com/elastic/go-elasticsearch/v7/esapi"
 )
 
-func elastic(hostname string) chan string {
+// https://pkg.go.dev/github.com/elastic/go-elasticsearch/v7
+
+func elastic(index, hostname string) chan string {
 
 	id := uint64(time.Now().UnixNano())
 
@@ -28,34 +29,31 @@ func elastic(hostname string) chan string {
 
 			id++
 
-			logit(client, hostname, fmt.Sprintf("%d", id), m)
+			indexRequest(client, index, hostname, fmt.Sprintf("%d", id), m)
 		}
 	}()
 
 	return c
 }
 
-func logit(client *elasticsearch.Client, host, id, message string) error {
+func indexRequest(client *elasticsearch.Client, index, host, id, message string) {
 
-again:
-	ctx := context.Background()
-	req := esapi.IndexRequest{
-		Index:      "vc5",
-		DocumentID: host + "-" + id,
-		Body:       strings.NewReader(message),
-		Refresh:    "true",
-	}
+	for {
+		ctx := context.Background()
+		req := esapi.IndexRequest{
+			Index:      index,
+			DocumentID: host + "-" + id,
+			Body:       strings.NewReader(message),
+			Refresh:    "true",
+		}
 
-	res, err := req.Do(ctx, client)
+		res, err := req.Do(ctx, client)
 
-	if err != nil {
-		log.Println("Coulnd't log message", id)
-		//return err
+		if err == nil {
+			res.Body.Close()
+			return
+		}
+
 		time.Sleep(time.Second)
-		goto again
 	}
-
-	defer res.Body.Close()
-
-	return nil
 }
