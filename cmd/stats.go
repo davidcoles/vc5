@@ -70,15 +70,15 @@ type State struct {
 }
 
 type Stats struct {
-	IngressOctets  uint64 `json:"octets"`
-	IngressPackets uint64 `json:"packets"`
+	IngressOctets  uint64 `json:"ingress_octets"`
+	IngressPackets uint64 `json:"ingress_packets"`
 	EgressOctets   uint64 `json:"egress_octets"`
 	EgressPackets  uint64 `json:"egress_packets"`
 	Flows          uint64 `json:"flows"`
 	Current        uint64 `json:"current"`
 
-	IngressOctetsPerSecond  uint64 `json:"octets_per_second"`
-	IngressPacketsPerSecond uint64 `json:"packets_per_second"`
+	IngressOctetsPerSecond  uint64 `json:"ingress_octets_per_second"`
+	IngressPacketsPerSecond uint64 `json:"ingress_packets_per_second"`
 	EgressOctetsPerSecond   uint64 `json:"egress_octets_per_second"`
 	EgressPacketsPerSecond  uint64 `json:"egress_packets_per_second"`
 	FlowsPerSecond          uint64 `json:"flows_per_second"`
@@ -95,12 +95,12 @@ type Summary struct {
 	BlockedPerSecond   uint64 `json:"blocked_per_second"`
 	NotQueuedPerSecond uint64 `json:"notqueued_per_second"`
 
-	IngressOctets           uint64 `json:"octets"`
-	IngressPackets          uint64 `json:"packets"`
+	IngressOctets           uint64 `json:"ingress_octets"`
+	IngressPackets          uint64 `json:"ingress_packets"`
 	Flows                   uint64 `json:"flows"`
 	Current                 uint64 `json:"current"`
-	IngressOctetsPerSecond  uint64 `json:"octets_per_second"`
-	IngressPacketsPerSecond uint64 `json:"packets_per_second"`
+	IngressOctetsPerSecond  uint64 `json:"ingress_octets_per_second"`
+	IngressPacketsPerSecond uint64 `json:"ingress_packets_per_second"`
 	FlowsPerSecond          uint64 `json:"flows_per_second"`
 	EgressOctets            uint64 `json:"egress_octets"`
 	EgressPackets           uint64 `json:"egress_packets"`

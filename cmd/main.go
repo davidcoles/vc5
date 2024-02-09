@@ -470,13 +470,12 @@ func (s *Summary) summary(c Client) {
 	s.NotQueued = u.NotQueued
 	s.IngressOctets = u.Octets
 	s.IngressPackets = u.Packets
+	s.EgressOctets = 0  // Not available in DSR
+	s.EgressPackets = 0 // Not available in DSR
 	s.Flows = u.Flows
 
 	s.DSR = true
 	s.VC5 = true
-
-	//s.EgressOctets = u.EgressOctets
-	//s.EgressPackets = u.EgressPackets
 }
 
 func (s *Stats) update(u lb.Stats) Stats {
@@ -484,12 +483,11 @@ func (s *Stats) update(u lb.Stats) Stats {
 
 	s.IngressOctets = u.Octets
 	s.IngressPackets = u.Packets
+	s.EgressOctets = 0  // Not available in DSR
+	s.EgressPackets = 0 // Not available in DSR
 	s.Flows = u.Flows
 	s.Current = u.Current
 	s.time = time.Now()
-
-	//s.EgressOctets = u.EgressOctets
-	//s.EgressPackets = u.EgressPackets
 
 	if o.time.Unix() != 0 {
 		diff := uint64(s.time.Sub(o.time) / time.Millisecond)

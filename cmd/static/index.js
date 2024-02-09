@@ -79,6 +79,9 @@ function spc(x) {
 }
 
 function tsf(num) {
+    if(num === undefined) {
+	return "XXX";
+    }
     var suffix = ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
     
     if(num < 1000) {
@@ -158,10 +161,10 @@ function vips_t(vips, dsr) {
 	var tr = append(t, "tr", null, v.up ? "up" : "dn")
 	append(tr, "td", `<a href="#`+v.vip+`">`+v.vip+`</a>`)
 	append(tr, "td", v.up ? "UP" : "DOWN")
-	append(tr, "td", tsf(v.stats.octets_per_second*8)+"bits/s in")
+	append(tr, "td", tsf(v.stats.ingress_octets_per_second*8)+"bits/s in")
 	if(!dsr) append(tr, "td", tsf(v.stats.egress_octets_per_second*8)+"bits/s out")
-	append(tr, "td", tsf(v.stats.packets_per_second)+"packets/s in")
-	if(!dsr) append(tr, "td", tsf(v.stats.packets_per_second)+"packets/s out")
+	append(tr, "td", tsf(v.stats.ingress_packets_per_second)+"packets/s in")
+	if(!dsr) append(tr, "td", tsf(v.stats.egress_packets_per_second)+"packets/s out")
 	append(tr, "td", tsf(v.stats.flows_per_second)+"conns/s")
 	append(tr, "td", spc(v.stats.current), "ar")
     }
@@ -196,17 +199,17 @@ function summary_t(s, bgp) {
 
     if(s.dsr) {
 	append(hd, "th", "Traffic")
-	append(tr, "td", tsf(s.octets_per_second*8)+"bits/s in")
+	append(tr, "td", tsf(s.ingress_octets_per_second*8)+"bits/s in")
 	
 	append(hd, "th", "Packets")
-	append(tr, "td", tsf(s.packets_per_second)+"packets/s in")
+	append(tr, "td", tsf(s.ingress_packets_per_second)+"packets/s in")
     } else {
 	append(hd, "th", "Traffic").setAttribute("colspan", 2)
-	append(tr, "td", tsf(s.octets_per_second*8)+"bits/s in")
+	append(tr, "td", tsf(s.ingress_octets_per_second*8)+"bits/s in")
 	append(tr, "td", tsf(s.egress_octets_per_second*8)+"bits/s out")
 	
 	append(hd, "th", "Packets").setAttribute("colspan", 2)
-	append(tr, "td", tsf(s.packets_per_second)+"packets/s in")
+	append(tr, "td", tsf(s.ingress_packets_per_second)+"packets/s in")
 	append(tr, "td", tsf(s.egress_packets_per_second)+"packets/s out")
     }
 
@@ -238,10 +241,10 @@ function serv(v, _vip, list, up, dsr) {
     append(tr, "th", v.vip, "ip")
     append(tr, "th", v.up ? "UP" : "DOWN")
     
-    append(tr, "th", tsf(v.stats.octets_per_second*8)+"bits/s in")
+    append(tr, "th", tsf(v.stats.ingress_octets_per_second*8)+"bits/s in")
     if(!dsr) append(tr, "th", tsf(v.stats.egress_octets_per_second*8)+"bits/s out")
 
-    append(tr, "th", tsf(v.stats.packets_per_second)+"packets/s in")
+    append(tr, "th", tsf(v.stats.ingress_packets_per_second)+"packets/s in")
     if(!dsr) append(tr, "th", tsf(v.stats.egress_packets_per_second)+"packets/s out")
 
     append(tr, "th", tsf(v.stats.flows_per_second)+"conns/s")
@@ -265,9 +268,9 @@ function serv(v, _vip, list, up, dsr) {
 	tr = append(t, "tr", null, s.available >= s.required ? "up" : "dn")
 	append(tr, "th", s.address+":"+s.port+":"+s.protocol)
 	append(tr, "th",  dhms(s.for) + " " + (s.up ? "UP" : "DOWN"))
-	append(tr, "th", tsf(s.stats.octets_per_second*8)+"bits/s in")
+	append(tr, "th", tsf(s.stats.ingress_octets_per_second*8)+"bits/s in")
 	if(!dsr) append(tr, "th", tsf(s.stats.egress_octets_per_second*8)+"bits/s out")
-	append(tr, "th", tsf(s.stats.packets_per_second)+"packets/s in")
+	append(tr, "th", tsf(s.stats.ingress_packets_per_second)+"packets/s in")
 	if(!dsr) append(tr, "th", tsf(s.stats.egress_packets_per_second)+"packets/s out")
 	append(tr, "th", tsf(s.stats.flows_per_second)+"conns/s")
 	append(tr, "th", spc(s.stats.current), "ar")
@@ -286,9 +289,9 @@ function serv(v, _vip, list, up, dsr) {
 	    var tr = append(t, "tr", null, c)
 	    append(tr, "td").appendChild(address)
 	    append(tr, "td").appendChild(status)	    
-	    append(tr, "td", spc(d.stats.octets_per_second*8), "ar")
+	    append(tr, "td", spc(d.stats.ingress_octets_per_second*8), "ar")
 	    if(!dsr) append(tr, "td", spc(d.stats.egress_octets_per_second*8), "ar")
-	    append(tr, "td", spc(d.stats.packets_per_second), "ar")
+	    append(tr, "td", spc(d.stats.ingress_packets_per_second), "ar")
 	    if(!dsr) append(tr, "td", spc(d.stats.egress_packets_per_second), "ar")
 	    append(tr, "td", spc(d.stats.flows_per_second), "ar")
 	    append(tr, "td", spc(d.stats.current), "ar")	    

@@ -37,6 +37,8 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 	r = append(r, fmt.Sprintf(`vc5_session_total %d`, summary.Flows))
 	r = append(r, fmt.Sprintf(`vc5_rx_packets %d`, summary.IngressPackets))
 	r = append(r, fmt.Sprintf(`vc5_rx_octets %d`, summary.IngressOctets))
+	r = append(r, fmt.Sprintf(`vc5_tx_packets %d`, summary.EgressPackets))
+	r = append(r, fmt.Sprintf(`vc5_tx_octets %d`, summary.EgressOctets))
 
 	zeroone := func(u bool) uint8 {
 		if u {
@@ -73,6 +75,8 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 			r = metric(r, `vc5_service_sessions_total{service="%s",name="%s"} %d`, serv, name, stat.Flows)
 			r = metric(r, `vc5_service_rx_packets{service="%s",name="%s"} %d`, serv, name, stat.IngressPackets)
 			r = metric(r, `vc5_service_rx_octets{service="%s",name="%s"} %d`, serv, name, stat.IngressOctets)
+			r = metric(r, `vc5_service_tx_packets{service="%s",name="%s"} %d`, serv, name, stat.EgressPackets)
+			r = metric(r, `vc5_service_tx_octets{service="%s",name="%s"} %d`, serv, name, stat.EgressOctets)
 			r = metric(r, `vc5_service_status{service="%s",name="%s"} %d`, serv, name, up)
 			r = metric(r, `vc5_service_status_duration{service="%s",name="%s"} %d`, serv, name, s.For)
 			r = metric(r, `vc5_service_reserves_used{service="%s",name="%s"} %d`, serv, name, 666)
@@ -85,6 +89,8 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 				r = metric(r, `vc5_backend_sessions_total{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.Flows)
 				r = metric(r, `vc5_backend_rx_packets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.IngressPackets)
 				r = metric(r, `vc5_backend_rx_octets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.IngressOctets)
+				r = metric(r, `vc5_backend_tx_packets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.EgressPackets)
+				r = metric(r, `vc5_backend_tx_octets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.EgressOctets)
 				r = metric(r, `vc5_backend_status{service="%s",name="%s",backend="%s"} %d`, serv, name, real, up)
 				r = metric(r, `vc5_backend_status_duration{service="%s",name="%s",backend="%s"} %d`, serv, name, real, d.For)
 				r = metric(r, `vc5_backend_reserves_used{service="%s",name="%s",backend="%s"} %d`, serv, name, real, 666)
@@ -109,12 +115,16 @@ func help() string {
 # TYPE vc5_session_total counter
 # TYPE vc5_rx_packets counter
 # TYPE vc5_rx_octets counter
+# TYPE vc5_tx_packets counter
+# TYPE vc5_tx_octets counter
 # TYPE vc5_vip_status gauge
 # TYPE vc5_vip_status_duration gauge
 # TYPE vc5_service_sessions gauge
 # TYPE vc5_service_sessions_total counter
 # TYPE vc5_service_rx_packets counter
 # TYPE vc5_service_rx_octets counter
+# TYPE vc5_service_tx_packets counter
+# TYPE vc5_service_tx_octets counter
 # TYPE vc5_service_status gauge
 # TYPE vc5_service_status_duration gauge
 # TYPE vc5_service_reserves_used gauge
@@ -122,6 +132,8 @@ func help() string {
 # TYPE vc5_backend_sessions_total counter
 # TYPE vc5_backend_rx_packets counter
 # TYPE vc5_backend_rx_octets counter
+# TYPE vc5_backend_tx_packets counter
+# TYPE vc5_backend_tx_octets counter
 # TYPE vc5_backend_status gauge
 # TYPE vc5_backend_status_duration gauge
 # HELP vc5_uptime Uptime in seconds
@@ -131,12 +143,16 @@ func help() string {
 # HELP vc5_session_total Total number of new sessions written to state tracking table
 # HELP vc5_rx_packets Total number of incoming packets
 # HELP vc5_rx_octets Total number incoming bytes
+# HELP vc5_tx_packets Total number of outgoing packets
+# HELP vc5_tx_octets Total number outgoing bytes
 # HELP vc5_vip_status gauge
 # HELP vc5_vip_status_duration gauge
 # HELP vc5_service_sessions gauge
 # HELP vc5_service_sessions_total counter
 # HELP vc5_service_rx_packets counter
 # HELP vc5_service_rx_octets counter
+# HELP vc5_service_tx_packets counter
+# HELP vc5_service_tx_octets counter
 # HELP vc5_service_status gauge
 # HELP vc5_service_status_duration gauge
 # HELP vc5_service_reserves_used gauge
@@ -144,6 +160,8 @@ func help() string {
 # HELP vc5_backend_sessions_total counter
 # HELP vc5_backend_rx_packets counter
 # HELP vc5_backend_rx_octets counter
+# HELP vc5_backend_tx_packets counter
+# HELP vc5_backend_tx_octets counter
 # HELP vc5_backend_status gauge
 # HELP vc5_backend_status_duration gauge`
 }
