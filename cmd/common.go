@@ -19,6 +19,7 @@
 package main
 
 import (
+	"net"
 	"net/netip"
 	"sort"
 	"time"
@@ -231,4 +232,22 @@ func (s *Summary) update(c Client, t uint64) Summary {
 	}
 
 	return *s
+}
+
+func bgpListener(l net.Listener, logs Logger) {
+	F := "listener"
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			logs.ERR(F, "Failed to accept connection", err)
+		} else {
+			go func(c net.Conn) {
+				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
+				defer c.Close()
+				time.Sleep(time.Minute)
+			}(conn)
+		}
+	}
 }
