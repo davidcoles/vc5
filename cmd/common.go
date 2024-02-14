@@ -177,7 +177,7 @@ func vipState(services []cue.Service, old map[netip.Addr]State, logs *logger) ma
 
 			if o.up != up {
 				new[v] = State{up: up, time: time.Now()}
-				logs.NOTICE(F, KV{"vip": v, "state": updown(up), "event": "vip"})
+				logs.WARNING(F, KV{"vip": v, "state": updown(up), "event": "vip"})
 			} else {
 				new[v] = o
 			}

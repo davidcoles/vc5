@@ -61,7 +61,7 @@ func main() {
 	root := flag.String("r", "", "webserver root directory")
 	sock := flag.String("s", "", "socket")
 	native := flag.Bool("n", false, "Native mode XDP")
-	redirect := flag.Bool("R", false, "Redirect mode")
+	untagged := flag.Bool("u", false, "Untagged VLAN mode")
 	webserver := flag.String("w", ":80", "webserver listen address")
 	elasticsearch := flag.Bool("e", false, "Elasticsearch logging")
 
@@ -124,10 +124,14 @@ func main() {
 		go bgpListener(l, logs.sub("bgp"))
 	}
 
+	for _, i := range nics {
+		ethtool(i)
+	}
+
 	client := &lb.Client{
 		Interfaces: nics,
 		Address:    addr,
-		Redirect:   *redirect,
+		Redirect:   *untagged,
 		Native:     *native,
 		VLANs:      config.vlans(),
 		NAT:        true,

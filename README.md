@@ -37,13 +37,21 @@ If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
-## Homepage
+## Quickstart
 
-The code is hosted at GitHub, https://github.com/davidcoles/vc5
+A simple example on a server with a single, untagged ethernet interface:
 
-Clone with `git clone https://github.com/davidcoles/vc5.git`
+* `apt-get install git make libelf-dev golang-1.20 libyaml-perl libjson-perl ethtool` (or your distro's equivalent)
+* `ln -s /usr/lib/go-1.20/bin/go /usr/local/bin/go` (ensure that the Go binary is in your path)
+* `git clone https://github.com/davidcoles/vc5.git`
+* `cd vc5/cmd`
+* `cp config.sample.yaml config.yaml` (edit config.yaml to match your requirements)
+* `make` (builds the binary and JSON config file)
+* `./vc5 config.json 10.1.10.100 eth0` (amend to use your server's IP address and ethernet interface)
+* A web console will be on your load balancer server's port 80 by default
+* Add your VIP to the loopback device on your backend servers (eg.: `ip add 192.168.101.1/32 dev lo`)
+* Configure routing to send traffic for your VIP to the load balancer either via BGP (see config file) or static routing
 
-[Documentation and quick start guide](docs/README.md) with a [video demonstration](docs/quickstart.md).
 
 ## Goals/status
 

@@ -485,14 +485,24 @@ sub params {
 __END__;
 ---
 
+# Single untagged interface, load balancer IP is 10.1.10.100:
+# vc5 config.json 10.1.10.100 eth0
+
+# With tagged VLANs on one interface, vlan section uncommented and other VLAN services added:
+# vc5 config.json 10.1.10.100 eth0
+
+# vlan secion enabled, two separate interfaces on different, untagged, VLANs:
+# vc5 -u config.json 10.1.10.100 eth0 eth1
+
+# Route Host Injection - BGP settings
 rhi:
   as_number: 65000
   peers:
-    - 10.1.2.200
+    - 10.1.10.200
 
-vlans:
-  10: 10.1.10.0/24
-  20: 10.1.20.0/24
+#vlans:
+#  10: 10.1.10.0/24
+#  20: 10.1.20.0/24
 
 services:
   
@@ -508,12 +518,13 @@ services:
     policy:
       http:
         
-  - name: bind
-    virtual:
-      - 192.168.101.2
-    servers:
-      - 10.1.20.1
-      - 10.1.20.2
-      - 10.1.20.3
-    policy:
-      domain:
+#  - name: bind
+#    description: BIND server on a different VLAN
+#    virtual:
+#      - 192.168.101.2
+#    servers:
+#      - 10.1.20.1
+#      - 10.1.20.2
+#      - 10.1.20.3
+#    policy:
+#      domain:

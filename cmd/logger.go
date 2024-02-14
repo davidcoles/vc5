@@ -44,17 +44,7 @@ const (
 
 var mutex sync.Mutex
 
-type KV map[string]any
-
-func (kv KV) error(e error) KV {
-	kv["error"] = e.Error()
-	return kv
-}
-
-func (kv KV) add(k string, v any) KV {
-	kv[k] = v
-	return kv
-}
+type KV = map[string]any
 
 type entry struct {
 	Indx index  `json:"indx"`
@@ -146,6 +136,7 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		e := a[0]
 
 		if k, ok := e.(KV); ok {
+
 			kv = k
 			var t []string
 			for k, v := range kv {
@@ -154,6 +145,9 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 			sort.Strings(t)
 			text = strings.Join(t, " ")
 
+			//} else if k, ok := e.(map[string]any); ok {
+			//	fmt.Println("foo", a)
+			//	kv, text = foo(k)
 		} else {
 			kv["text"] = text
 		}
@@ -209,6 +203,20 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		log.Println("Logging stuffed - restarting")
 	}
 }
+
+/*
+func foo(k map[string]any) (map[string]any, string) {
+	kv := k
+	var t []string
+	for k, v := range kv {
+		t = append(t, fmt.Sprintf("%s:%v", k, v))
+	}
+	sort.Strings(t)
+	text := strings.Join(t, " ")
+
+	return kv, text
+}
+*/
 
 func (l *logger) get(start index) (s []entry) {
 	l.mutex.Lock()

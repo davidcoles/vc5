@@ -339,3 +339,10 @@ func unix(socket string) *http.Client {
 		},
 	}
 }
+
+func ethtool(i string) {
+	exec.Command("ethtool", "-K", i, "rx", "off").Output()
+	exec.Command("ethtool", "-K", i, "tx", "off").Output()
+	exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
+	exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
+}
