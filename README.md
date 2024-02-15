@@ -49,8 +49,8 @@ A simple example on a server with a single, untagged ethernet interface:
 * `make` (builds the binary and JSON config file)
 * `./vc5 config.json 10.1.10.100 eth0` (amend to use your server's IP address and ethernet interface)
 * A web console will be on your load balancer server's port 80 by default
-* Add your VIP to the loopback device on your backend servers (eg.: `ip add 192.168.101.1/32 dev lo`)
-* Configure routing to send traffic for your VIP to the load balancer either via BGP (see config file) or static routing
+* Add your VIP to the loopback device on your backend servers (eg.: `ip addr add 192.168.101.1/32 dev lo`)
+* Configure your network/client to send traffic for your VIP to the load balancer, either via BGP (see config file) or static routing
 
 
 ## Goals/status
@@ -66,7 +66,7 @@ A simple example on a server with a single, untagged ethernet interface:
 * ✅ Multiple VLAN support
 * ✅ Multiple NIC support for lower bandwidth/development applications
 * ✅ Works with bonded network devices to support high-availibility/high-bandwidth
-* ✅ Observability via a web console, Elasticsearch logging and Prometheus metrics
+* ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
 
 ## Performance
 
@@ -93,7 +93,7 @@ address (VIP) to be distributed over a set of real servers. Real
 servers might run the service themselves or act as proxies for another
 layer of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
 offload). The only requirement being that the VIP needs to be
-configured on a loopback device on real server, eg.: `ip a add
+configured on a loopback device on real server, eg.: `ip addr add
 192.168.101.1/32 dev lo`
 
 Currently only layer 2 load balancing is performed. This means that

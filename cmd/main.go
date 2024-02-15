@@ -30,7 +30,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
-	//"runtime/debug"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,8 +52,6 @@ var STATIC embed.FS
 
 func main() {
 	F := "vc5"
-
-	//fmt.Println(debug.ReadBuildInfo())
 
 	var mutex sync.Mutex
 
@@ -271,6 +269,23 @@ func main() {
 		start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
 		logs := logs.get(index(start))
 		js, err := json.MarshalIndent(&logs, " ", " ")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	http.HandleFunc("/build.json", func(w http.ResponseWriter, r *http.Request) {
+		info, ok := debug.ReadBuildInfo()
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		js, err := json.MarshalIndent(info, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
