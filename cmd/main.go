@@ -51,6 +51,7 @@ import (
 var STATIC embed.FS
 
 func main() {
+
 	F := "vc5"
 
 	var mutex sync.Mutex
@@ -61,7 +62,7 @@ func main() {
 	native := flag.Bool("n", false, "Native mode XDP")
 	untagged := flag.Bool("u", false, "Untagged VLAN mode")
 	webserver := flag.String("w", ":80", "webserver listen address")
-	elasticsearch := flag.Bool("e", false, "Elasticsearch logging")
+	elasticsearch := flag.String("e", "", "Log with Elasticsearch to this index")
 
 	flag.Parse()
 
@@ -395,7 +396,7 @@ func main() {
 		log.Fatal(server.Serve(listener))
 	}()
 
-	sig := make(chan os.Signal)
+	sig := make(chan os.Signal, 10)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT)
 
 	for {

@@ -12,6 +12,13 @@ import (
 
 // https://pkg.go.dev/github.com/elastic/go-elasticsearch/v7
 
+type Elasticsearch struct {
+	Index     string   `json:"index,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
+	Username  string   `json:"username,omitempty"`
+	Password  string   `json:"password,omitempty"`
+}
+
 func elastic(index, hostname string) chan string {
 
 	id := uint64(time.Now().UnixNano())

@@ -29,8 +29,6 @@ import (
 	"time"
 )
 
-const INDEX = "vc5"
-
 const (
 	EMERG   = 0
 	ALERT   = 1
@@ -58,7 +56,7 @@ type logger struct {
 	history []entry
 	indx    index
 	out     chan string
-	elastic bool
+	elastic string
 }
 
 var HOSTNAME string
@@ -182,7 +180,7 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		l.console(level(lev) + " " + f + " " + text)
 	}
 
-	if !l.elastic {
+	if l.elastic == "" {
 		return
 	}
 
@@ -190,7 +188,7 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 	defer l.mutex.Unlock()
 
 	if l.out == nil {
-		if l.out = elastic(INDEX, HOSTNAME); l.out == nil {
+		if l.out = elastic(l.elastic, HOSTNAME); l.out == nil {
 			log.Println("Unable to start logging")
 		}
 	}

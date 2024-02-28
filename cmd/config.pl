@@ -519,7 +519,7 @@ services:
       http:
         
 #  - name: bind
-#    description: BIND server on a different VLAN
+#    description: DNS server on a different VLAN
 #    virtual:
 #      - 192.168.101.2
 #    servers:
