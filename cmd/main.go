@@ -62,7 +62,6 @@ func main() {
 	native := flag.Bool("n", false, "Native mode XDP")
 	untagged := flag.Bool("u", false, "Untagged VLAN mode")
 	webserver := flag.String("w", ":80", "webserver listen address")
-	elasticsearch := flag.String("e", "", "Log with Elasticsearch to this index")
 
 	flag.Parse()
 
@@ -75,7 +74,18 @@ func main() {
 		return
 	}
 
-	logs := &logger{elastic: *elasticsearch}
+	file := args[0]
+	addr := netip.MustParseAddr(args[1])
+	nics := args[2:]
+
+	config, err := Load(file)
+
+	logs := &logger{elastic: config.Elasticsearch}
+
+	if err != nil {
+		logs.EMERG(F, "Couldn't load config file:", config, err)
+		log.Fatal("Couldn't load config file:", config, err)
+	}
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -86,20 +96,9 @@ func main() {
 
 	defer os.Remove(socket.Name())
 
-	file := args[0]
-	addr := netip.MustParseAddr(args[1])
-	nics := args[2:]
-
 	if !addr.Is4() {
 		logs.EMERG(F, "Address is not IPv4:", addr)
 		log.Fatal("Address is not IPv4: ", addr)
-	}
-
-	config, err := Load(file)
-
-	if err != nil {
-		logs.EMERG(F, "Couldn't load config file:", config, err)
-		log.Fatal("Couldn't load config file:", config, err)
 	}
 
 	if config.Webserver != "" {

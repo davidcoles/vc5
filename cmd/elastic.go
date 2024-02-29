@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/elastic/go-elasticsearch/v7"
@@ -17,30 +18,61 @@ type Elasticsearch struct {
 	Addresses []string `json:"addresses,omitempty"`
 	Username  string   `json:"username,omitempty"`
 	Password  string   `json:"password,omitempty"`
+
+	c chan string
+	m sync.Mutex
 }
 
-func elastic(index, hostname string) chan string {
+func (e *Elasticsearch) log(l string, hostname string) bool {
+
+	if e.Index == "" {
+		return true
+	}
+
+	e.m.Lock()
+	defer e.m.Unlock()
+
+	if e.c == nil {
+		config := elasticsearch.Config{
+			Addresses: e.Addresses,
+			Username:  e.Username,
+			Password:  e.Password,
+		}
+
+		e.c = elastic(config, e.Index, hostname)
+	}
+
+	select {
+	case e.c <- l:
+	default:
+		close(e.c)
+		e.c = nil
+		return false
+	}
+
+	return true
+}
+
+func elastic(config elasticsearch.Config, index, hostname string) chan string {
 
 	id := uint64(time.Now().UnixNano())
 
-	client, err := elasticsearch.NewDefaultClient()
+	client, err := elasticsearch.NewClient(config)
 
 	if err != nil {
 		return nil
 	}
 
-	c := make(chan string, 10000)
+	in := make(chan string, 10000)
 
 	go func() {
-		for m := range c {
-
+		for m := range in {
 			id++
-
 			indexRequest(client, index, hostname, fmt.Sprintf("%d", id), m)
 		}
 	}()
 
-	return c
+	return in
 }
 
 func indexRequest(client *elasticsearch.Client, index, host, id, message string) {

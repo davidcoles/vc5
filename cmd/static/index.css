@@ -1,5 +1,16 @@
+body {
+    font-family: arial, helvetica, sans-serif;
+    font-size: 12px;
+    font-weight: normal;
+    color: black;
+    background: white;
+}
+
+th,td { font-size: 10px;}
+
 #console {
     height: 150px;
+    font-size: 10px;
     background: #e0e0e0;
     overflow-x: hidden;
     overflow-x: auto;

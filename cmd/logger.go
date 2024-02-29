@@ -55,8 +55,8 @@ type logger struct {
 	mutex   sync.Mutex
 	history []entry
 	indx    index
-	out     chan string
-	elastic string
+	//out     chan string
+	elastic Elasticsearch
 }
 
 var HOSTNAME string
@@ -180,41 +180,31 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		l.console(level(lev) + " " + f + " " + text)
 	}
 
-	if l.elastic == "" {
-		return
-	}
+	l.elastic.log(string(js), HOSTNAME)
 
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-
-	if l.out == nil {
-		if l.out = elastic(l.elastic, HOSTNAME); l.out == nil {
-			log.Println("Unable to start logging")
+	/*
+		if l.elastic.Index == "" {
+			return
 		}
-	}
 
-	select {
-	case l.out <- string(js):
-	default:
-		close(l.out)
-		l.out = nil
-		log.Println("Logging stuffed - restarting")
-	}
+		l.mutex.Lock()
+		defer l.mutex.Unlock()
+
+		if l.out == nil {
+			if l.out = elastic(l.elastic, HOSTNAME); l.out == nil {
+				log.Println("Unable to start logging")
+			}
+		}
+
+		select {
+		case l.out <- string(js):
+		default:
+			close(l.out)
+			l.out = nil
+			log.Println("Logging stuffed - restarting")
+		}
+	*/
 }
-
-/*
-func foo(k map[string]any) (map[string]any, string) {
-	kv := k
-	var t []string
-	for k, v := range kv {
-		t = append(t, fmt.Sprintf("%s:%v", k, v))
-	}
-	sort.Strings(t)
-	text := strings.Join(t, " ")
-
-	return kv, text
-}
-*/
 
 func (l *logger) get(start index) (s []entry) {
 	l.mutex.Lock()
