@@ -80,12 +80,11 @@ func main() {
 
 	config, err := Load(file)
 
-	logs := &logger{elastic: config.Elasticsearch}
-
 	if err != nil {
-		logs.EMERG(F, "Couldn't load config file:", config, err)
 		log.Fatal("Couldn't load config file:", config, err)
 	}
+
+	logs := &(config.Logging)
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -362,12 +361,14 @@ func main() {
 			BGP      map[string]bgp.Status `json:"bgp"`
 			VIP      []VIPStats            `json:"vip"`
 			RIB      []netip.Addr          `json:"rib"`
+			Logging  LogStats              `json:"logging"`
 		}{
 			Summary:  summary,
 			Services: services,
 			BGP:      pool.Status(),
 			VIP:      vipStatus(services, rib),
 			RIB:      rib,
+			Logging:  logs.Stats(),
 		}, " ", " ")
 		mutex.Unlock()
 

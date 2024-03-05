@@ -19,9 +19,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
@@ -40,7 +42,7 @@ const (
 	DEBUG   = 7
 )
 
-var mutex sync.Mutex
+var HOSTNAME string
 
 type KV = map[string]any
 
@@ -50,16 +52,27 @@ type entry struct {
 	Text string `json:"text"`
 }
 
-type index = int64
+type secret string
+
+func (s secret) MarshalText() ([]byte, error) { return []byte("************"), nil }
+func (s *secret) String() string              { return "************" }
+
 type logger struct {
+	Slack         secret        `json:"slack,omitempty"`
+	Teams         secret        `json:"teams,omitempty"`
+	Notify        uint8         `json:"notify,omitempty"`
+	Elasticsearch Elasticsearch `json:"elasticsearch,omitempty"`
+
 	mutex   sync.Mutex
+	index   index
+	count   uint64
 	history []entry
-	indx    index
-	//out     chan string
-	elastic Elasticsearch
+
+	slack chan string
+	teams chan string
 }
 
-var HOSTNAME string
+type index = int64
 
 func init() {
 	HOSTNAME, _ = os.Hostname()
@@ -68,57 +81,38 @@ func init() {
 	}
 }
 
-func (l *logger) Println(a ...any) {
+type LogStats struct {
+	ElasticsearchErrors uint64 `json:"elasticsearch_errors"`
+}
 
-	text := fmt.Sprintln(a...)
-
-	if len(a) > 0 {
-		e := a[0]
-		if kv, ok := e.(KV); ok {
-			text = ""
-			for k, v := range kv {
-				text = text + fmt.Sprintf("%s:%v ", k, v)
-			}
-		}
-		text = text + fmt.Sprintln(a...)
+func (l *logger) Stats() LogStats {
+	return LogStats{
+		ElasticsearchErrors: l.Elasticsearch.Fail(),
 	}
-
-	l.console(text)
 }
 
 func (l *logger) console(text string) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
-	if l.indx == 0 {
-		// Not using UnixNano here because large integers cause an
+	if l.index == 0 {
+		// Not using full UnixNano here because large integers cause an
 		// overflow in jq(1) which I often use for highlighting JSON
 		// and it confuses me when the numbers are wrong!
-		l.indx = index(time.Now().Unix()) * 1000
+		l.index = index(time.Now().UnixNano() / 1000000)
 	}
 
-	l.indx++
+	l.index++
 
-	l.history = append(l.history, entry{Indx: l.indx, Text: text, Time: time.Now().Unix()})
+	l.history = append(l.history, entry{Indx: l.index, Text: text, Time: time.Now().Unix()})
 	for len(l.history) > 1000 {
 		l.history = l.history[1:]
 	}
 }
 
-func null() chan string {
-	c := make(chan string, 10000)
-	go func() {
-		for _ = range c {
-		}
-	}()
-	return c
-}
-
 func (l *logger) log(lev uint8, f string, a ...any) {
 
 	text := fmt.Sprintln(a...)
-
-	//log.Println(text)
 
 	if len(text) > 0 {
 		// chop off the trailing newline
@@ -142,10 +136,6 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 			}
 			sort.Strings(t)
 			text = strings.Join(t, " ")
-
-			//} else if k, ok := e.(map[string]any); ok {
-			//	fmt.Println("foo", a)
-			//	kv, text = foo(k)
 		} else {
 			kv["text"] = text
 		}
@@ -154,16 +144,11 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 	}
 
 	kv["date"] = date
-	//kv["text"] = text
 	kv["level"] = level(lev)
 	kv["facility"] = f
 	kv["hostname"] = HOSTNAME
 
 	js, err := json.MarshalIndent(&kv, " ", " ")
-
-	if f == "RDR" {
-		log.Println(string(js), err)
-	}
 
 	if err != nil {
 		kv := KV{}
@@ -180,30 +165,110 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		l.console(level(lev) + " " + f + " " + text)
 	}
 
-	l.elastic.log(string(js), HOSTNAME)
+	if lev <= l.Notify {
+		l.sendSlack(text)
+		l.sendTeams(text)
+	}
 
-	/*
-		if l.elastic.Index == "" {
-			return
-		}
+	l.Elasticsearch.log(string(js), HOSTNAME)
 
-		l.mutex.Lock()
-		defer l.mutex.Unlock()
+	if l.elasticAlert() {
+		l.sendSlack("Elasticsearch logging is failing")
+	}
+}
 
-		if l.out == nil {
-			if l.out = elastic(l.elastic, HOSTNAME); l.out == nil {
-				log.Println("Unable to start logging")
+func (l *logger) elasticAlert() bool {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.count == 0 {
+		l.count = 1
+	}
+
+	fails := l.Elasticsearch.Fail()
+
+	if fails >= l.count {
+		l.count *= 10
+		return true
+	}
+
+	return false
+}
+
+func (l *logger) sendSlack(text string) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.Slack == "" {
+		return
+	}
+
+	if l.slack == nil {
+		l.slack = webhooks("Slack", l.Slack)
+	}
+
+	select {
+	case l.slack <- text:
+	default:
+		l.slack = nil
+		log.Println("Slack channel blocked")
+	}
+}
+
+func (l *logger) sendTeams(text string) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	if l.Teams == "" {
+		return
+	}
+
+	if l.teams == nil {
+		l.teams = webhooks("Teams", l.Teams)
+	}
+
+	select {
+	case l.teams <- text:
+	default:
+		l.teams = nil
+		log.Println("Teams channel blocked")
+	}
+}
+
+func webhooks(name string, url secret) chan string {
+	c := make(chan string, 1000)
+
+	go func() {
+		for m := range c {
+			if !webhook(url, m) {
+				log.Printf("Failed to write log to %s: %s\n", name, m)
 			}
 		}
+	}()
 
-		select {
-		case l.out <- string(js):
-		default:
-			close(l.out)
-			l.out = nil
-			log.Println("Logging stuffed - restarting")
-		}
-	*/
+	return c
+}
+
+func webhook(dest secret, text string) bool {
+	type slack struct {
+		Text string `json:"text"`
+	}
+
+	js, _ := json.Marshal(&slack{Text: fmt.Sprintf("%s: %s", HOSTNAME, text)})
+
+	res, err := http.Post(string(dest), "application/json", bytes.NewReader(js))
+
+	if err != nil {
+		return false
+	}
+
+	defer res.Body.Close()
+
+	if res.StatusCode != 200 {
+		return false
+	}
+
+	return true
 }
 
 func (l *logger) get(start index) (s []entry) {
@@ -253,7 +318,6 @@ type sub struct {
 
 func (l *sub) log(n uint8, s string, a ...any) { l.parent.log(n, l.facility+"."+s, a...) }
 
-func (l *sub) Println(a ...any)           { l.parent.Println(a...) }
 func (l *sub) EMERG(s string, a ...any)   { l.log(EMERG, s, a...) }
 func (l *sub) ALERT(s string, a ...any)   { l.log(ALERT, s, a...) }
 func (l *sub) CRIT(s string, a ...any)    { l.log(CRIT, s, a...) }

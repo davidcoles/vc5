@@ -8,9 +8,9 @@ LIBBPF = $(PWD)/libbpf/src
 export CGO_CFLAGS  = -I$(LIBBPF)
 export CGO_LDFLAGS = -L$(LIBBPF)
 
-default: libbpf/src/libbpf.a vc5 config.json
+default: vc5 config.json
 
-vc5: *.go static/* libbpf/src/libbpf.a
+vc5: libbpf/src/libbpf.a *.go static/*
 	go build -race -o $@
 
 # avoid clobbering an existing config file when make is run with -B

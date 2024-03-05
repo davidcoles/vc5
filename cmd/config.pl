@@ -38,12 +38,16 @@ $json->{'services'} = services($scheduler, $services, \%defaults, $servers, $pol
 $json->{'bgp'} = new_rhi($conf->{'rhi'}, $conf->{'prefixes'});
 $conf->{'learn'}+=0 if defined $conf->{'learn'};
 
-foreach(qw(vlans learn multicast webserver defcon elasticsearch)) {
+foreach(qw(vlans learn multicast webserver defcon logging)) {
     $json->{$_} = $conf->{$_} if exists $conf->{$_};
 }
 
 if(defined $conf->{'rhi'} && jsonbool($conf->{'rhi'}->{'listen'})) {
     $json->{'listen'} = $TRUE;
+}
+
+if(defined $json->{'logging'}) {
+    $json->{'logging'}->{'notify'}+=0;
 }
 
 if(defined $json->{'defcon'}) {
@@ -500,6 +504,22 @@ rhi:
   peers:
     - 10.1.10.200
 
+# If Teams or Slack webhook URLs are set then messages of level <Notify> (default 0) or lower wil be sent to the channel.
+# If elasticsearch/index is set then all logs will be written to elasticsearch
+# Other setting are optional, and the usual Elasticsearch environment variables will be consulted by the library
+    
+#logging:
+#  #notify: 4 # 0:EMERG, 1:ALERT, 2:CRIT, 3:ERR, 4:WARNING, 5:NOTICE, 6:INFO, 7:DEBUG
+#  #teams: https://myorganisation.webhook.office.com/webhookb2/....
+#  #slack: https://hooks.slack.com/services/....
+#  elasticsearch:
+#    index: vc5
+#    #addresses:
+#    #  - http://10.1.2.31/    
+#    #  - http://10.1.2.32/    
+#    #username: elastic
+#    #password: Xg5nRkc9RA3hALMiBw8X
+    
 #vlans:
 #  10: 10.1.10.0/24
 #  20: 10.1.20.0/24
