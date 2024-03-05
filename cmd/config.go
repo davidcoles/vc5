@@ -78,11 +78,16 @@ type Config struct {
 
 	BGP map[string]bgp.Parameters `json:"bgp,omitempty"`
 
-	Learn     time.Duration `json:"learn,omitempty"`
-	Listen    bool          `json:"listen,omitempty"`
-	Multicast string        `json:"multicast,omitempty"`
-	Webserver string        `json:"webserver,omitempty"`
-	Logging   logger        `json:"logging,omitempty"`
+	Learn      time.Duration `json:"learn,omitempty"`
+	Listen     bool          `json:"listen,omitempty"`
+	Multicast  string        `json:"multicast,omitempty"`
+	Webserver  string        `json:"webserver,omitempty"`
+	Webroot    string        `json:"webroot,omitempty"`
+	Logging    logger        `json:"logging,omitempty"`
+	Native     bool          `json:"native,omitempty"`
+	Untagged   bool          `json:"untagged,omitempty"`
+	Address    string        `json:"address,omitempty"`
+	Interfaces []string      `json:"interfaces,omitempty"`
 }
 
 func (c *Config) vlans() map[uint16]net.IPNet {

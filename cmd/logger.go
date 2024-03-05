@@ -60,7 +60,7 @@ func (s *secret) String() string              { return "************" }
 type logger struct {
 	Slack         secret        `json:"slack,omitempty"`
 	Teams         secret        `json:"teams,omitempty"`
-	Notify        uint8         `json:"notify,omitempty"`
+	Alert         uint8         `json:"alert,omitempty"`
 	Elasticsearch Elasticsearch `json:"elasticsearch,omitempty"`
 
 	mutex   sync.Mutex
@@ -165,7 +165,7 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		l.console(level(lev) + " " + f + " " + text)
 	}
 
-	if lev <= l.Notify {
+	if lev <= l.Alert {
 		l.sendSlack(text)
 		l.sendTeams(text)
 	}

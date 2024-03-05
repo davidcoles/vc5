@@ -15,6 +15,22 @@ rhi:
   peers:
     - 10.1.10.200
 
+# If Teams or Slack webhook URLs are set then messages of level <alert> (default 0) or lower wil be sent to the channel.
+# If elasticsearch/index is set then all logs will be written to elasticsearch
+# Other setting are optional, and the usual Elasticsearch environment variables will be consulted by the library
+    
+#logging:
+#  #alert: 4 # 0:EMERG, 1:ALERT, 2:CRIT, 3:ERR, 4:WARNING, 5:NOTICE, 6:INFO, 7:DEBUG
+#  #teams: https://myorganisation.webhook.office.com/webhookb2/....
+#  #slack: https://hooks.slack.com/services/....
+#  elasticsearch:
+#    index: vc5
+#    #addresses:
+#    #  - http://10.1.2.31/    
+#    #  - http://10.1.2.32/    
+#    #username: elastic
+#    #password: Xg5nRkc9RA3hALMiBw8X
+    
 #vlans:
 #  10: 10.1.10.0/24
 #  20: 10.1.20.0/24
@@ -34,7 +50,7 @@ services:
       http:
         
 #  - name: bind
-#    description: BIND server on a different VLAN
+#    description: DNS server on a different VLAN
 #    virtual:
 #      - 192.168.101.2
 #    servers:

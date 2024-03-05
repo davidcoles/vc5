@@ -57,11 +57,12 @@ func main() {
 	var mutex sync.Mutex
 
 	start := time.Now()
-	root := flag.String("r", "", "webserver root directory")
-	sock := flag.String("s", "", "socket")
+	webroot := flag.String("r", "", "webserver root directory")
+	webserver := flag.String("w", ":80", "webserver listen address")
+	sock := flag.String("s", "", "socket") // used internally
+	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
 	untagged := flag.Bool("u", false, "Untagged VLAN mode")
-	webserver := flag.String("w", ":80", "webserver listen address")
 
 	flag.Parse()
 
@@ -75,8 +76,7 @@ func main() {
 	}
 
 	file := args[0]
-	addr := netip.MustParseAddr(args[1])
-	nics := args[2:]
+	nics := args[1:]
 
 	config, err := Load(file)
 
@@ -95,13 +95,40 @@ func main() {
 
 	defer os.Remove(socket.Name())
 
-	if !addr.Is4() {
-		logs.EMERG(F, "Address is not IPv4:", addr)
-		log.Fatal("Address is not IPv4: ", addr)
+	if config.Address != "" {
+		*addr = config.Address
+	}
+
+	if len(config.Interfaces) > 0 {
+		nics = config.Interfaces
+	}
+
+	if config.Native {
+		*native = true
+	}
+
+	if config.Untagged {
+		*untagged = true
 	}
 
 	if config.Webserver != "" {
 		*webserver = config.Webserver
+	}
+
+	if config.Webroot != "" {
+		*webroot = config.Webroot
+	}
+
+	if len(nics) < 1 {
+		logs.EMERG(F, "No interfaces defined")
+		log.Fatal("No interfaces defined")
+	}
+
+	address := netip.MustParseAddr(*addr)
+
+	if !address.Is4() {
+		logs.EMERG(F, "Address is not IPv4:", address)
+		log.Fatal("Address is not IPv4: ", address)
 	}
 
 	var listener net.Listener
@@ -127,7 +154,7 @@ func main() {
 
 	client := &lb.Client{
 		Interfaces: nics,
-		Address:    addr,
+		Address:    address,
 		Redirect:   *untagged,
 		Native:     *native,
 		VLANs:      config.vlans(),
@@ -148,7 +175,7 @@ func main() {
 		go multicast_recv(client, config.Multicast)
 	}
 
-	pool := bgp.NewPool(addr.As4(), config.BGP, nil, logs.sub("bgp"))
+	pool := bgp.NewPool(address.As4(), config.BGP, nil, logs.sub("bgp"))
 
 	if pool == nil {
 		log.Fatal("BGP pool fail")
@@ -240,8 +267,8 @@ func main() {
 	static := http.FS(STATIC)
 	var fs http.FileSystem
 
-	if *root != "" {
-		fs = http.FileSystem(http.Dir(*root))
+	if *webroot != "" {
+		fs = http.FileSystem(http.Dir(*webroot))
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -332,6 +359,14 @@ func main() {
 	})
 
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
+
+		config.Address = *addr
+		config.Interfaces = nics
+		config.Native = *native
+		config.Untagged = *untagged
+		config.Webserver = *webserver
+		config.Webroot = *webroot
+
 		js, err := json.MarshalIndent(config, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
