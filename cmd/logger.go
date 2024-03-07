@@ -82,7 +82,7 @@ func init() {
 }
 
 type LogStats struct {
-	ElasticsearchErrors uint64 `json:"elasticsearch_errors"`
+	ElasticsearchErrors uint64 `json:"elasticsearch_errors,omitempty"`
 }
 
 func (l *logger) Stats() LogStats {

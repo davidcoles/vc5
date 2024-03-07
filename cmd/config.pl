@@ -35,7 +35,7 @@ my %defaults;
 my $scheduler = $conf->{'scheduler'} if exists $conf->{'scheduler'};
 
 $json->{'services'} = services($scheduler, $services, \%defaults, $servers, $policy);
-$json->{'bgp'} = new_rhi($conf->{'rhi'}, $conf->{'prefixes'});
+$json->{'bgp'} = new_rhi($conf->{'bgp'}, $conf->{'prefixes'});
 $conf->{'learn'}+=0 if defined $conf->{'learn'};
 
 foreach(qw(vlans multicast webserver webroot defcon logging address interfaces native untagged)) {
@@ -50,12 +50,12 @@ if(defined $conf->{'untagged'} && jsonbool($conf->{'untagged'})) {
     $json->{'untagged'} = $TRUE;
 }
 
-if(defined $conf->{'rhi'} && jsonbool($conf->{'rhi'}->{'listen'})) {
+if(defined $conf->{'bgp'} && jsonbool($conf->{'bgp'}->{'listen'})) {
     $json->{'listen'} = $TRUE;
 }
 
-if(defined $conf->{'rhi'} && $conf->{'rhi'}->{'learn'} > 0) {
-    $json->{'learn'} = $conf->{'rhi'}->{'learn'} + 0;
+if(defined $conf->{'bgp'} && $conf->{'bgp'}->{'learn'} > 0) {
+    $json->{'learn'} = $conf->{'bgp'}->{'learn'} + 0;
 }
 
 if(defined $json->{'logging'}) {
@@ -510,8 +510,7 @@ __END__;
 # vlan secion enabled, two separate interfaces on different, untagged, VLANs:
 # vc5 -u config.json 10.1.10.100 eth0 eth1
 
-# Route Host Injection - BGP settings
-rhi:
+bgp:
   as_number: 65000
   peers:
     - 10.1.10.200

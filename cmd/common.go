@@ -246,7 +246,7 @@ func bgpListener(l net.Listener, logs Logger) {
 			go func(c net.Conn) {
 				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
 				defer c.Close()
-				time.Sleep(time.Minute)
+				time.Sleep(time.Second * 10) // time.Minute)
 			}(conn)
 		}
 	}

@@ -70,7 +70,7 @@ func main() {
 
 	if *sock != "" {
 		// we're going to be the server running in the network namespace ...
-		signal.Ignore(syscall.SIGINT, syscall.SIGQUIT)
+		signal.Ignore(syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 		netns(*sock, netip.MustParseAddr(args[0]))
 		return
 	}
@@ -262,7 +262,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("******************** RUNNING ********************")
+	log.Println("Initialised")
 
 	static := http.FS(STATIC)
 	var fs http.FileSystem
@@ -432,18 +432,13 @@ func main() {
 	}()
 
 	sig := make(chan os.Signal, 10)
-	signal.Notify(sig, syscall.SIGINT, syscall.SIGQUIT)
+	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	for {
 		switch <-sig {
-		case syscall.SIGQUIT:
-			logs.ALERT(F, "SIGQUIT received - shutting down")
-			fmt.Println("CLOSING")
-			close(done) // shut down BGP, etc
-			time.Sleep(4 * time.Second)
-			fmt.Println("DONE")
-			return
 		case syscall.SIGINT:
+			fallthrough
+		case syscall.SIGUSR2:
 			logs.NOTICE(F, "Reload signal received")
 			conf, err := Load(file)
 			if err == nil {
@@ -456,6 +451,16 @@ func main() {
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)
 			}
+
+		case syscall.SIGTERM:
+			fallthrough
+		case syscall.SIGQUIT:
+			logs.ALERT(F, "Shutting down")
+			fmt.Println("CLOSING")
+			close(done) // shut down BGP, etc
+			time.Sleep(4 * time.Second)
+			fmt.Println("DONE")
+			return
 		}
 	}
 }

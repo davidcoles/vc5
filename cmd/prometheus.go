@@ -58,12 +58,13 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 
 	for vip, s := range vips {
 		r = metric(r, `vc5_vip_status{vip="%s"} %d`, vip, zeroone(s.up))
-		r = metric(r, `vc5_vip_status_duration{{vip="%s",status="%s"} %d`, vip, updown(s.up), now.Sub(s.time)/time.Second)
+		r = metric(r, `vc5_vip_status_duration{vip="%s",status="%s"} %d`, vip, updown(s.up), now.Sub(s.time)/time.Second)
 	}
 
 	for _, x := range services {
 		for _, s := range x {
-			serv := fmt.Sprintf("%s:%d:%s", s.Address, s.Port, s.Protocol.string())
+			//serv := fmt.Sprintf("%s:%d:%s", s.Address, s.Port, s.Protocol.string())
+			serv := fmt.Sprintf("%s:%s:%d", s.Address, s.Protocol.string(), s.Port)
 			name := s.Name
 			stat := s.Stats
 			up := zeroone(s.Up)
@@ -78,7 +79,7 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 			r = metric(r, `vc5_service_tx_packets{service="%s",name="%s"} %d`, serv, name, stat.EgressPackets)
 			r = metric(r, `vc5_service_tx_octets{service="%s",name="%s"} %d`, serv, name, stat.EgressOctets)
 			r = metric(r, `vc5_service_status{service="%s",name="%s"} %d`, serv, name, up)
-			r = metric(r, `vc5_service_status_duration{service="%s",name="%s"} %d`, serv, name, s.For)
+			r = metric(r, `vc5_service_status_duration{service="%s",name="%s",status="%s"} %d`, serv, name, updown(s.Up), s.For)
 			r = metric(r, `vc5_service_reserves_used{service="%s",name="%s"} %d`, serv, name, 666)
 
 			for _, d := range s.Destinations {
@@ -92,7 +93,7 @@ func prometheus(services map[netip.Addr][]Serv, summary Summary, vips map[netip.
 				r = metric(r, `vc5_backend_tx_packets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.EgressPackets)
 				r = metric(r, `vc5_backend_tx_octets{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.EgressOctets)
 				r = metric(r, `vc5_backend_status{service="%s",name="%s",backend="%s"} %d`, serv, name, real, up)
-				r = metric(r, `vc5_backend_status_duration{service="%s",name="%s",backend="%s"} %d`, serv, name, real, d.For)
+				r = metric(r, `vc5_backend_status_duration{service="%s",name="%s",backend="%s",status="%s"} %d`, serv, name, real, updown(d.Up), d.For)
 				r = metric(r, `vc5_backend_reserves_used{service="%s",name="%s",backend="%s"} %d`, serv, name, real, 666)
 
 			}
