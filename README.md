@@ -37,6 +37,12 @@ If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
+## NOTICE
+
+YAML/JSON config format changed to include LB server's IP and
+interfaces, native mode, etc.. There can still be specified on the
+command line if easier.
+
 ## Quickstart
 
 A simple example on a server with a single, untagged ethernet interface:
