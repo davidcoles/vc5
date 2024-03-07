@@ -501,15 +501,17 @@ sub params {
 __END__;
 ---
 
-# Single untagged interface, load balancer IP is 10.1.10.100:
-# vc5 config.json 10.1.10.100 eth0
+#webserver: :80
+#webroot: /var/local/vc5
+#multicast: 224.0.0.1:12345
 
-# With tagged VLANs on one interface, vlan section uncommented and other VLAN services added:
-# vc5 config.json 10.1.10.100 eth0
-
-# vlan secion enabled, two separate interfaces on different, untagged, VLANs:
-# vc5 -u config.json 10.1.10.100 eth0 eth1
-
+#native: false
+#untagged: false
+#address: 10.1.10.100 # load balancer server's primary ip
+#interfaces:
+#  - ens192
+#  - ens224
+    
 bgp:
   as_number: 65000
   peers:
