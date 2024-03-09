@@ -4,35 +4,6 @@ A horizontally scalable layer 2 Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
-The repository is for the `vc5` binary (in the [cmd/](cmd/)
-directory).
-
-The Go module that was included here has now been removed - the v0.1
-branch is still available if you need it.
-
-The code for eBPF/XDP has been split out into the
-[xvs](https://github.com/davidcoles/xvs) repository - the object file
-is now committed to this repository and so does not need to be built
-as a seperate step.
-
-The code for managing services, carrying out health checks and
-speaking to BGP peers has been split out to the
-[cue](https://github.com/davidcoles/cue) repository, which allows it
-to be reused by other projects which use a different load balancing
-implementation
-(eg., [LVS/IPVS](https://en.wikipedia.org/wiki/IP_Virtual_Server)).
-
-This README is currently out of date and is in the process of being
-updated. It's broadly applicable, but some specifics are wrong.
-
-Basically, to build it you should install dependencies (see the
-`ubuntu-dependencies` Makefile rule) and run `make` in the `cmd/`
-directory.
-
-The process will checkout and build the
-[libbpf](https://github.com/libbpf/libbpf) library which the binary
-needs to link against.
-
 If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
@@ -40,7 +11,7 @@ raise a GitHub issue.
 ## NOTICE
 
 YAML/JSON config format changed to include LB server's IP and
-interfaces, native mode, etc.. There can still be specified on the
+interfaces, native mode, etc.. They can still be specified on the
 command line if easier.
 
 ## Quickstart
@@ -58,11 +29,17 @@ A simple example on a server with a single, untagged ethernet interface:
 * `git clone https://github.com/davidcoles/vc5.git`
 * `cd vc5/cmd`
 * `cp config.sample.yaml config.yaml` (edit config.yaml to match your requirements)
-* `make` (builds the binary and JSON config file)
+* `make` (pulls down the [libbpf](https://github.com/libbpf/libbpf) library, builds the binary and JSON config file)
 * `./vc5 -a 10.1.10.100 config.json eth0` (amend to use your server's IP address and ethernet interface)
 * A web console will be on your load balancer server's port 80 by default
 * Add your VIP to the loopback device on your backend servers (eg.: `ip addr add 192.168.101.1/32 dev lo`)
 * Configure your network/client to send traffic for your VIP to the load balancer, either via BGP (see config file) or static routing
+
+It is almost certainly easier to use the binary from the latest Github
+release. This will have been tested in production so should be
+reliable. Ensure that your configuration is compatible with this
+version by using the config.pl script from the tagged release (or, of
+course, you can build your own JSON config however you prefer).
 
 If you update the YAML config file and regenerate the JSON (`make
 config.json`) you can reload the new configuration by sending an a
@@ -84,16 +61,17 @@ will consistently route packets for a flow to the same CPU core in the
 event of your switch slecting a different interface when the LACP
 topology changes. Disable irqbalance, ensure that channel settings are
 the same on each interface (ethtool -l/-L) and that RSS flow hash
-indirection matches (ethtool -x/-X). The setup can be tested by
-starting a long running connection (eg. using iperf with the -t
-option) to a set of backend servers, then [disabling the chosen
-backend with an asterisk after the IP address in the config
-file](doc/servers.md), determining which interface is receiving the
-flow on the load balancer (eg., `watch -d 'cat /proc/interrupts | grep
-enp130s0f'` and look for the rapidly increasing IRQ counter) and then
-dropping this interface out of LACP (`ifenslave -d bond0
-enp130s0f0`). You should see the flow move to the other network
-interface but still hit the same core.
+indirection matches (ethtool -x/-X).
+
+The setup can be tested by starting a long running connection
+(eg. using iperf with the -t option) to a set of backend servers, then
+[disabling the chosen backend with an asterisk after the IP address in
+the config file](doc/servers.md), determining which interface is
+receiving the flow on the load balancer (eg., `watch -d 'cat
+/proc/interrupts | grep enp130s0f'` and look for the rapidly
+increasing IRQ counter) and then dropping this interface out of LACP
+(`ifenslave -d bond0 enp130s0f0`). You should see the flow move to the
+other network interface but still hit the same core.
 
 When using backends in multiple subnets, for best performance you
 should ensure that all VLANs are tagged on a single trunk interface
@@ -184,13 +162,27 @@ Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
 A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
 
 A sample utility to render traffic from /20 prefixes going through the
-load-balancer is in the [old/cmd/hilbert/](old/cmd/hilbert/) directory:
-![old/cmd/hilbert/hilbert.png](old/cmd/hilbert/hilbert.png)
+load-balancer is available at https://github.com/davidcoles/hilbert:
+![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
 
-A good use for the traffic stats would be to track which prefixes are
-usually active and to generate a table of which /20s to early drop
-traffic from in the case of a DoS/DDoS (particularly spoofed source
-addresses).
+A good use for the traffic stats (/prefixes.json endpoint) would be to
+track which prefixes are usually active and to generate a table of
+which /20s to early drop traffic from in the case of a DoS/DDoS
+(particularly spoofed source addresses).
+
+## Changes from old version
+
+The code for eBPF/XDP has been split out into the
+[xvs](https://github.com/davidcoles/xvs) repository - the object file
+is now committed to this repository and so does not need to be built
+as a seperate step.
+
+The code for managing services, carrying out health checks and
+speaking to BGP peers has been split out to the
+[cue](https://github.com/davidcoles/cue) repository, which allows it
+to be reused by other projects which use a different load balancing
+implementation
+(eg., [LVS/IPVS](https://en.wikipedia.org/wiki/IP_Virtual_Server)).
 
 ## Operation
 
