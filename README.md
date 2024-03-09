@@ -43,7 +43,7 @@ course, you can build your own JSON config however you prefer).
 
 If you update the YAML config file and regenerate the JSON (`make
 config.json`) you can reload the new configuration by sending an a
-SIGINT (Ctrl-C) or SIGUSR2 to the process. SIGQUIT (Ctrl-\) or SIGTERM
+SIGINT (Ctrl-C) or SIGUSR2 to the process. SIGQUIT (Ctrl-backslash) or SIGTERM
 will cause the process to gracefully shut down BGP connections and
 exit.
 

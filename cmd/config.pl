@@ -42,12 +42,12 @@ foreach(qw(vlans multicast webserver webroot defcon logging address interfaces n
     $json->{$_} = $conf->{$_} if exists $conf->{$_};
 }
 
-if(defined $conf->{'native'} && jsonbool($conf->{'native'})) {
-    $json->{'native'} = $TRUE;
+if(defined $conf->{'native'}) {
+    $json->{'native'} = jsonbool($conf->{'native'});
 }
 
-if(defined $conf->{'untagged'} && jsonbool($conf->{'untagged'})) {
-    $json->{'untagged'} = $TRUE;
+if(defined $conf->{'untagged'}) {
+    $json->{'untagged'} = jsonbool($conf->{'untagged'});
 }
 
 if(defined $conf->{'bgp'} && jsonbool($conf->{'bgp'}->{'listen'})) {
