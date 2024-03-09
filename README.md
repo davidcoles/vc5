@@ -45,6 +45,12 @@ command line if easier.
 
 ## Quickstart
 
+For best results you should disable/uninstall irqbalance.
+
+You will need to select a primary IP to pass to the balancer. This is
+used for the BGP router ID and, when only using a single subnet, as
+the source address for healthcheck probe packets.
+
 A simple example on a server with a single, untagged ethernet interface:
 
 * `apt-get install git make libelf-dev golang-1.20 libyaml-perl libjson-perl ethtool` (or your distro's equivalent)
@@ -53,10 +59,54 @@ A simple example on a server with a single, untagged ethernet interface:
 * `cd vc5/cmd`
 * `cp config.sample.yaml config.yaml` (edit config.yaml to match your requirements)
 * `make` (builds the binary and JSON config file)
-* `./vc5 config.json 10.1.10.100 eth0` (amend to use your server's IP address and ethernet interface)
+* `./vc5 -a 10.1.10.100 config.json eth0` (amend to use your server's IP address and ethernet interface)
 * A web console will be on your load balancer server's port 80 by default
 * Add your VIP to the loopback device on your backend servers (eg.: `ip addr add 192.168.101.1/32 dev lo`)
 * Configure your network/client to send traffic for your VIP to the load balancer, either via BGP (see config file) or static routing
+
+If you update the YAML config file and regenerate the JSON (`make
+config.json`) you can reload the new configuration by sending an a
+SIGINT (Ctrl-C) or SIGUSR2 to the process. SIGQUIT (Ctrl-\) or SIGTERM
+will cause the process to gracefully shut down BGP connections and
+exit.
+
+A more complex example with an LACP bonded ethernet device consisting
+of two (10Gbps Intel X520 on my test server) interfaces, with native
+XDP driver mode enabled:
+
+`./vc5 -n -a 10.1.10.100 config.json enp130s0f0 enp130s0f1`
+
+Because connection state is tracked on a per-core basis
+(BPF_MAP_TYPE_LRU_PERCPU_HASH), you should ensure that RSS ([Receive
+Side
+Scaling](https://www.kernel.org/doc/Documentation/networking/scaling.txt))
+will consistently route packets for a flow to the same CPU core in the
+event of your switch slecting a different interface when the LACP
+topology changes. Disable irqbalance, ensure that channel settings are
+the same on each interface (ethtool -l/-L) and that RSS flow hash
+indirection matches (ethtool -x/-X). The setup can be tested by
+starting a long running connection (eg. using iperf with the -t
+option) to a set of backend servers, then [disabling the chosen
+backend with an asterisk after the IP address in the config
+file](doc/servers.md), determining which interface is receiving the
+flow on the load balancer (eg., `watch -d 'cat /proc/interrupts | grep
+enp130s0f'` and look for the rapidly increasing IRQ counter) and then
+dropping this interface out of LACP (`ifenslave -d bond0
+enp130s0f0`). You should see the flow move to the other network
+interface but still hit the same core.
+
+When using backends in multiple subnets, for best performance you
+should ensure that all VLANs are tagged on a single trunk interface
+(LACP bonded if you have more than one physical interface) with
+subnet/VLAN ID mappings specified in the `vlans` section of the config
+file.
+
+If this is not possible (for example creating trunked interfaces on
+vSphere is not simple), then you can assign each subnet to a different
+interface and use untagged mode (-u). This will use XDP's XDP_REDIRECT
+return code to send traffic out of the right interface, rather than updating 802.1Q VLAN ID and using XDP_TX.
+
+`./vc5 -u -a 10.1.10.100 config.json eth0 eth1 eth2`
 
 
 ## Goals/status
