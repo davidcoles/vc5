@@ -1,5 +1,5 @@
-github.com/davidcoles/cue v0.0.3 h1:YZ2nwk0kagJkGxEJZIEJF/yE089XGVhJJwNx1N1f0SQ=
-github.com/davidcoles/cue v0.0.3/go.mod h1:uUTkCvlkD+nqbmP9XyA63BGMW3g3JJRYC0q8vJKSXMc=
+github.com/davidcoles/cue v0.0.4 h1:DnDmr5PuKCypMk7e7pY+Nd0upxCz/Jjixp07/g7ulpg=
+github.com/davidcoles/cue v0.0.4/go.mod h1:uUTkCvlkD+nqbmP9XyA63BGMW3g3JJRYC0q8vJKSXMc=
 github.com/davidcoles/xvs v0.1.8 h1:gnkO3kZHANYvKYKIlkRJJPkeSaT9VUq9e7TE6Vjqjz0=
 github.com/davidcoles/xvs v0.1.8/go.mod h1:xSFQ+/pDWhsMyH0DuAJr92ujAdPnRMcqqBbY+BRkRoE=
 github.com/elastic/go-elasticsearch/v7 v7.17.10 h1:TCQ8i4PmIJuBunvBS6bwT2ybzVFxxUhhltAs3Gyu1yo=
