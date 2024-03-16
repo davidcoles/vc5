@@ -516,6 +516,7 @@ bgp:
   as_number: 65000
   peers:
     - 10.1.10.200
+    - 10.1.10.201    
 
 # If Teams or Slack webhook URLs are set then messages of level <alert> (default 0) or lower wil be sent to the channel.
 # If elasticsearch/index is set then all logs will be written to elasticsearch
@@ -536,28 +537,32 @@ bgp:
 #vlans:
 #  10: 10.1.10.0/24
 #  20: 10.1.20.0/24
-
+#  30: 10.1.30.0/24    
+#  40: 10.1.40.0/24
+    
 services:
   
   - name: nginx
     virtual:
       - 192.168.101.1
     servers:
-      - 10.1.10.1
-      - 10.1.10.2
-      - 10.1.10.3            
+      - 10.1.10.10
+      - 10.1.10.11
+      - 10.1.10.12
+      - 10.1.10.13            
     need: 1
     path: /alive
     policy:
       http:
         
 #  - name: bind
-#    description: DNS server on a different VLAN
+#    description: DNS servers on a different VLAN
 #    virtual:
 #      - 192.168.101.2
 #    servers:
-#      - 10.1.20.1
-#      - 10.1.20.2
-#      - 10.1.20.3
+#      - 10.1.20.10
+#      - 10.1.20.12
+#      - 10.1.20.13
+#      - 10.1.20.14
 #    policy:
 #      domain:
