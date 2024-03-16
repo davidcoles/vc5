@@ -49,7 +49,20 @@ exit.
 
 A more complex example with an LACP bonded ethernet device consisting
 of two (10Gbps Intel X520 on my test server) interfaces, with native
-XDP driver mode enabled:
+XDP driver mode enabled and tagged VLANs:
+
+
+`config.json` vlans entry: 
+
+```
+vlans:
+  11: 10.1.11.0/24
+  12: 10.1.12.0/24
+  13: 10.1.13.0/24
+  14: 10.1.14.0/24
+```
+
+Command line:
 
 `./vc5 -n -a 10.1.10.100 config.json enp130s0f0 enp130s0f1`
 
@@ -82,7 +95,8 @@ file.
 If this is not possible (for example creating trunked interfaces on
 vSphere is not simple), then you can assign each subnet to a different
 interface and use untagged mode (-u). This will use XDP's XDP_REDIRECT
-return code to send traffic out of the right interface, rather than updating 802.1Q VLAN ID and using XDP_TX.
+return code to send traffic out of the right interface, rather than
+updating 802.1Q VLAN ID and using XDP_TX (vlans entry as before).
 
 `./vc5 -u -a 10.1.10.100 config.json eth0 eth1 eth2`
 
