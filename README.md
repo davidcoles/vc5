@@ -52,7 +52,7 @@ of two (10Gbps Intel X520 on my test server) interfaces, with native
 XDP driver mode enabled and tagged VLANs:
 
 
-`config.json` vlans entry: 
+`config.yaml` vlans entry: 
 
 ```
 vlans:
