@@ -225,7 +225,7 @@ function summary_t(s, bgp) {
     for(var peer of peers) {
 	var conn = bgp[peer];
 	append(hd, "th", "BGP: " + peer)
-	append(tr, "td", conn.state, conn.state == "ESTABLISHED" ? "up" : "dn")
+        append(tr, "td", conn.state + " " + dhms(conn.duration_s), conn.state == "ESTABLISHED" ? "up" : "dn")
     }
 			
     return div

@@ -10,9 +10,8 @@ default: vc5 config.json
 race:
 	$(MAKE) default FLAGS=-race
 
-vc5: libbpf/src/libbpf.a *.go static/*
+vc5: libbpf/bpf libbpf/src/libbpf.a *.go static/*
 	CGO_CFLAGS="-I$(LIBBPF)" CGO_LDFLAGS="-L$(LIBBPF)/bpf" go build $(FLAGS) -o $@
-
 
 # avoid clobbering an existing config file when make is run with -B
 config.yaml:
@@ -30,10 +29,10 @@ distclean: clean
 libbpf:
 	git clone -b $(BPFVER) https://github.com/libbpf/libbpf
 
-libbpf/bpf:
+libbpf/bpf: libbpf
 	cd libbpf && ln -s src bpf
 
-libbpf/src/libbpf.a: libbpf libbpf/bpf
+libbpf/src/libbpf.a: libbpf
 	cd libbpf/src && $(MAKE)
 
 # need to pass as a hook to git

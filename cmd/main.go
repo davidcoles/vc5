@@ -419,7 +419,7 @@ func main() {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 
 		mutex.Lock()
-		metrics := prometheus(services, summary, vip)
+		metrics := prometheus("vc5", services, summary, vip)
 		mutex.Unlock()
 
 		w.Header().Set("Content-Type", "text/plain")
