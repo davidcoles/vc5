@@ -1,8 +1,8 @@
-<picture>
-  <img src="doc/vc5.drawio.png" width="40%">
-</picture>
-
 # VC5
+
+<picture>
+  <img src="doc/vc5.drawio.png" width="25%">
+</picture>
 
 A horizontally scalable layer 2 Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
