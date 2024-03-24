@@ -1,4 +1,6 @@
-![Logo](doc/vc5.drawio.png)
+<picture>
+  <img src="doc/vc5.drawio.png" width="40%">
+</picture>
 
 # VC5
 
