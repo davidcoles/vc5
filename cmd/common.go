@@ -131,12 +131,13 @@ func (s *Stats) add(x Stats) {
 
 type VIP = netip.Addr
 type VIPStats struct {
-	VIP   VIP   `json:"vip"`
-	Up    bool  `json:"up"`
-	Stats Stats `json:"stats"`
+	VIP   VIP    `json:"vip"`
+	Up    bool   `json:"up"`
+	Stats Stats  `json:"stats"`
+	For   uint64 `json:"for"`
 }
 
-func vipStatus(in map[VIP][]Serv, rib []netip.Addr) (out []VIPStats) {
+func vipStatus_(in map[VIP][]Serv, rib []netip.Addr) (out []VIPStats) {
 
 	up := map[VIP]bool{}
 
@@ -151,6 +152,29 @@ func vipStatus(in map[VIP][]Serv, rib []netip.Addr) (out []VIPStats) {
 		}
 
 		out = append(out, VIPStats{VIP: vip, Stats: stats, Up: up[vip]})
+	}
+
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].VIP.Compare(out[j].VIP) < 0
+	})
+
+	return
+}
+
+func vipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
+
+	for vip, list := range in {
+		var stats Stats
+		for _, s := range list {
+			stats.add(s.Stats)
+		}
+
+		r, ok := foo[vip]
+		if !ok {
+			r.time = time.Now()
+		}
+
+		out = append(out, VIPStats{VIP: vip, Stats: stats, Up: r.up, For: uint64(time.Now().Sub(r.time) / time.Second)})
 	}
 
 	sort.SliceStable(out, func(i, j int) bool {

@@ -1,3 +1,5 @@
+![Logo](doc/vc5.drawio.png)
+
 # VC5
 
 A horizontally scalable layer 2 Direct Server Return

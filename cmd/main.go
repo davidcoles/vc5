@@ -401,9 +401,10 @@ func main() {
 			Summary:  summary,
 			Services: services,
 			BGP:      pool.Status(),
-			VIP:      vipStatus(services, rib),
-			RIB:      rib,
-			Logging:  logs.Stats(),
+			//VIP:      vipStatus(services, rib),
+			VIP:     vipStatus(services, vip),
+			RIB:     rib,
+			Logging: logs.Stats(),
 		}, " ", " ")
 		mutex.Unlock()
 

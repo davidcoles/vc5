@@ -160,7 +160,7 @@ function vips_t(vips, dsr) {
     var row = function(v) {
 	var tr = append(t, "tr", null, v.up ? "up" : "dn")
 	append(tr, "td", `<a href="#`+v.vip+`">`+v.vip+`</a>`)
-	append(tr, "td", v.up ? "UP" : "DOWN")
+	append(tr, "td",  dhms(v.for) + " " + (v.up ? "UP" : "DOWN"))
 	append(tr, "td", tsf(v.stats.ingress_octets_per_second*8)+"bits/s in")
 	if(!dsr) append(tr, "td", tsf(v.stats.egress_octets_per_second*8)+"bits/s out")
 	append(tr, "td", tsf(v.stats.ingress_packets_per_second)+"packets/s in")
@@ -239,7 +239,7 @@ function serv(v, _vip, list, up, dsr) {
     var tr = append(t, "tr", null, v.up ? "up" : "dn")
 
     append(tr, "th", v.vip, "ip")
-    append(tr, "th", v.up ? "UP" : "DOWN")
+    append(tr, "th", dhms(v.for) + " " + (v.up ? "UP" : "DOWN"))
     
     append(tr, "th", tsf(v.stats.ingress_octets_per_second*8)+"bits/s in")
     if(!dsr) append(tr, "th", tsf(v.stats.egress_octets_per_second*8)+"bits/s out")
