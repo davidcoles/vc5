@@ -133,8 +133,8 @@ func Load(file string) (*Config, error) {
 type ipport = IPPort
 
 type IPPort struct {
-	Addr netip.Addr
-	Port uint16
+	Address netip.Addr
+	Port    uint16
 }
 
 func (i *ipport) MarshalJSON() ([]byte, error) {
@@ -159,7 +159,7 @@ func (i *ipport) UnmarshalJSON(data []byte) error {
 }
 
 func (i ipport) MarshalText() ([]byte, error) {
-	return []byte(fmt.Sprintf("%s:%d", i.Addr, i.Port)), nil
+	return []byte(fmt.Sprintf("%s:%d", i.Address, i.Port)), nil
 }
 
 func (i *ipport) UnmarshalText(data []byte) error {
@@ -182,7 +182,7 @@ func (i *ipport) UnmarshalText(data []byte) error {
 		return errors.New("Badly formed ip:port - IP: " + m[1])
 	}
 
-	i.Addr = ip
+	i.Address = ip
 
 	if m[3] != "" {
 
@@ -203,14 +203,15 @@ func (i *ipport) UnmarshalText(data []byte) error {
 
 /**********************************************************************/
 
+type tuple = Tuple
 type Tuple struct {
-	Addr     netip.Addr
+	Address  netip.Addr
 	Port     uint16
 	Protocol uint8
 }
 
 func (i *Tuple) Compare(j *Tuple) (r int) {
-	if r = i.Addr.Compare(j.Addr); r != 0 {
+	if r = i.Address.Compare(j.Address); r != 0 {
 		return r
 	}
 
@@ -267,7 +268,7 @@ func (t Tuple) MarshalText() ([]byte, error) {
 		return nil, errors.New("Invalid protocol")
 	}
 
-	return []byte(fmt.Sprintf("%s:%d:%s", t.Addr, t.Port, p)), nil
+	return []byte(fmt.Sprintf("%s:%d:%s", t.Address, t.Port, p)), nil
 }
 
 func (t *Tuple) UnmarshalText(data []byte) error {
@@ -292,7 +293,7 @@ func (t *Tuple) UnmarshalText(data []byte) error {
 		return errors.New("Badly formed ip:port:protocol - IP " + text)
 	}
 
-	t.Addr = ip
+	t.Address = ip
 
 	port, err := strconv.Atoi(m[2])
 	if err != nil {
@@ -359,7 +360,7 @@ func (c *Config) parse() []cue.Service {
 	for ipp, svc := range c.Services {
 
 		service := cue.Service{
-			Address:  ipp.Addr,
+			Address:  ipp.Address,
 			Port:     ipp.Port,
 			Protocol: ipp.Protocol,
 			Required: svc.Need,
@@ -369,7 +370,7 @@ func (c *Config) parse() []cue.Service {
 		for ap, dst := range svc.Destinations {
 
 			destination := cue.Destination{
-				Address:  ap.Addr,
+				Address:  ap.Address,
 				Port:     ap.Port,
 				Weight:   dst.Weight,
 				Disabled: dst.Disabled,

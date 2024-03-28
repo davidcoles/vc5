@@ -40,8 +40,6 @@ import (
 
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/bgp"
-	"github.com/davidcoles/cue/mon"
-
 	lb "github.com/davidcoles/xvs"
 )
 
@@ -170,11 +168,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if config.Multicast != "" {
-		go multicast_send(client, config.Multicast)
-		go multicast_recv(client, config.Multicast)
-	}
-
 	pool := bgp.NewPool(address.As4(), config.BGP, nil, logs.sub("bgp"))
 
 	if pool == nil {
@@ -183,16 +176,18 @@ func main() {
 
 	go spawn(logs, client.Namespace(), os.Args[0], "-s", socket.Name(), client.NamespaceAddress())
 
-	af_unix := unix(socket.Name())
+	balancer := &Balancer{
+		NetNS:  NetNS(socket.Name()),
+		Logger: logs,
+		Client: client,
+	}
 
 	director := &cue.Director{
-		Logger: logs.sub("director"),
-		Balancer: &Balancer{
-			Client: client,
-			ProbeFunc: func(vip, rip, nat netip.Addr, check mon.Check) (bool, string) {
-				return probe(af_unix, vip, rip, nat, check, logs)
-			},
-		},
+		Balancer: balancer,
+	}
+
+	if config.Multicast != "" {
+		balancer.Multicast(config.Multicast)
 	}
 
 	err = director.Start(config.parse())
@@ -478,7 +473,7 @@ func serviceStatus(config *Config, client Client, director *cue.Director, old ma
 		xs := lb.Service{Address: svc.Address, Port: svc.Port, Protocol: lb.Protocol(svc.Protocol)}
 		xse, _ := client.Service(xs)
 
-		t := Tuple{Addr: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
+		t := Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
 		cnf, _ := config.Services[t]
 
 		available := svc.Available()

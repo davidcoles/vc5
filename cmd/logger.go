@@ -23,12 +23,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/syslog"
 	"net/http"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/davidcoles/cue/bgp"
 )
 
 const (
@@ -58,6 +61,7 @@ func (s secret) MarshalText() ([]byte, error) { return []byte("************"), n
 func (s *secret) String() string              { return "************" }
 
 type logger struct {
+	Syslog        bool          `json:"syslog,omitempty"`
 	Slack         secret        `json:"slack,omitempty"`
 	Teams         secret        `json:"teams,omitempty"`
 	Alert         uint8         `json:"alert,omitempty"`
@@ -68,11 +72,14 @@ type logger struct {
 	count   uint64
 	history []entry
 
-	slack chan string
-	teams chan string
+	slack  chan string
+	teams  chan string
+	syslog *syslog.Writer
 }
 
 type index = int64
+
+var syslogger *syslog.Writer
 
 func init() {
 	HOSTNAME, _ = os.Hostname()
@@ -165,15 +172,58 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 		l.console(level(lev) + " " + f + " " + text)
 	}
 
+	if l.Syslog {
+		l.logSyslog(lev, f+": "+text)
+	}
+
 	if lev <= l.Alert {
-		l.sendSlack(text)
-		l.sendTeams(text)
+		l.sendSlack(fmt.Sprintf("%s %s: %s", level(lev), f, text))
+		l.sendTeams(fmt.Sprintf("%s %s: %s", level(lev), f, text))
 	}
 
 	l.Elasticsearch.log(string(js), HOSTNAME)
 
 	if l.elasticAlert() {
 		l.sendSlack("Elasticsearch logging is failing")
+	}
+}
+
+func (l *logger) logSyslog(level uint8, text string) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	var err error
+
+	if l.syslog == nil {
+		l.syslog, err = syslog.New(syslog.LOG_WARNING, "")
+		if err != nil {
+			log.Println("syslog:", err)
+		}
+	}
+
+	if s := l.syslog; s != nil {
+		switch level {
+		case EMERG:
+			err = s.Emerg(text)
+		case ALERT:
+			err = s.Alert(text)
+		case CRIT:
+			err = s.Crit(text)
+		case ERR:
+			err = s.Err(text)
+		case WARNING:
+			err = s.Warning(text)
+		case NOTICE:
+			err = s.Notice(text)
+		case INFO:
+			err = s.Info(text)
+		case DEBUG:
+			err = s.Debug(text)
+		}
+
+		if err != nil {
+			log.Println("syslog:", err)
+		}
 	}
 }
 
@@ -326,5 +376,21 @@ func (l *sub) WARNING(s string, a ...any) { l.log(WARNING, s, a...) }
 func (l *sub) NOTICE(s string, a ...any)  { l.log(NOTICE, s, a...) }
 func (l *sub) INFO(s string, a ...any)    { l.log(INFO, s, a...) }
 func (l *sub) DEBUG(s string, a ...any)   { l.log(DEBUG, s, a...) }
+
+func (l *sub) BGPPeer(peer string, params bgp.Parameters, add bool) {
+	if add {
+		l.NOTICE("add", KV{"peer": peer})
+	} else {
+		l.NOTICE("remove", KV{"peer": peer})
+	}
+}
+
+func (l *sub) BGPSession(peer string, local bool, reason string) {
+	if local {
+		l.NOTICE("local", KV{"peer": peer, "reason": reason})
+	} else {
+		l.ERR("remote", KV{"peer": peer, "reason": reason})
+	}
+}
 
 type Logger = *sub

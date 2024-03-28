@@ -62,6 +62,10 @@ if(defined $json->{'logging'}) {
     $json->{'logging'}->{'alert'}+=0;
 }
 
+if(defined $json->{'logging'}) {
+    $json->{'logging'}->{'syslog'} = jsonbool($json->{'logging'}->{'syslog'});
+}
+
 if(defined $json->{'defcon'}) {
     $json->{'defcon'}+=0;
     given($json->{'defcon'}) {

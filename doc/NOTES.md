@@ -40,3 +40,109 @@ using percpu hash - not using LACP:
 * More complete BGP4 implementation
 * BFD implementation (maybe no need for this with 3s hold time)
 
+## Elasticsearch
+
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+
+echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | \
+	sudo tee -a /etc/apt/sources.list.d/elastic-7.x.list
+	
+apt update
+apt install elasticsearch kibana
+
+cat >>/etc/elasticsearch/elasticsearch.yml <<EOF
+xpack.security.enabled: true
+discovery.type: single-node
+# default to false if ssl not enabled
+xpack.security.authc.api_key.enabled: true
+EOF
+
+systemctl enable elasticsearch
+systemctl start elasticsearch
+
+
+/usr/share/elasticsearch/bin/elasticsearch-setup-passwords auto
+
+# not the passwords somewhere ...
+# edit /etc/kibana/kibana.yml and update:
+#  elasticsearch.username: "kibana_system"
+#  elasticsearch.password: "..."
+
+systemctl enable kibana
+systemctl start kibana
+
+
+
+user=elastic
+pass=...
+index=my-index-name
+
+curl -u "$user:$pass" -X DELETE http://localhost:9200/$index
+
+curl -u "$user:$pass" -X PUT --header 'Content-Type: application/json' \
+     --data @- http://localhost:9200/$index <<EOF
+{
+ "mappings": {
+  "properties": {
+   "date": {
+    "type": "date"
+   }
+  }
+ } 
+}
+EOF
+
+in kibana:
+stack management -> index patterns -> create index pattern
+...
+roles -> create role -> load-balancer : index perms on my-index-name
+users -> create user -> load-balancer : roles->load-balancer
+
+edit logging params ...
+
+logging:
+  elasticsearch:
+    addresses:
+      - http://10.9.8.7:9200/
+	  # add more addresses if you have a cluster
+    index: my-index-name
+    username: load-balancer
+    password: Rarkensh1droj
+
+
+
+echo "deb [signed-by=/etc/apt/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/7.x/apt stable main" >/etc/apt/sources.list.d/elastic-7.x.list
+
+cat >/etc/apt/keyrings/elastic.gpg <<EOF
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+mQENBFI3HsoBCADXDtbNJnxbPqB1vDNtCsqhe49vFYsZN9IOZsZXgp7aHjh6CJBD
+A+bGFOwyhbd7at35jQjWAw1O3cfYsKAmFy+Ar3LHCMkV3oZspJACTIgCrwnkic/9
+CUliQe324qvObU2QRtP4Fl0zWcfb/S8UYzWXWIFuJqMvE9MaRY1bwUBvzoqavLGZ
+j3SF1SPO+TB5QrHkrQHBsmX+Jda6d4Ylt8/t6CvMwgQNlrlzIO9WT+YN6zS+sqHd
+1YK/aY5qhoLNhp9G/HxhcSVCkLq8SStj1ZZ1S9juBPoXV1ZWNbxFNGwOh/NYGldD
+2kmBf3YgCqeLzHahsAEpvAm8TBa7Q9W21C8vABEBAAG0RUVsYXN0aWNzZWFyY2gg
+KEVsYXN0aWNzZWFyY2ggU2lnbmluZyBLZXkpIDxkZXZfb3BzQGVsYXN0aWNzZWFy
+Y2gub3JnPokBTgQTAQgAOAIbAwIXgBYhBEYJWsyFSFgsGiaZqdJ9ZmzYjkK0BQJk
+9vrZBQsJCAcDBRUKCQgLBRYCAwEAAh4FAAoJENJ9ZmzYjkK00hoH+wYXZKgVb3Wv
+4AA/+T1IAf7edwgajr58bEyqds6/4v6uZBneUaqahUqMXgLFRX5dBSrAS7bvE/jx
++BBQx+rpFGxSwvFegRevE1zAGVtpgkFQX0RpRcKSmksucSBxikR/dPn9XdJSEVa8
+vPcs11V+2E5tq3LEP14zJL4MkJKQF0VJl5UUmKLS7U2F/IB5aXry9UWdMTnwNntX
+kl2iDaViYF4MC6xTS24uLwND2St0Jvjt+xGEwbdBVvp+UZ/kG6IGkYM5eWGPuok/
+DHvjUdwTfyO9b5xGbqn5FJ3UFOwB/nOSFXHM8rsHRT/67gHcIl8YFqSQXpIkk9D3
+dCY+KieW0ue5AQ0EUjceygEIAOSVJc3DFuf3LsmUfGpUmnCqoUm76Eqqm8xynFEG
+ZpczTChkwARRtckcfa/sGv376j+jk0c0Q71Uv3MnMLPGF+w3bpu8fLiPeW/cntf1
+8uZ6DxJvHA/oaZZ6VPjwUGSeVydiPtZfTYsceO8Dxl3gpS6nHZ9Gsnfr/kcH9/11
+Ca73HBtmGVIkOI1mZKMbANO8cewY/i7fPxShu7B0Rb3jxVNGUuiRcfRiao0gWx0U
+ZGpvuHplt7loFX2cbsHFAp9WsjYEbSohb/Y0K4NkyFhL82MfbcsEwsXPhRTFgJWw
+s4vpuFg/kFFlnw0NNPVP1jNJLNCsMBMEpP1A7k6MRpylNnUAEQEAAYkBNgQYAQgA
+IAIbDBYhBEYJWsyFSFgsGiaZqdJ9ZmzYjkK0BQJk9vsHAAoJENJ9ZmzYjkK0hWsH
+/ArKtn12HM3+41zYo9qO4rTri7+IYTjSB/JDTOusZgZLd/HCp1xQo4SI2Eur3Rtx
+USMWK1LEeBzsjwDT9yVceYekrBEqUVyRMSVYj+UeZK2s4LbXm9b4jxXVtaivmkMA
+jtznndrD7kmm8ak+UsZplf6p6uZS9TZ9hjwoMmw5oMaS6TZkLT4KYGWeyzHJSUBX
+YikY6vssDQu4SJ07m1f4Hz81J39QOcHln5I5HTK8Rh/VUFcxNnGg9360g55wWpiF
+eUTeMyoXpOtffiUhiOtbRYsmSYC0D4Fd5yJnO3n1pwnVVVsM7RAC22rc5j/Dw8dR
+GIHikRcYWeXTYW7veewK5Ss=
+=ftS0
+-----END PGP PUBLIC KEY BLOCK-----
+EOF
+

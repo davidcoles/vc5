@@ -39,85 +39,6 @@ import (
 
 // XVS specific routines
 
-const maxDatagramSize = 1500
-
-func multicast_send(client Client, address string) {
-
-	addr, err := net.ResolveUDPAddr("udp", address)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn, err := net.DialUDP("udp", nil, addr)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn.SetWriteBuffer(maxDatagramSize * 100)
-
-	ticker := time.NewTicker(time.Millisecond * 10)
-
-	var buff [maxDatagramSize]byte
-
-	for {
-		select {
-		case <-ticker.C:
-			n := 0
-
-		read_flow:
-			f := client.ReadFlow()
-			if len(f) > 0 {
-				buff[n] = uint8(len(f))
-
-				copy(buff[n+1:], f[:])
-				n += 1 + len(f)
-				if n < maxDatagramSize-100 {
-					goto read_flow
-				}
-			}
-
-			if n > 0 {
-				conn.Write(buff[:n])
-			}
-		}
-	}
-}
-
-func multicast_recv(client Client, address string) {
-	udp, err := net.ResolveUDPAddr("udp", address)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	s := []string{`|`, `/`, `-`, `\`}
-	var x int
-
-	conn, err := net.ListenMulticastUDP("udp", nil, udp)
-
-	conn.SetReadBuffer(maxDatagramSize * 1000)
-
-	buff := make([]byte, maxDatagramSize)
-
-	for {
-		nread, _, err := conn.ReadFromUDP(buff)
-		fmt.Print(s[x%4] + "\b")
-		x++
-		if err == nil {
-			for n := 0; n+1 < nread; {
-				l := int(buff[n])
-				o := n + 1
-				n = o + l
-				if l > 0 && n <= nread {
-					client.WriteFlow(buff[o:n])
-				}
-			}
-		}
-	}
-}
-
 type query struct {
 	Address string    `json:"address"`
 	Check   mon.Check `json:"check"`
@@ -126,96 +47,6 @@ type query struct {
 type reply struct {
 	OK         bool   `json:"ok"`
 	Diagnostic string `json:"diagnostic"`
-}
-
-func probe(client *http.Client, vip, rip, addr netip.Addr, check mon.Check, l *logger) (bool, string) {
-
-	q := query{Address: addr.String(), Check: check}
-
-	buff := new(bytes.Buffer)
-	err := json.NewEncoder(buff).Encode(&q)
-
-	if err != nil {
-		return false, "Internal error marshalling probe: " + err.Error()
-	}
-
-	resp, err := client.Post("http://unix/probe", "application/octet-stream", buff)
-
-	if err != nil {
-		return false, "Internal error contacting netns daemon: " + err.Error()
-	}
-
-	defer resp.Body.Close()
-
-	body, _ := ioutil.ReadAll(resp.Body)
-
-	var r reply
-
-	err = json.Unmarshal(body, &r)
-
-	if err != nil {
-		r.Diagnostic = "unable to unmarshal reply: " + err.Error()
-	}
-
-	if resp.StatusCode != 200 {
-		return false, fmt.Sprintf("%d response: %s", resp.StatusCode, r.Diagnostic)
-	}
-
-	type KV = map[string]any
-	//expect := fmt.Sprintf("%v", check.Expect)
-	//method := ""
-
-	kv := KV{
-		"event": "healthcheck",
-		"nat":   addr.String(),
-		"vip":   vip.String(),
-		"rip":   rip.String(),
-		"port":  check.Port,
-		"type":  check.Type,
-		//"method":     method,
-		//"host":       check.Host,
-		//"path":       check.Path,
-		//"expect":     expect,
-		"status":     updown(r.OK),
-		"diagnostic": r.Diagnostic,
-	}
-
-	switch check.Type {
-	case "dns":
-		if check.Method {
-			kv["method"] = "tcp"
-		} else {
-			kv["method"] = "udp"
-		}
-	case "http":
-		fallthrough
-	case "https":
-		if check.Method {
-			kv["method"] = "GET"
-		} else {
-			kv["method"] = "HEAD"
-		}
-
-		if check.Host != "" {
-			kv["host"] = check.Host
-		}
-
-		if check.Path != "" {
-			kv["path"] = check.Path
-		}
-
-		if len(check.Expect) > 0 {
-			kv["expect"] = fmt.Sprintf("%v", check.Expect)
-		}
-	}
-
-	//kv["check"] = check
-
-	if l != nil {
-		l.DEBUG("PROBER", kv)
-	}
-
-	return r.OK, r.Diagnostic
 }
 
 // spawn a server (specified by args) which runs in the network namespace - if it dies then restart it
@@ -254,6 +85,56 @@ func spawn(logs *logger, netns string, args ...string) {
 	}
 }
 
+type nns struct {
+	client *http.Client
+}
+
+func NetNS(socket string) *nns {
+	return &nns{
+		client: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", socket)
+				},
+			},
+		},
+	}
+}
+
+func (n *nns) Probe(addr netip.Addr, check mon.Check) (bool, string) {
+
+	buff := new(bytes.Buffer)
+	err := json.NewEncoder(buff).Encode(&query{Address: addr.String(), Check: check})
+
+	if err != nil {
+		return false, "Internal error marshalling probe: " + err.Error()
+	}
+
+	resp, err := n.client.Post("http://unix/probe", "application/octet-stream", buff)
+
+	if err != nil {
+		return false, "Internal error contacting netns daemon: " + err.Error()
+	}
+
+	defer resp.Body.Close()
+
+	body, _ := ioutil.ReadAll(resp.Body)
+
+	var r reply
+
+	err = json.Unmarshal(body, &r)
+
+	if err != nil {
+		r.Diagnostic = "unable to unmarshal reply: " + err.Error()
+	}
+
+	if resp.StatusCode != 200 {
+		return false, fmt.Sprintf("%d response: %s", resp.StatusCode, r.Diagnostic)
+	}
+
+	return r.OK, r.Diagnostic
+}
+
 // server to run in the network namespace - receive probes from unix socket, pass to the 'mon' object to execute
 func netns(socket string, addr netip.Addr) {
 
@@ -268,7 +149,7 @@ func netns(socket string, addr netip.Addr) {
 		}
 	}()
 
-	monitor, err := mon.New(addr, nil, nil, nil)
+	monitor, err := mon.New(addr, nil, nil)
 
 	if err != nil {
 		log.Fatal(err)
@@ -297,6 +178,7 @@ func netns(socket string, addr netip.Addr) {
 		}
 
 		var q query
+		var rep reply
 
 		err = json.Unmarshal(body, &q)
 
@@ -306,12 +188,13 @@ func netns(socket string, addr netip.Addr) {
 			return
 		}
 
-		rip := netip.MustParseAddr(q.Address)
-		vip := rip // fake the vip - NAT will take care of filling in the right address
+		addr, err := netip.ParseAddr(q.Address)
 
-		var rep reply
-
-		rep.OK, rep.Diagnostic = monitor.Probe(vip, rip, q.Check)
+		if err == nil {
+			rep.OK, rep.Diagnostic = monitor.Probe(addr, q.Check)
+		} else {
+			rep.Diagnostic = "probe request: " + err.Error()
+		}
 
 		js, err := json.Marshal(&rep)
 
@@ -328,16 +211,6 @@ func netns(socket string, addr netip.Addr) {
 	server := http.Server{}
 
 	log.Fatal(server.Serve(s))
-}
-
-func unix(socket string) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", socket)
-			},
-		},
-	}
 }
 
 func ethtool(i string) {
