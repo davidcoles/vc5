@@ -64,7 +64,7 @@ type Service struct {
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
 	Sticky bool `json:"sticky,omitempty"`
 
-	//Scheduler types.Scheduler `json:"scheduler"`
+	Scheduler string `json:"scheduler"`
 }
 
 type services map[Tuple]Service
@@ -360,11 +360,12 @@ func (c *Config) parse() []cue.Service {
 	for ipp, svc := range c.Services {
 
 		service := cue.Service{
-			Address:  ipp.Address,
-			Port:     ipp.Port,
-			Protocol: ipp.Protocol,
-			Required: svc.Need,
-			Sticky:   svc.Sticky,
+			Address:   ipp.Address,
+			Port:      ipp.Port,
+			Protocol:  ipp.Protocol,
+			Required:  svc.Need,
+			Scheduler: svc.Scheduler,
+			Sticky:    svc.Sticky,
 		}
 
 		for ap, dst := range svc.Destinations {
