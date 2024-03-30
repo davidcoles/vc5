@@ -179,6 +179,16 @@ Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
 
 A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
 
+Experimental elasticsearch support for logging (direct to your
+cluster, no need to scrape system logs) is now included. Every probe
+to backend servers is logged, so if one goes down you can see
+precisely what error was returned, as well all sorts of other
+conditions. This will require a lot of refinement and more sensible
+naming of log parameters, etc. (if you've got any insights please get
+in touch), but it should lead to being able to get some good insights
+into what is going on with the system - my very inept first attempt
+creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
+
 A sample utility to render traffic from /20 prefixes going through the
 load-balancer is available at https://github.com/davidcoles/hilbert:
 ![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)

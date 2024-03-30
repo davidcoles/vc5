@@ -184,7 +184,7 @@ func (l *logger) log(lev uint8, f string, a ...any) {
 	l.Elasticsearch.log(string(js), HOSTNAME)
 
 	if l.elasticAlert() {
-		l.sendSlack("Elasticsearch logging is failing")
+		l.sendSlack("HELP! Elasticsearch logging is failing!")
 	}
 }
 
