@@ -210,6 +210,21 @@ type Tuple struct {
 	Protocol uint8
 }
 
+func (t *Tuple) string() string {
+	var p string
+
+	switch t.Protocol {
+	case TCP:
+		p = "tcp"
+	case UDP:
+		p = "udp"
+	default:
+		p = fmt.Sprint(t.Protocol)
+	}
+
+	return fmt.Sprintf("%s:%d:%s", t.Address, t.Port, p)
+}
+
 func (i *Tuple) Compare(j *Tuple) (r int) {
 	if r = i.Address.Compare(j.Address); r != 0 {
 		return r
