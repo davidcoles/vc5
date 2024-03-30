@@ -490,6 +490,8 @@ func serviceStatus(config *Config, client Client, director *cue.Director, old ma
 			Up:          svc.Up,
 			For:         uint64(time.Now().Sub(svc.When) / time.Second),
 			Stats:       old[key],
+			Sticky:      svc.Sticky,
+			Scheduler:   svc.Scheduler,
 		}
 		stats[key] = serv.Stats.update(xse.Stats)
 

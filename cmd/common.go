@@ -40,6 +40,8 @@ type Serv struct {
 	Up           bool       `json:"up"`
 	For          uint64     `json:"for"`
 	Last         uint64     `json:"last"`
+	Sticky       bool       `json:"sticky"`
+	Scheduler    string     `json:"scheduler"`
 }
 
 type Dest struct {

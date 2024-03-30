@@ -258,7 +258,15 @@ function serv(v, _vip, list, up, dsr) {
 	var t = append(div, "table")
 	var tr = append(t, "tr", null, "hd")
 
-	var title = esc(s.description) + " [" + s.available + "/" +s.destinations.length + " available - " + s.required + " required]"
+	var title = esc(s.description) + " [" + s.available + "/" +s.destinations.length + " available - " + s.required + " required] "
+
+	if(s.scheduler !== undefined) {
+	    title += s.scheduler
+	}
+
+	if(s.sticky !== undefined && s.sticky) {
+	    title += "(sticky)"
+	}
 	
 	append(tr, "th", esc(s.name))
 	append(tr, "th", esc(title)).setAttribute("colspan", dsr ? 4 : 6)
