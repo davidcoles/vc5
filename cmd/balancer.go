@@ -259,3 +259,84 @@ func proto(p uint8) string {
 	}
 	return fmt.Sprintf("%d", p)
 }
+
+func (b *Balancer) Stats(s xvs.Stats) (r Stats) {
+
+	r.IngressOctets = s.Octets
+	r.IngressPackets = s.Packets
+	r.EgressOctets = 0  // Not available in DSR
+	r.EgressPackets = 0 // Not available in DSR
+	r.Flows = s.Flows
+
+	return r
+}
+
+func (b *Balancer) Service(s cue.Service) (xvs.ServiceExtended, error) {
+	xs := xvs.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}
+	return b.Client.Service(xs)
+}
+
+func (b *Balancer) Destinations(s cue.Service) ([]xvs.DestinationExtended, error) {
+	xs := xvs.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}
+	return b.Client.Destinations(xs)
+}
+
+func (b *Balancer) Destination(dst cue.Destination) mon.Destination {
+	return mon.Destination{Address: dst.Address, Port: dst.Port}
+}
+
+func (b *Balancer) Dest(s xvs.Service, d xvs.Destination) mon.Destination {
+	return mon.Destination{Address: d.Address, Port: s.Port}
+}
+
+func (b *Balancer) ServiceInstance(s cue.Service) mon.Instance {
+	return mon.Instance{Service: mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}}
+}
+
+func (b *Balancer) DestinationInstance(s cue.Service, d cue.Destination) mon.Instance {
+	return mon.Instance{
+		Service:     mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol},
+		Destination: mon.Destination{Address: d.Address, Port: d.Port},
+	}
+}
+
+func (b *Balancer) MAC(d xvs.DestinationExtended) string {
+	return d.MAC.String()
+}
+
+func (b *Balancer) TCPStats() map[mon.Instance]tcpstats {
+	tcp := map[mon.Instance]tcpstats{}
+	svcs, _ := b.Client.Services()
+	for _, se := range svcs {
+		s := se.Service
+		dsts, _ := b.Client.Destinations(s)
+		for _, de := range dsts {
+			d := de.Destination
+			i := mon.Instance{
+				Service:     mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol},
+				Destination: mon.Destination{Address: d.Address, Port: s.Port},
+			}
+			tcp[i] = tcpstats{ESTABLISHED: de.Stats.Current}
+		}
+	}
+
+	return tcp
+}
+
+func (b *Balancer) summary() (s Summary) {
+	u := b.Client.Info()
+	s.Latency = u.Latency
+	s.Dropped = u.Dropped
+	s.Blocked = u.Blocked
+	s.NotQueued = u.NotQueued
+	s.IngressOctets = u.Octets
+	s.IngressPackets = u.Packets
+	s.EgressOctets = 0  // Not available in DSR
+	s.EgressPackets = 0 // Not available in DSR
+	s.Flows = u.Flows
+
+	s.DSR = true
+	s.VC5 = true
+
+	return
+}

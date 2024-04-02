@@ -31,7 +31,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	"sort"
+	//"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,7 +40,7 @@ import (
 
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/bgp"
-	lb "github.com/davidcoles/xvs"
+	"github.com/davidcoles/xvs"
 )
 
 // TODO:
@@ -150,7 +150,7 @@ func main() {
 		ethtool(i)
 	}
 
-	client := &lb.Client{
+	client := &xvs.Client{
 		Interfaces: nics,
 		Address:    address,
 		Redirect:   *untagged,
@@ -204,15 +204,18 @@ func main() {
 	var rib []netip.Addr
 	var summary Summary
 
-	services, old, _ := serviceStatus(config, client, director, nil)
+	services, old, _ := serviceStatus(config, balancer, director, nil)
 
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		for {
 			mutex.Lock()
-			summary.update(client, uint64(time.Now().Sub(start)/time.Second))
-			services, old, summary.Current = serviceStatus(config, client, director, old)
+			//summary.update(client, uint64(time.Now().Sub(start)/time.Second))
+
+			summary.update(balancer.summary(), start)
+
+			services, old, summary.Current = serviceStatus(config, balancer, director, old)
 			mutex.Unlock()
 			select {
 			case <-ticker.C:
@@ -256,8 +259,6 @@ func main() {
 			pool.RIB(rib)
 		}
 	}()
-
-	log.Println("Initialised")
 
 	static := http.FS(STATIC)
 	var fs http.FileSystem
@@ -335,8 +336,8 @@ func main() {
 	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
 		var ret []interface{}
 		type status struct {
-			Service      lb.ServiceExtended
-			Destinations []lb.DestinationExtended
+			Service      xvs.ServiceExtended
+			Destinations []xvs.DestinationExtended
 		}
 		svcs, _ := client.Services()
 		for _, se := range svcs {
@@ -396,10 +397,9 @@ func main() {
 			Summary:  summary,
 			Services: services,
 			BGP:      pool.Status(),
-			//VIP:      vipStatus(services, rib),
-			VIP:     vipStatus(services, vip),
-			RIB:     rib,
-			Logging: logs.Stats(),
+			VIP:      vipStatus(services, vip),
+			RIB:      rib,
+			Logging:  logs.Stats(),
 		}, " ", " ")
 		mutex.Unlock()
 
@@ -423,9 +423,16 @@ func main() {
 	})
 
 	go func() {
-		server := http.Server{}
-		log.Fatal(server.Serve(listener))
+		for {
+			server := http.Server{}
+			//log.Fatal(server.Serve(listener))
+			err := server.Serve(listener)
+			logs.ALERT(F, "Webserver exited: "+err.Error())
+			time.Sleep(10 * time.Second)
+		}
 	}()
+
+	logs.ALERT(F, "Initialised")
 
 	sig := make(chan os.Signal, 10)
 	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -451,17 +458,35 @@ func main() {
 		case syscall.SIGTERM:
 			fallthrough
 		case syscall.SIGQUIT:
-			logs.ALERT(F, "Shutting down")
 			fmt.Println("CLOSING")
 			close(done) // shut down BGP, etc
 			time.Sleep(4 * time.Second)
-			fmt.Println("DONE")
+			logs.ALERT(F, "Shutting down")
 			return
 		}
 	}
 }
 
-func serviceStatus(config *Config, client Client, director *cue.Director, old map[Key]Stats) (map[VIP][]Serv, map[Key]Stats, uint64) {
+func (s *Summary) summary(c Client) {
+	u := c.Info()
+	s.Latency = u.Latency
+	s.Dropped = u.Dropped
+	s.Blocked = u.Blocked
+	s.NotQueued = u.NotQueued
+	s.IngressOctets = u.Octets
+	s.IngressPackets = u.Packets
+	s.EgressOctets = 0  // Not available in DSR
+	s.EgressPackets = 0 // Not available in DSR
+	s.Flows = u.Flows
+
+	s.DSR = true
+	s.VC5 = true
+}
+
+/*
+func _serviceStatus(config *Config, balancer *Balancer, director *cue.Director, old map[Key]Stats) (map[VIP][]Serv, map[Key]Stats, uint64) {
+
+	client := balancer.Client
 
 	var current uint64
 
@@ -539,22 +564,6 @@ func serviceStatus(config *Config, client Client, director *cue.Director, old ma
 	return status, stats, current
 }
 
-func (s *Summary) summary(c Client) {
-	u := c.Info()
-	s.Latency = u.Latency
-	s.Dropped = u.Dropped
-	s.Blocked = u.Blocked
-	s.NotQueued = u.NotQueued
-	s.IngressOctets = u.Octets
-	s.IngressPackets = u.Packets
-	s.EgressOctets = 0  // Not available in DSR
-	s.EgressPackets = 0 // Not available in DSR
-	s.Flows = u.Flows
-
-	s.DSR = true
-	s.VC5 = true
-}
-
 func (s *Stats) update(u lb.Stats) Stats {
 	o := *s
 
@@ -580,3 +589,5 @@ func (s *Stats) update(u lb.Stats) Stats {
 
 	return *s
 }
+
+*/

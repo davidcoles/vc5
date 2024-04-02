@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/davidcoles/cue"
+	"github.com/davidcoles/cue/mon"
 )
 
 type Serv struct {
@@ -57,14 +58,6 @@ type Dest struct {
 	Last       uint64     `json:"last"`
 	Diagnostic string     `json:"diagnostic"`
 	MAC        string     `json:"mac"`
-}
-
-type Key struct {
-	VIP      netip.Addr
-	RIP      netip.Addr
-	Port     uint16
-	RPort    uint16
-	Protocol uint8
 }
 
 type State struct {
@@ -233,7 +226,7 @@ func updown(b bool) string {
 	return "down"
 }
 
-func (s *Summary) update(c Client, t uint64) Summary {
+func (s *Summary) _update(c Client, t uint64) Summary {
 	o := *s
 
 	s.summary(c)
@@ -260,6 +253,31 @@ func (s *Summary) update(c Client, t uint64) Summary {
 	return *s
 }
 
+func (s *Summary) update(n Summary, start time.Time) {
+
+	o := *s
+	*s = n
+
+	s.Uptime = uint64(time.Now().Sub(start) / time.Second)
+	s.time = time.Now()
+
+	if o.time.Unix() != 0 {
+		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
+
+		if diff != 0 {
+			s.DroppedPerSecond = (1000 * (s.Dropped - o.Dropped)) / diff
+			s.BlockedPerSecond = (1000 * (s.Blocked - o.Blocked)) / diff
+			s.NotQueuedPerSecond = (1000 * (s.NotQueued - o.NotQueued)) / diff
+
+			s.IngressPacketsPerSecond = (1000 * (s.IngressPackets - o.IngressPackets)) / diff
+			s.IngressOctetsPerSecond = (1000 * (s.IngressOctets - o.IngressOctets)) / diff
+			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
+			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
+			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
+		}
+	}
+}
+
 func bgpListener(l net.Listener, logs Logger) {
 	F := "listener"
 
@@ -272,8 +290,115 @@ func bgpListener(l net.Listener, logs Logger) {
 			go func(c net.Conn) {
 				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
 				defer c.Close()
-				time.Sleep(time.Second * 10) // time.Minute)
+				time.Sleep(time.Second * 10)
 			}(conn)
 		}
 	}
+}
+
+func serviceStatus(config *Config, balancer *Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
+
+	var current uint64
+
+	stats := map[mon.Instance]Stats{}
+	status := map[netip.Addr][]Serv{}
+	tcpstats := balancer.TCPStats()
+
+	for _, svc := range director.Status() {
+
+		t := Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
+		cnf, _ := config.Services[t]
+
+		available := svc.Available()
+
+		key := balancer.ServiceInstance(svc)
+		xse, _ := balancer.Service(svc)
+
+		serv := Serv{
+			Name:        cnf.Name,
+			Description: cnf.Description,
+			Address:     svc.Address,
+			Port:        svc.Port,
+			Protocol:    protocol(svc.Protocol),
+			Required:    svc.Required,
+			Available:   available,
+			Up:          svc.Up,
+			For:         uint64(time.Now().Sub(svc.When) / time.Second),
+			Sticky:      svc.Sticky,
+			Scheduler:   svc.Scheduler,
+			Stats:       calculateRate(balancer.Stats(xse.Stats), old[key]),
+		}
+
+		lbs := map[mon.Destination]Stats{}
+		mac := map[mon.Destination]string{}
+
+		de, _ := balancer.Destinations(svc)
+		for _, d := range de {
+			//key := mon.Destination{Address: d.Destination.Address, Port: svc.Port}
+			key := balancer.Dest(xse.Service, d.Destination)
+			lbs[key] = balancer.Stats(d.Stats)
+			mac[key] = balancer.MAC(d)
+		}
+
+		for _, dst := range svc.Destinations {
+			key := balancer.DestinationInstance(svc, dst)
+			dest := Dest{
+				Address:    dst.Address,
+				Port:       dst.Port,
+				Disabled:   dst.Disabled,
+				Up:         dst.Status.OK,
+				For:        uint64(time.Now().Sub(dst.Status.When) / time.Second),
+				Took:       uint64(dst.Status.Took / time.Millisecond),
+				Diagnostic: dst.Status.Diagnostic,
+				Weight:     dst.Weight,
+				Stats:      calculateRate(lbs[balancer.Destination(dst)], old[key]),
+				MAC:        mac[balancer.Destination(dst)],
+			}
+
+			if tcp, ok := tcpstats[key]; ok {
+				dest.Stats.Current = tcp.ESTABLISHED
+				serv.Stats.Current += tcp.ESTABLISHED
+				current += tcp.ESTABLISHED
+			}
+
+			stats[key] = dest.Stats
+			serv.Destinations = append(serv.Destinations, dest)
+		}
+
+		stats[key] = serv.Stats
+
+		sort.SliceStable(serv.Destinations, func(i, j int) bool {
+			return serv.Destinations[i].Address.Compare(serv.Destinations[j].Address) < 0
+		})
+
+		status[svc.Address] = append(status[svc.Address], serv)
+	}
+
+	return status, stats, current
+}
+
+func calculateRate(s Stats, o Stats) Stats {
+
+	s.time = time.Now()
+
+	if o.time.Unix() != 0 {
+		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
+
+		if diff != 0 {
+			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
+			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
+			s.IngressPacketsPerSecond = (1000 * (s.IngressPackets - o.IngressPackets)) / diff
+			s.IngressOctetsPerSecond = (1000 * (s.IngressOctets - o.IngressOctets)) / diff
+			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
+		}
+	}
+
+	return s
+}
+
+type tcpstats struct {
+	SYN_RECV    uint64
+	ESTABLISHED uint64
+	CLOSE       uint64
+	TIME_WAIT   uint64
 }
