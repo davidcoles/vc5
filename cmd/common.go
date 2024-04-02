@@ -226,33 +226,6 @@ func updown(b bool) string {
 	return "down"
 }
 
-func (s *Summary) _update(c Client, t uint64) Summary {
-	o := *s
-
-	s.summary(c)
-
-	s.Uptime = t
-	s.time = time.Now()
-
-	if o.time.Unix() != 0 {
-		diff := uint64(s.time.Sub(o.time) / time.Millisecond)
-
-		if diff != 0 {
-			s.DroppedPerSecond = (1000 * (s.Dropped - o.Dropped)) / diff
-			s.BlockedPerSecond = (1000 * (s.Blocked - o.Blocked)) / diff
-			s.NotQueuedPerSecond = (1000 * (s.NotQueued - o.NotQueued)) / diff
-
-			s.IngressPacketsPerSecond = (1000 * (s.IngressPackets - o.IngressPackets)) / diff
-			s.IngressOctetsPerSecond = (1000 * (s.IngressOctets - o.IngressOctets)) / diff
-			s.EgressPacketsPerSecond = (1000 * (s.EgressPackets - o.EgressPackets)) / diff
-			s.EgressOctetsPerSecond = (1000 * (s.EgressOctets - o.EgressOctets)) / diff
-			s.FlowsPerSecond = (1000 * (s.Flows - o.Flows)) / diff
-		}
-	}
-
-	return *s
-}
-
 func (s *Summary) update(n Summary, start time.Time) {
 
 	o := *s
