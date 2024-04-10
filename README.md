@@ -14,9 +14,10 @@ raise a GitHub issue.
 
 ## NOTICE
 
-YAML/JSON config format changed to include LB server's IP and
-interfaces, native mode, etc.. They can still be specified on the
-command line if easier.
+The eBPF code doesn't seem to work properly on Ubuntu 22.04
+(5.15.0-101-generic kernel). I've got a working replacement undergoing
+testing currently, but it is missing a couple of features like the
+flow queue for sharing flows between servers. Should be ready for reealse soon.
 
 ## Quickstart
 
