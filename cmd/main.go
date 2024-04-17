@@ -35,6 +35,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -159,6 +160,7 @@ func main() {
 		NAT:        true,
 		Logger:     logs.sub("xvs"),
 		Share:      config.Multicast != "",
+		//Debug:      &Debug{Log: logs.sub("test")},
 	}
 
 	err = client.Start()
@@ -465,4 +467,64 @@ func main() {
 			return
 		}
 	}
+}
+
+func mac(m [6]byte) string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
+}
+
+type Debug struct{ Log *sub }
+
+var foo atomic.Uint64
+
+func (d *Debug) NAT(tag map[netip.Addr]int16, arp map[netip.Addr][6]byte, vrn map[[2]netip.Addr]netip.Addr, nat map[netip.Addr]string, out []netip.Addr, in []string) {
+
+	f := foo.Add(1)
+
+	//fmt.Println("NAT")
+	d.Log.INFO("nat", KV{"run": f})
+	for k, v := range tag {
+		fmt.Printf("TAG %s -> %d\n", k, v)
+		d.Log.INFO("tag", KV{"run": f, "rip": k, "tag": v})
+
+	}
+
+	for k, v := range arp {
+		fmt.Printf("ARP %s -> %v\n", k, mac(v))
+		d.Log.INFO("arp", KV{"run": f, "rip": k, "mac": mac(v)})
+	}
+
+	for k, v := range vrn {
+		fmt.Printf("MAP %s|%s -> %s\n", k[0], k[1], v)
+		d.Log.INFO("map", KV{"run": f, "vip": k[0], "rip": k[1], "nat": v})
+	}
+
+	for k, v := range nat {
+		fmt.Printf("NAT %s -> %s\n", k, v)
+		d.Log.INFO("nat", KV{"run": f, "nat": k, "info": v})
+	}
+
+	for _, v := range out {
+		fmt.Println("DEL nat_out", v)
+		d.Log.INFO("delete", KV{"run": f, "out": v})
+	}
+
+	for _, v := range in {
+		fmt.Println("DEL nat_in", v)
+		d.Log.INFO("delete", KV{"run": f, "in": v})
+	}
+}
+
+func (d *Debug) Redirects(vlans map[uint16]string) {
+	fmt.Println("REDIRECTS")
+	f := foo.Add(1)
+	for k, v := range vlans {
+		fmt.Println("NIC", k, v)
+		d.Log.INFO("nic", KV{"run": f, "vlan": k, "info": v})
+	}
+}
+
+func (d *Debug) Backend(vip netip.Addr, port uint16, protocol uint8, backends []byte, took time.Duration) {
+	fmt.Println(vip, port, protocol, backends, took)
+	d.Log.INFO("backend", KV{"vip": vip, "port": port, "protocol": protocol, "backends": fmt.Sprint(backends), "took": took.String()})
 }
