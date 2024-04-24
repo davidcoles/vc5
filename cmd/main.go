@@ -185,7 +185,8 @@ func main() {
 	}
 
 	director := &cue.Director{
-		Balancer: balancer,
+		//Balancer: balancer,
+		Balancer: &dummy{},
 	}
 
 	if config.Multicast != "" {
@@ -245,7 +246,10 @@ func main() {
 			select {
 			case <-ticker.C: // check for matured VIPs
 			case <-director.C: // a backend has changed state
+				mutex.Lock()
 				services = director.Status()
+				balancer.Configure(services)
+				mutex.Unlock()
 			case <-done: // shuting down
 				return
 			case <-timer.C:
@@ -527,4 +531,10 @@ func (d *Debug) Redirects(vlans map[uint16]string) {
 func (d *Debug) Backend(vip netip.Addr, port uint16, protocol uint8, backends []byte, took time.Duration) {
 	fmt.Println(vip, port, protocol, backends, took)
 	d.Log.INFO("backend", KV{"vip": vip, "port": port, "protocol": protocol, "backends": fmt.Sprint(backends), "took": took.String()})
+}
+
+type dummy struct{}
+
+func (d *dummy) Configure([]cue.Service) error {
+	return nil
 }
