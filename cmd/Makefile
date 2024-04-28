@@ -4,13 +4,14 @@
 
 BPFVER ?= v1.3.0
 LIBBPF ?= $(PWD)/libbpf
+GOLANG ?= 1.21
 
 default: vc5 config.json
 
 race:
 	$(MAKE) default FLAGS=-race
 
-vc5: libbpf/bpf libbpf/src/libbpf.a *.go static/*
+vc5: libbpf/bpf/libbpf.a *.go static/*
 	CGO_CFLAGS="-I$(LIBBPF)" CGO_LDFLAGS="-L$(LIBBPF)/bpf" go build $(FLAGS) -o $@
 
 # avoid clobbering an existing config file when make is run with -B
@@ -27,14 +28,27 @@ distclean: clean
 	rm -rf libbpf
 
 libbpf:
-	git clone -b $(BPFVER) https://github.com/libbpf/libbpf
+	git clone -b $(BPFVER) --depth 1 https://github.com/libbpf/libbpf
 
 libbpf/bpf: libbpf
 	cd libbpf && ln -s src bpf
 
-libbpf/src/libbpf.a: libbpf
-	cd libbpf/src && $(MAKE)
+libbpf/bpf/libbpf.a:
+	$(MAKE) libbpf/bpf
+	cd libbpf/bpf && $(MAKE)
 
 # need to pass as a hook to git
 pre-commit:
 	if grep '^replace' go.mod; then false; fi
+
+# just for quick setup on testing machines
+focal: apt-install /usr/local/bin/go
+jammy: apt-install /usr/local/bin/go
+bookworm: apt-install; $(MAKE) /usr/local/bin/go GOLANG=1.19
+
+apt-install:; apt install -y libelf-dev libyaml-perl libjson-perl
+
+/usr/local/bin/go:
+	apt install -y golang-$(GOLANG)
+	ln -s /usr/lib/go-$(GOLANG)/bin/go /usr/local/bin/go
+

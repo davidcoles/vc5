@@ -214,10 +214,7 @@ func main() {
 		defer ticker.Stop()
 		for {
 			mutex.Lock()
-			//summary.update(client, uint64(time.Now().Sub(start)/time.Second))
-
 			summary.update(balancer.summary(), start)
-
 			services, old, summary.Current = serviceStatus(config, balancer, director, old)
 			mutex.Unlock()
 			select {
@@ -431,7 +428,6 @@ func main() {
 	go func() {
 		for {
 			server := http.Server{}
-			//log.Fatal(server.Serve(listener))
 			err := server.Serve(listener)
 			logs.ALERT(F, "Webserver exited: "+err.Error())
 			time.Sleep(10 * time.Second)

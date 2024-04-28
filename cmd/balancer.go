@@ -75,7 +75,7 @@ func (b *Balancer) Configure(services []cue.Service) error {
 			}
 		}
 
-		b.Client.SetService(service, dsts)
+		b.Client.SetService(service, dsts...)
 	}
 
 	return nil
