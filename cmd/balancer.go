@@ -39,7 +39,7 @@ type Balancer struct {
 }
 
 // interface method called by the director when the load balancer needs to be reconfigured
-func (b *Balancer) Configure(services []cue.Service) error {
+func (b *Balancer) configure(services []cue.Service) error {
 
 	target := map[tuple]cue.Service{}
 
@@ -81,10 +81,17 @@ func (b *Balancer) Configure(services []cue.Service) error {
 	return nil
 }
 
-// interface method alled by mon when a destination's heatlh status transistions up or down
+// interface method called by mon when a destination's heatlh status transitions up or down
 func (b *Balancer) Notify(instance mon.Instance, state bool) {
 	if logger := b.Logger; logger != nil {
 		logger.NOTICE("notify", notifyLog(instance, state))
+	}
+}
+
+// interface method called by mon every time a destination is checked
+func (b *Balancer) Result(instance mon.Instance, state bool, diagnostic string) {
+	if logger := b.Logger; logger != nil {
+		logger.DEBUG("result", resultLog(instance, state, diagnostic))
 	}
 }
 
@@ -248,6 +255,12 @@ func notifyLog(instance mon.Instance, status bool) map[string]any {
 		"daddr":  instance.Destination.Address.String(),
 		"dport":  instance.Destination.Port,
 	}
+}
+
+func resultLog(instance mon.Instance, status bool, diagnostic string) map[string]any {
+	r := notifyLog(instance, status)
+	r["diagnostic"] = diagnostic
+	return r
 }
 
 func proto(p uint8) string {

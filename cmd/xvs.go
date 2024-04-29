@@ -149,7 +149,7 @@ func netns(socket string, addr netip.Addr) {
 		}
 	}()
 
-	monitor, err := mon.New(addr, nil, nil)
+	monitor, err := mon.New(addr, nil, nil, nil)
 
 	if err != nil {
 		log.Fatal(err)

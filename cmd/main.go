@@ -31,7 +31,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
-	//"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -185,8 +184,8 @@ func main() {
 	}
 
 	director := &cue.Director{
-		//Balancer: balancer,
-		Balancer: &dummy{},
+		Notifier: balancer,
+		Prober:   balancer,
 	}
 
 	if config.Multicast != "" {
@@ -245,7 +244,7 @@ func main() {
 			case <-director.C: // a backend has changed state
 				mutex.Lock()
 				services = director.Status()
-				balancer.Configure(services)
+				balancer.configure(services)
 				mutex.Unlock()
 			case <-done: // shuting down
 				return
