@@ -32,6 +32,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"sync/atomic"
 	"time"
 
 	"github.com/davidcoles/cue/mon"
@@ -218,4 +219,151 @@ func ethtool(i string) {
 	exec.Command("ethtool", "-K", i, "tx", "off").Output()
 	exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
 	exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
+}
+
+func mac(m [6]byte) string {
+	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
+}
+
+type Debug struct{ Log *sub }
+
+var foo atomic.Uint64
+
+func (d *Debug) NAT(tag map[netip.Addr]int16, arp map[netip.Addr][6]byte, vrn map[[2]netip.Addr]netip.Addr, nat map[netip.Addr]string, out []netip.Addr, in []string) {
+
+	f := foo.Add(1)
+
+	//fmt.Println("NAT")
+	d.Log.DEBUG("nat", KV{"run": f})
+	for k, v := range tag {
+		//fmt.Printf("TAG %s -> %d\n", k, v)
+		d.Log.DEBUG("tag", KV{"run": f, "rip": k, "tag": v})
+
+	}
+
+	for k, v := range arp {
+		//fmt.Printf("ARP %s -> %v\n", k, mac(v))
+		d.Log.DEBUG("arp", KV{"run": f, "rip": k, "mac": mac(v)})
+	}
+
+	for k, v := range vrn {
+		//fmt.Printf("MAP %s|%s -> %s\n", k[0], k[1], v)
+		d.Log.DEBUG("map", KV{"run": f, "vip": k[0], "rip": k[1], "nat": v})
+	}
+
+	for k, v := range nat {
+		//fmt.Printf("NAT %s -> %s\n", k, v)
+		d.Log.DEBUG("nat", KV{"run": f, "nat": k, "info": v})
+	}
+
+	for _, v := range out {
+		//fmt.Println("DEL nat_out", v)
+		d.Log.DEBUG("delete", KV{"run": f, "out": v})
+	}
+
+	for _, v := range in {
+		//fmt.Println("DEL nat_in", v)
+		d.Log.DEBUG("delete", KV{"run": f, "in": v})
+	}
+}
+
+func (d *Debug) Redirects(vlans map[uint16]string) {
+	//fmt.Println("REDIRECTS")
+	f := foo.Add(1)
+	for k, v := range vlans {
+		//fmt.Println("NIC", k, v)
+		d.Log.DEBUG("nic", KV{"run": f, "vlan": k, "info": v})
+	}
+}
+
+func (d *Debug) Backend(vip netip.Addr, port uint16, protocol uint8, backends []byte, took time.Duration) {
+	if len(backends) > 32 {
+		backends = backends[:32]
+	}
+	//fmt.Println(vip, port, protocol, backends, took)
+	d.Log.DEBUG("backend", KV{"vip": vip, "port": port, "protocol": protocol, "backends": fmt.Sprint(backends), "took": took.String()})
+}
+
+const maxDatagramSize = 1500
+
+func multicast(c Client, multicast string) {
+	go multicast_send(c, multicast)
+	go multicast_recv(c, multicast)
+}
+
+func multicast_send(c Client, address string) {
+
+	addr, err := net.ResolveUDPAddr("udp", address)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn, err := net.DialUDP("udp", nil, addr)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn.SetWriteBuffer(maxDatagramSize * 100)
+
+	ticker := time.NewTicker(time.Millisecond * 10)
+
+	var buff [maxDatagramSize]byte
+
+	for {
+		select {
+		case <-ticker.C:
+			n := 0
+
+		read_flow:
+			f := c.ReadFlow()
+			if len(f) > 0 {
+				buff[n] = uint8(len(f))
+
+				copy(buff[n+1:], f[:])
+				n += 1 + len(f)
+				if n < maxDatagramSize-100 {
+					goto read_flow
+				}
+			}
+
+			if n > 0 {
+				conn.Write(buff[:n])
+			}
+		}
+	}
+}
+
+func multicast_recv(c Client, address string) {
+	udp, err := net.ResolveUDPAddr("udp", address)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	s := []string{`|`, `/`, `-`, `\`}
+	var x int
+
+	conn, err := net.ListenMulticastUDP("udp", nil, udp)
+
+	conn.SetReadBuffer(maxDatagramSize * 1000)
+
+	buff := make([]byte, maxDatagramSize)
+
+	for {
+		nread, _, err := conn.ReadFromUDP(buff)
+		fmt.Print(s[x%4] + "\b")
+		x++
+		if err == nil {
+			for n := 0; n+1 < nread; {
+				l := int(buff[n])
+				o := n + 1
+				n = o + l
+				if l > 0 && n <= nread {
+					c.WriteFlow(buff[o:n])
+				}
+			}
+		}
+	}
 }

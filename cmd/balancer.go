@@ -21,10 +21,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
-	"net"
 	"net/netip"
-	"time"
 
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/mon"
@@ -34,7 +31,7 @@ import (
 type Client = *xvs.Client
 type Balancer struct {
 	NetNS  *nns
-	Logger *logger
+	Logger *sub
 	Client *xvs.Client
 }
 
@@ -79,198 +76,6 @@ func (b *Balancer) configure(services []cue.Service) error {
 	}
 
 	return nil
-}
-
-// interface method called by mon when a destination's heatlh status transitions up or down
-func (b *Balancer) Notify(instance mon.Instance, state bool) {
-	if logger := b.Logger; logger != nil {
-		logger.NOTICE("notify", notifyLog(instance, state))
-	}
-}
-
-// interface method called by mon every time a destination is checked
-func (b *Balancer) Result(instance mon.Instance, state bool, diagnostic string) {
-	if logger := b.Logger; logger != nil {
-		logger.DEBUG("result", resultLog(instance, state, diagnostic))
-	}
-}
-
-// interface method called by mon when a destination needs to be probed - find the NAT address and probe that via the netns
-func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok bool, diagnostic string) {
-
-	vip := instance.Service.Address
-	rip := instance.Destination.Address
-	nat, ok := b.Client.NATAddress(vip, rip)
-
-	if !ok {
-		diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
-	} else {
-		ok, diagnostic = b.NetNS.Probe(nat, check)
-	}
-
-	if b.Logger != nil {
-		b.Logger.DEBUG("probe", probeLog(instance, nat, check, ok, diagnostic))
-	}
-
-	return ok, diagnostic
-}
-
-func (b *Balancer) Multicast(multicast string) {
-	go b.multicast_send(multicast)
-	go b.multicast_recv(multicast)
-}
-
-const maxDatagramSize = 1500
-
-func (b *Balancer) multicast_send(address string) {
-
-	addr, err := net.ResolveUDPAddr("udp", address)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn, err := net.DialUDP("udp", nil, addr)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	conn.SetWriteBuffer(maxDatagramSize * 100)
-
-	ticker := time.NewTicker(time.Millisecond * 10)
-
-	var buff [maxDatagramSize]byte
-
-	for {
-		select {
-		case <-ticker.C:
-			n := 0
-
-		read_flow:
-			f := b.Client.ReadFlow()
-			if len(f) > 0 {
-				buff[n] = uint8(len(f))
-
-				copy(buff[n+1:], f[:])
-				n += 1 + len(f)
-				if n < maxDatagramSize-100 {
-					goto read_flow
-				}
-			}
-
-			if n > 0 {
-				conn.Write(buff[:n])
-			}
-		}
-	}
-}
-
-func (b *Balancer) multicast_recv(address string) {
-	udp, err := net.ResolveUDPAddr("udp", address)
-
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	s := []string{`|`, `/`, `-`, `\`}
-	var x int
-
-	conn, err := net.ListenMulticastUDP("udp", nil, udp)
-
-	conn.SetReadBuffer(maxDatagramSize * 1000)
-
-	buff := make([]byte, maxDatagramSize)
-
-	for {
-		nread, _, err := conn.ReadFromUDP(buff)
-		fmt.Print(s[x%4] + "\b")
-		x++
-		if err == nil {
-			for n := 0; n+1 < nread; {
-				l := int(buff[n])
-				o := n + 1
-				n = o + l
-				if l > 0 && n <= nread {
-					b.Client.WriteFlow(buff[o:n])
-				}
-			}
-		}
-	}
-}
-
-func probeLog(instance mon.Instance, addr netip.Addr, check mon.Check, status bool, reason string) map[string]any {
-
-	kv := map[string]any{
-		"reason": reason,
-		"status": updown(status),
-		"proto":  proto(instance.Service.Protocol),
-		"saddr":  instance.Service.Address.String(),
-		"sport":  instance.Service.Port,
-		"daddr":  instance.Destination.Address.String(),
-		"dport":  instance.Destination.Port,
-		"probe":  check.Type,
-		"pport":  check.Port,
-		"paddr":  addr,
-	}
-
-	switch check.Type {
-	case "dns":
-		if check.Method {
-			kv["method"] = "tcp"
-		} else {
-			kv["method"] = "udp"
-		}
-	case "http":
-		fallthrough
-	case "https":
-		if check.Method {
-			kv["method"] = "HEAD"
-		} else {
-			kv["method"] = "GET"
-		}
-
-		if check.Host != "" {
-			kv["host"] = check.Host
-		}
-
-		if check.Path != "" {
-			kv["path"] = check.Path
-		}
-
-		if len(check.Expect) > 0 {
-			kv["expect"] = fmt.Sprintf("%v", check.Expect)
-		}
-	}
-
-	return kv
-}
-
-func notifyLog(instance mon.Instance, status bool) map[string]any {
-	return map[string]any{
-		"status": updown(status),
-		"proto":  proto(instance.Service.Protocol),
-		"saddr":  instance.Service.Address.String(),
-		"sport":  instance.Service.Port,
-		"daddr":  instance.Destination.Address.String(),
-		"dport":  instance.Destination.Port,
-	}
-}
-
-func resultLog(instance mon.Instance, status bool, diagnostic string) map[string]any {
-	r := notifyLog(instance, status)
-	r["diagnostic"] = diagnostic
-	return r
-}
-
-func proto(p uint8) string {
-	switch p {
-	case TCP:
-		return "tcp"
-	case UDP:
-		return "udp"
-	}
-	return fmt.Sprintf("%d", p)
 }
 
 func (b *Balancer) Stats(s xvs.Stats) (r Stats) {
@@ -352,4 +157,88 @@ func (b *Balancer) summary() (s Summary) {
 	s.VC5 = true
 
 	return
+}
+
+// interface method called by mon when a destination's heatlh status transitions up or down
+func (b *Balancer) Notify(instance mon.Instance, state bool) {
+	if logger := b.Logger; logger != nil {
+		logger.NOTICE("notify", notifyLog(instance, state))
+	}
+}
+
+// interface method called by mon every time a round of checks for a destination is completed
+func (b *Balancer) Result(instance mon.Instance, state bool, diagnostic string) {
+	// return // we log all probes anyway - no need for this
+	if logger := b.Logger; logger != nil {
+		logger.DEBUG("result", resultLog(instance, state, diagnostic))
+	}
+}
+
+func (b *Balancer) Check(instance mon.Instance, check string, round uint64, state bool, diagnostic string) {
+	// return // we log all probes anyway - no need for this
+	if logger := b.Logger; logger != nil {
+		logger.DEBUG("check", checkLog(instance, state, diagnostic, check, round))
+	}
+}
+
+// interface method called by mon when a destination needs to be probed - find the NAT address and probe that via the netns
+func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok bool, diagnostic string) {
+
+	vip := instance.Service.Address
+	rip := instance.Destination.Address
+	nat, ok := b.Client.NATAddress(vip, rip)
+
+	if !ok {
+		diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
+	} else {
+		ok, diagnostic = b.NetNS.Probe(nat, check)
+	}
+
+	if b.Logger != nil {
+		b.Logger.DEBUG("probe", probeLog(instance, nat, fmt.Sprint(check), ok, diagnostic))
+	}
+
+	return ok, diagnostic
+}
+
+func notifyLog(instance mon.Instance, status bool) map[string]any {
+
+	proto := func(p uint8) string {
+		switch instance.Service.Protocol {
+		case TCP:
+			return "tcp"
+		case UDP:
+			return "udp"
+		}
+		return fmt.Sprintf("%d", p)
+	}
+
+	return map[string]any{
+		"state": updown(status),
+		"proto": proto(instance.Service.Protocol),
+		"saddr": instance.Service.Address.String(),
+		"sport": instance.Service.Port,
+		"daddr": instance.Destination.Address.String(),
+		"dport": instance.Destination.Port,
+	}
+}
+
+func resultLog(instance mon.Instance, status bool, diagnostic string) map[string]any {
+	r := notifyLog(instance, status)
+	r["diagnostic"] = diagnostic
+	return r
+}
+
+func probeLog(instance mon.Instance, addr netip.Addr, check string, status bool, diagnostic string) map[string]any {
+	r := resultLog(instance, status, diagnostic)
+	r["check"] = check
+	r["paddr"] = addr
+	return r
+}
+
+func checkLog(instance mon.Instance, status bool, diagnostic string, check string, round uint64) map[string]any {
+	r := resultLog(instance, status, diagnostic)
+	r["check"] = check
+	r["round"] = round
+	return r
 }
