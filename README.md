@@ -12,12 +12,11 @@ If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
-## NOTICE
-
-The eBPF code doesn't seem to work properly on Ubuntu 22.04
-(5.15.0-101-generic kernel). I've got a working replacement undergoing
-testing currently, but it is missing a couple of features like the
-flow queue for sharing flows between servers. Should be ready for release soon.
+After a recent refactoring of the underlying XDP code this now works
+with the eBPF verifier on newer kernels, and seems to run fine on
+other architectures; tested on a Raspberry Pi, which according to
+`/sys/firmware/devicetree/base/model` is a "Raspberry Pi 3 Model B Rev
+1.2".
 
 ## Quickstart
 
@@ -41,10 +40,11 @@ A simple example on a server with a single, untagged ethernet interface:
 * Configure your network/client to send traffic for your VIP to the load balancer, either via BGP (see config file) or static routing
 
 It is almost certainly easier to use the binary from the latest Github
-release. This will have been tested in production so should be
-reliable. Ensure that your configuration is compatible with this
-version by using the config.pl script from the tagged release (or, of
-course, you can build your own JSON config however you prefer).
+release (compiled for x86-64). This will have been tested in
+production so should be reliable. Ensure that your configuration is
+compatible with this version by using the config.pl script from the
+tagged release (or, of course, you can build your own JSON config
+however you prefer).
 
 If you update the YAML config file and regenerate the JSON (`make
 config.json`) you can reload the new configuration by sending an a
@@ -70,6 +70,13 @@ vlans:
 Command line:
 
 `./vc5 -n -a 10.1.10.100 config.json enp130s0f0 enp130s0f1`
+
+The binary will detect your VLAN interfaces by looking for devices
+with IP addreses which are contained in the VLAN mapping in the
+configuration file. If you use separate untagged physical interfaces
+then this should now work transparently without any extra
+configuration, just list all of the interfaces on the command line so
+that the eBPF code is loaded into each of them.
 
 Because connection state is tracked on a per-core basis
 (BPF_MAP_TYPE_LRU_PERCPU_HASH), you should ensure that RSS ([Receive
