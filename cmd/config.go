@@ -127,6 +127,26 @@ func Load(file string) (*Config, error) {
 		return nil, err
 	}
 
+	if len(config.VLANs) != 0 {
+		for _, s := range config.Services {
+			for d, _ := range s.Destinations {
+
+				var ok bool
+
+				for _, p := range config.VLANs {
+					if p.Contains(d.Address) {
+						ok = true
+					}
+				}
+
+				if !ok {
+					return nil, fmt.Errorf("Destination server %s is not in a declared VLAN", d.Address)
+				}
+
+			}
+		}
+	}
+
 	return &config, nil
 }
 
@@ -339,8 +359,17 @@ func (p *Prefix) String() string {
 	return (*net.IPNet)(p).String()
 }
 
-func (p *Prefix) Contains(i net.IP) bool {
-	return (*net.IPNet)(p).Contains(i)
+func (p *Prefix) Contains(i netip.Addr) bool {
+	var ip net.IP
+	if i.Is4() {
+		t := i.As4()
+		ip = t[:]
+	} else if i.Is6() {
+		t := i.As16()
+		ip = t[:]
+	}
+
+	return (*net.IPNet)(p).Contains(ip)
 }
 
 func (p *Prefix) UnmarshalJSON(data []byte) error {
