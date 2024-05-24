@@ -84,6 +84,7 @@ func prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips 
 
 			for _, d := range s.Destinations {
 				real := fmt.Sprintf("%s:%d", d.Address, d.Port)
+				stat := d.Stats
 				up := zeroone(d.Up)
 
 				r = metric(r, p+`_backend_sessions{service="%s",name="%s",backend="%s"} %d`, serv, name, real, stat.Current)
