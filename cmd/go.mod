@@ -3,7 +3,7 @@ module vc5
 go 1.19
 
 require (
-	github.com/davidcoles/cue v0.0.11
+	github.com/davidcoles/cue v0.0.12
 	github.com/davidcoles/xvs v0.1.13
 	github.com/elastic/go-elasticsearch/v7 v7.17.10
 )
