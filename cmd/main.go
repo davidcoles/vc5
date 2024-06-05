@@ -164,7 +164,7 @@ func main() {
 
 	if err != nil {
 		logs.EMERG(F, "Couldn't start client:", err)
-		log.Fatal(err)
+		log.Fatal("Couldn't start client: ", err)
 	}
 
 	pool := bgp.NewPool(address.As4(), config.BGP, nil, logs.sub("bgp"))

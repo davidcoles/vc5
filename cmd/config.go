@@ -65,6 +65,7 @@ type Service struct {
 	Sticky bool `json:"sticky,omitempty"`
 
 	Scheduler string `json:"scheduler"`
+	Persist   uint32 `json:"persist"`
 }
 
 type services map[Tuple]Service
@@ -409,6 +410,7 @@ func (c *Config) parse() []cue.Service {
 			Protocol:  ipp.Protocol,
 			Required:  svc.Need,
 			Scheduler: svc.Scheduler,
+			Persist:   svc.Persist,
 			Sticky:    svc.Sticky,
 		}
 

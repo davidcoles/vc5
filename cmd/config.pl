@@ -100,6 +100,7 @@ sub services {
 	$defaults{_need} = key($s, 'need',        1)+0;
 	$defaults{_stic} = key($s, 'sticky',      JSON::false);
 	$defaults{_schd} = key($s, 'scheduler',   $scheduler);
+	$defaults{_pers} = key($s, 'persist',     undef);	
 	
 	my @virtual;
 	my @servers;
@@ -156,6 +157,7 @@ sub services {
 		$svc->{'name'}        = $p->{_name} if defined $p->{_name};
 		$svc->{'description'} = $p->{_desc} if defined $p->{_desc};
 		$svc->{'scheduler'}   = $p->{_schd} if defined $p->{_schd};
+		$svc->{'persist'}     = $p->{_pers}+0 if defined $p->{_pers} && $p->{_pers}+0 > 0;
 
 		my %rips;
 
@@ -344,6 +346,7 @@ sub service() {
 	_prot => $protocol,
 	_port => $port,
 	
+	_pers => key($policy, 'persist',     $defaults->{_pers}),
 	_schd => key($policy, 'scheduler',   $defaults->{_schd}),
 	_stic => key($policy, 'sticky',      $defaults->{_stic}),
 	_need => key($policy, 'need',        $defaults->{_need}),
