@@ -65,7 +65,8 @@ type Service struct {
 	Sticky bool `json:"sticky,omitempty"`
 
 	Scheduler string `json:"scheduler"`
-	Persist   uint32 `json:"persist"`
+	Persist   uint32 `json:"persist"`         // used in IPVS version
+	Reset     bool   `json:"reset,omitempty"` // used in IPVS version
 }
 
 type services map[Tuple]Service
@@ -412,6 +413,7 @@ func (c *Config) parse() []cue.Service {
 			Scheduler: svc.Scheduler,
 			Persist:   svc.Persist,
 			Sticky:    svc.Sticky,
+			Reset:     svc.Reset,
 		}
 
 		for ap, dst := range svc.Destinations {

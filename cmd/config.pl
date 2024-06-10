@@ -99,6 +99,7 @@ sub services {
 	$defaults{_desc} = key($s, 'description', undef);
 	$defaults{_need} = key($s, 'need',        1)+0;
 	$defaults{_stic} = key($s, 'sticky',      JSON::false);
+	$defaults{_rest} = key($s, 'reset',       JSON::false);
 	$defaults{_schd} = key($s, 'scheduler',   $scheduler);
 	$defaults{_pers} = key($s, 'persist',     undef);	
 	
@@ -152,12 +153,14 @@ sub services {
 		my $l4 = $p->{_prot} . ':' . $p->{_port};
 		my @p = %$p;
 
-		my $svc = { 'need' => $p->{_need}+0, 'sticky' => jsonbool($p->{_stic}) };
+		my $svc = { 'need' => $p->{_need}+0 };
 
 		$svc->{'name'}        = $p->{_name} if defined $p->{_name};
 		$svc->{'description'} = $p->{_desc} if defined $p->{_desc};
 		$svc->{'scheduler'}   = $p->{_schd} if defined $p->{_schd};
-		$svc->{'persist'}     = $p->{_pers}+0 if defined $p->{_pers} && $p->{_pers}+0 > 0;
+		$svc->{'persist'}     = $p->{_pers}+0 if defined $p->{_pers};
+		$svc->{'sticky'}      = jsonbool($p->{_stic}) if defined $p->{_stic};
+		$svc->{'reset'}       = jsonbool($p->{_rest}) if defined $p->{_rest};
 
 		my %rips;
 
@@ -349,6 +352,7 @@ sub service() {
 	_pers => key($policy, 'persist',     $defaults->{_pers}),
 	_schd => key($policy, 'scheduler',   $defaults->{_schd}),
 	_stic => key($policy, 'sticky',      $defaults->{_stic}),
+	_rest => key($policy, 'reset',       $defaults->{_rest}),
 	_need => key($policy, 'need',        $defaults->{_need}),
 	_name => key($policy, 'name',        $defaults->{_name}),
 	_desc => key($policy, 'description', $defaults->{_desc}),
