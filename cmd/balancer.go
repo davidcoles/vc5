@@ -104,6 +104,7 @@ func (b *Balancer) Destination(dst cue.Destination) mon.Destination {
 }
 
 func (b *Balancer) Dest(s xvs.Service, d xvs.Destination) mon.Destination {
+	// DSR means no port mapping - use port from the service rather then dest
 	return mon.Destination{Address: d.Address, Port: s.Port}
 }
 
