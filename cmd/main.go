@@ -59,7 +59,8 @@ func main() {
 	sock := flag.String("s", "", "socket") // used internally
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
-	untagged := flag.Bool("u", false, "Untagged VLAN mode")
+	//untagged := flag.Bool("u", false, "Untagged VLAN mode")
+	asn := flag.Uint("A", 0, "Autonomous system number for loopback peer")
 
 	flag.Parse()
 
@@ -104,9 +105,9 @@ func main() {
 		*native = true
 	}
 
-	if config.Untagged {
-		*untagged = true
-	}
+	//if config.Untagged {
+	//	*untagged = true
+	//}
 
 	if config.Webserver != "" {
 		*webserver = config.Webserver
@@ -152,12 +153,12 @@ func main() {
 	client := &xvs.Client{
 		Interfaces: nics,
 		Address:    address,
-		Redirect:   *untagged,
-		Native:     *native,
-		VLANs:      config.vlans(),
-		NAT:        true,
-		Share:      config.Multicast != "",
-		Debug:      &Debug{Log: logs.sub("xvs")},
+		//Redirect:   *untagged,
+		Native: *native,
+		VLANs:  config.vlans(),
+		NAT:    true,
+		Share:  config.Multicast != "",
+		Debug:  &Debug{Log: logs.sub("xvs")},
 	}
 
 	err = client.Start()
@@ -167,7 +168,13 @@ func main() {
 		log.Fatal("Couldn't start client: ", err)
 	}
 
-	pool := bgp.NewPool(address.As4(), config.BGP, nil, logs.sub("bgp"))
+	routerID := address.As4()
+
+	if *asn > 0 {
+		routerID = [4]byte{127, 0, 0, 1}
+	}
+
+	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn)), nil, logs.sub("bgp"))
 
 	if pool == nil {
 		log.Fatal("BGP pool fail")
@@ -359,7 +366,7 @@ func main() {
 		config.Address = *addr
 		config.Interfaces = nics
 		config.Native = *native
-		config.Untagged = *untagged
+		//config.Untagged = *untagged
 		config.Webserver = *webserver
 		config.Webroot = *webroot
 
@@ -448,7 +455,7 @@ func main() {
 				config = conf
 				client.UpdateVLANs(config.vlans())
 				director.Configure(config.parse())
-				pool.Configure(config.BGP)
+				pool.Configure(config.bgp(uint16(*asn)))
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)
