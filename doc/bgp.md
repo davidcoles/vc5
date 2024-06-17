@@ -3,7 +3,7 @@
 ## Loopback BGP mode
 
 If the `-A` flag is used to specify an autonomous system number then
-loopback BGP mode is enabled. This will override the confing file and
+loopback BGP mode is enabled. This will override the config file and
 connect to a local BGP peer on the 127.0.0.1 address to advertise
 VIPs. From there the prefixes can be re-advertised into your network
 by your chosen implementation.

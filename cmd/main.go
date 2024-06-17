@@ -59,7 +59,6 @@ func main() {
 	sock := flag.String("s", "", "socket") // used internally
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
-	//untagged := flag.Bool("u", false, "Untagged VLAN mode")
 	asn := flag.Uint("A", 0, "Autonomous system number for loopback peer")
 
 	flag.Parse()
@@ -105,10 +104,6 @@ func main() {
 		*native = true
 	}
 
-	//if config.Untagged {
-	//	*untagged = true
-	//}
-
 	if config.Webserver != "" {
 		*webserver = config.Webserver
 	}
@@ -153,12 +148,11 @@ func main() {
 	client := &xvs.Client{
 		Interfaces: nics,
 		Address:    address,
-		//Redirect:   *untagged,
-		Native: *native,
-		VLANs:  config.vlans(),
-		NAT:    true,
-		Share:  config.Multicast != "",
-		Debug:  &Debug{Log: logs.sub("xvs")},
+		Native:     *native,
+		VLANs:      config.vlans(),
+		NAT:        true,
+		Share:      config.Multicast != "",
+		Debug:      &Debug{Log: logs.sub("xvs")},
 	}
 
 	err = client.Start()
