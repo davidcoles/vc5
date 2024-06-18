@@ -60,6 +60,7 @@ func main() {
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
 	asn := flag.Uint("A", 0, "Autonomous system number for loopback peer")
+	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")
 
 	flag.Parse()
 
@@ -150,8 +151,8 @@ func main() {
 		Address:    address,
 		Native:     *native,
 		VLANs:      config.vlans(),
+		InitDelay:  uint8(*delay),
 		NAT:        true,
-		Share:      config.Multicast != "",
 		Debug:      &Debug{Log: logs.sub("xvs")},
 	}
 
