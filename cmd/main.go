@@ -59,8 +59,13 @@ func main() {
 	sock := flag.String("s", "", "socket") // used internally
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
-	asn := flag.Uint("A", 0, "Autonomous system number for loopback peer")
-	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")
+	asn := flag.Uint("A", 0, "Autonomous system number for loopback peer")  // experimental - may change
+	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces") // experimental - may change
+	flows := flag.Uint("F", 0, "Set maximum number of flows")               // experimental - may change
+
+	// Changing number of flows will only work on some kernels
+	// Not supported: 5.4.0-171-generic
+	// Supported: 5.15.0-112-generic
 
 	flag.Parse()
 
@@ -154,6 +159,7 @@ func main() {
 		InitDelay:  uint8(*delay),
 		NAT:        true,
 		Debug:      &Debug{Log: logs.sub("xvs")},
+		MaxFlows:   uint32(*flows),
 	}
 
 	err = client.Start()
