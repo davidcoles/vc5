@@ -92,9 +92,9 @@ type Config struct {
 	Interfaces []string      `json:"interfaces,omitempty"`
 }
 
-func (c *Config) bgp(asn uint16) map[string]bgp.Parameters {
+func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 	if asn > 0 {
-		return map[string]bgp.Parameters{"127.0.0.1": bgp.Parameters{ASNumber: asn, HoldTime: 4}}
+		return map[string]bgp.Parameters{"127.0.0.1": bgp.Parameters{ASNumber: asn, HoldTime: 4, Multiprotocol: mp}}
 	}
 
 	return c.BGP

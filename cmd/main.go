@@ -59,13 +59,14 @@ func main() {
 	sock := flag.String("s", "", "socket") // used internally
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
-	asn := flag.Uint("A", 0, "Autonomous system number for loopback peer")  // experimental - may change
-	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces") // experimental - may change
-	flows := flag.Uint("F", 0, "Set maximum number of flows")               // experimental - may change
+	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
+	mp := flag.Bool("M", false, "Use multiprotocol extensions on loopback BGP") // experimental - may change
+	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
+	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
 
 	// Changing number of flows will only work on some kernels
 	// Not supported: 5.4.0-171-generic
-	// Supported: 5.15.0-112-generic
+	// Supported: 5.15.0-112-generic, 6.6.28+rpt-rpi-v7
 
 	flag.Parse()
 
@@ -175,7 +176,7 @@ func main() {
 		routerID = [4]byte{127, 0, 0, 1}
 	}
 
-	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn)), nil, logs.sub("bgp"))
+	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn), *mp), nil, logs.sub("bgp"))
 
 	if pool == nil {
 		log.Fatal("BGP pool fail")
@@ -456,7 +457,7 @@ func main() {
 				config = conf
 				client.UpdateVLANs(config.vlans())
 				director.Configure(config.parse())
-				pool.Configure(config.bgp(uint16(*asn)))
+				pool.Configure(config.bgp(uint16(*asn), *mp))
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)
