@@ -239,6 +239,8 @@ sub expect {
     my($expect) = @_;
     my @expect;
 
+    return [ 0 ] if $expect eq 'any';
+    
     foreach (split(/\s+/, $expect)) {
 	my @val;
 	

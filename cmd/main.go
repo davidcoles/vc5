@@ -63,6 +63,7 @@ func main() {
 	mp := flag.Bool("M", false, "Use multiprotocol extensions on loopback BGP") // experimental - may change
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
 	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
+	cmd_path := flag.String("C", "", "Command channel path")                    // experimental - may change
 
 	// Changing number of flows will only work on some kernels
 	// Not supported: 5.4.0-171-generic
@@ -148,6 +149,18 @@ func main() {
 		go bgpListener(l, logs.sub("bgp"))
 	}
 
+	var cmd_sock net.Listener
+
+	if *cmd_path != "" {
+		os.Remove(*cmd_path)
+
+		cmd_sock, err = net.Listen("unix", *cmd_path)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	for _, i := range nics {
 		ethtool(i)
 	}
@@ -168,6 +181,10 @@ func main() {
 	if err != nil {
 		logs.EMERG(F, "Couldn't start client:", err)
 		log.Fatal("Couldn't start client: ", err)
+	}
+
+	if cmd_sock != nil {
+		go readCommands(cmd_sock, client, logs.sub("command"))
 	}
 
 	routerID := address.As4()

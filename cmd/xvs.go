@@ -32,6 +32,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"regexp"
 	"sync/atomic"
 	"time"
 
@@ -364,6 +365,60 @@ func multicast_recv(c Client, address string) {
 					c.WriteFlow(buff[o:n])
 				}
 			}
+		}
+	}
+}
+
+func readCommands(sock net.Listener, client Client, log *sub) {
+	// eg.: echo enp130s0f0 | socat - UNIX-CLIENT:/var/run/vc5
+
+	re := regexp.MustCompile(`\s+`)
+
+	for {
+		conn, err := sock.Accept()
+		if err != nil {
+			log.ERR("accept", err.Error())
+		} else {
+			go func() {
+				s := bufio.NewScanner(conn)
+
+				for s.Scan() {
+
+					line := s.Text()
+
+					var cmd []string
+
+					for _, s := range re.Split(line, -1) {
+						if s != "" {
+							cmd = append(cmd, s)
+						}
+					}
+
+					l := len(cmd)
+
+					if l < 1 {
+						continue
+					}
+
+					switch cmd[0] {
+					case "reattach":
+						if l != 2 {
+							fmt.Println("Usage: reattach <interface>")
+							continue
+						}
+
+						nic := cmd[1]
+						if err := client.ReattachBPF(nic); err != nil {
+							log.ERR(cmd[0], fmt.Sprintf("%s: %s\n", nic, err.Error()))
+						} else {
+							log.NOTICE(cmd[0], fmt.Sprintf("%s: OK\n", nic))
+						}
+
+					default:
+						log.ERR("unknown", fmt.Sprintf("Unknown command: %s", cmd[0]))
+					}
+				}
+			}()
 		}
 	}
 }
