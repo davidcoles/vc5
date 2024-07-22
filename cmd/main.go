@@ -278,7 +278,7 @@ func main() {
 			}
 
 			mutex.Lock()
-			vip = vipState(services, vip, logs)
+			vip = vipState(services, vip, config.priorities(), logs)
 			rib = adjRIBOut(vip, initialised)
 			mutex.Unlock()
 

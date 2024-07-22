@@ -97,6 +97,7 @@ sub services {
 	$defaults{_expc} = key($s, 'expect',      undef); # checks
 	$defaults{_name} = key($s, 'name',        undef);
 	$defaults{_desc} = key($s, 'description', undef);
+	$defaults{_prio} = key($s, 'priority',    undef);
 	$defaults{_need} = key($s, 'need',        1)+0;
 	$defaults{_stic} = key($s, 'sticky',      JSON::false);
 	$defaults{_rest} = key($s, 'reset',       JSON::false);
@@ -157,6 +158,7 @@ sub services {
 
 		$svc->{'name'}        = $p->{_name} if defined $p->{_name};
 		$svc->{'description'} = $p->{_desc} if defined $p->{_desc};
+		$svc->{'priority'}    = $p->{_prio} if defined $p->{_prio};
 		$svc->{'scheduler'}   = $p->{_schd} if defined $p->{_schd};
 		$svc->{'persist'}     = $p->{_pers}+0 if defined $p->{_pers};
 		$svc->{'sticky'}      = jsonbool($p->{_stic}) if defined $p->{_stic};
@@ -173,6 +175,10 @@ sub services {
 
 		if(!defined $opt{'n'} && $bind != $p->{_port}) {
 		    die "port mismatch! enable port mapping for non DSR with -n";
+		}
+
+		if(defined $svc->{'priority'} && $svc->{'priority'} !~ /^(critical|high|medium|low)$/) {
+		    die "Invalid priority: ".$svc->{'priority'}."\n";
 		}
 		
 		foreach my $s (sort keys %servers) {
@@ -358,6 +364,7 @@ sub service() {
 	_need => key($policy, 'need',        $defaults->{_need}),
 	_name => key($policy, 'name',        $defaults->{_name}),
 	_desc => key($policy, 'description', $defaults->{_desc}),
+	_prio => key($policy, 'priority',    $defaults->{_prio}),
 	_bind => key($policy, 'bind',        $port)+0,
 	_chks => [ checks($tcp, $port, $type, $policy, \%defaults, @checks) ],
     };
