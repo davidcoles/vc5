@@ -479,6 +479,7 @@ func main() {
 				client.UpdateVLANs(config.vlans())
 				director.Configure(config.parse())
 				pool.Configure(config.bgp(uint16(*asn), *mp))
+				logs.configure(conf.logging())
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)

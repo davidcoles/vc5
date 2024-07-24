@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	//"log"
-	"strings"
+	//"strings"
 	"sync"
 	"sync/atomic"
 	//"time"
@@ -108,6 +108,7 @@ func elastic(client *elasticsearch.Client, index, hostname string, fail *atomic.
 }
 */
 
+/*
 func indexRequest(ctx context.Context, client *elasticsearch.Client, id uint64, index, host, message string) bool {
 
 	//ctx := context.Background()
@@ -131,9 +132,11 @@ func indexRequest(ctx context.Context, client *elasticsearch.Client, id uint64, 
 	return false
 }
 
-func (e *Elasticsearch) start() error {
+*/
 
-	client, err := elasticsearch.NewClient(elasticsearch.Config{
+func (e *Elasticsearch) start() (err error) {
+
+	e.client, err = elasticsearch.NewClient(elasticsearch.Config{
 		Addresses: e.Addresses,
 		Username:  string(e.Username),
 		Password:  string(e.Password),
@@ -143,33 +146,29 @@ func (e *Elasticsearch) start() error {
 		return err
 	}
 
-	e.client = client
-
 	return nil
 }
 
 func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
-	ctx := context.Background()
-	//return indexRequest(ctx, e.client, id, e.Index, host, message)
+	if e.client == nil {
+		return false
+	}
 
+	ctx := context.Background()
 	req := esapi.IndexRequest{
 		Index:      e.Index,
 		DocumentID: fmt.Sprintf("%s-%d", host, id),
-		//Body:       strings.NewReader(message),
-		Body:    bytes.NewReader(body),
-		Refresh: "true",
+		Body:       bytes.NewReader(body),
+		Refresh:    "true",
 	}
 
 	res, err := req.Do(ctx, e.client)
 
-	if err == nil {
-		res.Body.Close()
-
-		if res.StatusCode == 201 {
-			return true
-		}
+	if err != nil {
+		return false
 	}
 
-	return false
+	defer res.Body.Close()
 
+	return res.StatusCode == 201
 }

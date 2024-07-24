@@ -109,6 +109,7 @@ func (l *logger) Stats() LogStats {
 func (l *logging) logging() Logging {
 	logging := Logging{
 		Elasticsearch: l.Elasticsearch,
+		Syslog:        l.Syslog,
 	}
 
 	logging.Webhooks = map[secret]Webhook{}

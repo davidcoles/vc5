@@ -22,8 +22,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/syslog"
 	"net/http"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -60,7 +62,7 @@ type ent struct {
 	json     []byte
 	time     time.Time
 
-	//es  *Elasticsearch
+	es  *Elasticsearch
 	typ string
 
 	history []entry
@@ -94,27 +96,33 @@ func deliver(dest string, js []byte) bool {
 
 	defer res.Body.Close()
 
-	if res.StatusCode != 200 {
-		fmt.Println(res.StatusCode)
+	// Slack returns 200, Teams returns 202
+	if res.StatusCode != 200 && res.StatusCode != 202 {
 		return false
 	}
 
 	return true
 }
 
-func webhook_(url string) chan ent {
+func webhook_(url string, fail *atomic.Uint64) chan ent {
 	c := make(chan ent, 1000)
 	go func() {
 		for l := range c {
 			// could batch here
 			m := payload(l)
-			deliver(url, m)
+			if !deliver(url, m) {
+				fail.Add(1)
+			}
 		}
 	}()
 	return c
 }
 
 func (s *sink) _log(lev uint8, facility string, a ...any) {
+
+	if lev == 0 {
+		fmt.Println(runtime.Caller(3))
+	}
 
 	now := time.Now()
 	text := fmt.Sprintln(a...)
@@ -168,6 +176,10 @@ func (s *sink) get(start index) (h []entry) {
 	return h
 }
 
+func (s *sink) configure(l Logging) {
+	s.l <- l
+}
+
 func (s *sink) start(l Logging) {
 	s.e = make(chan *ent, 1000)
 	s.l = make(chan Logging, 1000)
@@ -189,6 +201,7 @@ func (s *sink) start(l Logging) {
 		console := history()
 
 		config := func(l Logging) {
+			fmt.Println(l)
 
 			if l.Elasticsearch.Index == "" {
 				if elastic != nil {
@@ -198,13 +211,26 @@ func (s *sink) start(l Logging) {
 			} else {
 				if elastic == nil {
 					elastic = elasticsink(l.Elasticsearch, &(s.elastic))
+				} else {
+					select {
+					case elastic <- ent{es: &(l.Elasticsearch)}:
+					default: // get rid of blocking channel
+						close(elastic)
+						elastic = elasticsink(l.Elasticsearch, &(s.elastic))
+					}
 				}
 			}
 
 			for k, v := range l.Webhooks {
-				if _, ok := webhooks[k]; !ok {
-					v.ent = webhook_(string(k))
+				if x, ok := webhooks[k]; !ok {
+					// does not exist
+					v.ent = webhook_(string(k), &(s.webhook))
 					webhooks[k] = v
+				} else {
+					// does exist - update
+					x.Type = v.Type
+					x.Level = v.Level
+					webhooks[k] = x
 				}
 			}
 
@@ -214,6 +240,18 @@ func (s *sink) start(l Logging) {
 					delete(webhooks, k)
 				}
 			}
+
+			if l.Syslog {
+				if syslog == nil {
+					syslog = syslogSink()
+				}
+			} else {
+				if syslog != nil {
+					close(syslog)
+					syslog = nil
+				}
+			}
+
 		}
 
 		config(l)
@@ -228,6 +266,18 @@ func (s *sink) start(l Logging) {
 				e.id = id
 				id++
 
+				// send to console
+				if console != nil && e.level < DEBUG {
+					select {
+					case console <- e:
+					default:
+					}
+				}
+
+				if e.get != nil {
+					break // e.get is only used to get history info for the console - it's not a real log
+				}
+
 				// send to webhooks
 				for _, v := range webhooks {
 					if e.level <= v.Level {
@@ -235,27 +285,25 @@ func (s *sink) start(l Logging) {
 						select {
 						case v.ent <- *e: // copy by value, .typ won't get modified later
 						default:
+							s.webhook.Add(1)
 						}
 					}
 				}
 				// send to syslog
 				if syslog != nil {
-					select {
-					case syslog <- *e:
-					default:
+					if e.level == 0 {
+						fmt.Println("EMERG", e)
+					} else {
+						select {
+						case syslog <- *e:
+						default:
+						}
 					}
 				}
 				// send to elasticsearch
 				if elastic != nil {
 					select {
 					case elastic <- *e:
-					default:
-					}
-				}
-				// send to console
-				if console != nil && e.level < DEBUG {
-					select {
-					case console <- e:
 					default:
 					}
 				}
@@ -298,6 +346,58 @@ func adaptiveCard(lines ...string) ([]byte, error) {
 	}, " ", " ")
 }
 
+func syslogSink() chan ent {
+
+	s, err := syslog.New(syslog.LOG_WARNING, "")
+
+	if err != nil {
+		return nil
+	}
+
+	c := make(chan ent, 1000)
+
+	go func() {
+		orig := runtime.GOMAXPROCS(0)
+
+		runtime.GOMAXPROCS(orig + 1)
+
+		procs := runtime.GOMAXPROCS(0)
+
+		fmt.Println("procs", orig, procs)
+
+		runtime.LockOSThread()
+
+		defer func() {
+			runtime.UnlockOSThread()
+			defer runtime.GOMAXPROCS(orig)
+			defer fmt.Println("EXITING")
+		}()
+
+		for e := range c {
+			switch e.level {
+			case EMERG:
+				err = s.Emerg(e.text)
+			case ALERT:
+				err = s.Alert(e.text)
+			case CRIT:
+				err = s.Crit(e.text)
+			case ERR:
+				err = s.Err(e.text)
+			case WARNING:
+				err = s.Warning(e.text)
+			case NOTICE:
+				err = s.Notice(e.text)
+			case INFO:
+				err = s.Info(e.text)
+			case DEBUG:
+				err = s.Debug(e.text)
+			}
+		}
+	}()
+
+	return c
+}
+
 func elasticsink(es Elasticsearch, f *atomic.Uint64) chan ent {
 	c := make(chan ent, 1000)
 
@@ -309,8 +409,15 @@ func elasticsink(es Elasticsearch, f *atomic.Uint64) chan ent {
 
 	go func() {
 		for e := range c {
-			if !es.log(e.host, e.id, e.json) {
-				f.Add(1)
+
+			if e.es != nil {
+				// reconfigure
+				es = *(e.es)
+				fmt.Println("ELASTIC", es.start())
+			} else {
+				if !es.log(e.host, e.id, e.json) {
+					f.Add(1)
+				}
 			}
 		}
 	}()
@@ -370,7 +477,7 @@ func (s *sink) Stats() LogStats {
 }
 
 type logger interface {
-	EMERG(f string, a ...any)
+	//EMERG(f string, a ...any)
 	ALERT(f string, a ...any)
 	CRIT(f string, a ...any)
 	ERR(f string, a ...any)
