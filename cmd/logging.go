@@ -25,7 +25,7 @@ import (
 	"log/syslog"
 	"net/http"
 	"os"
-	"runtime"
+	//"runtime"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -45,7 +45,7 @@ type Logging struct {
 }
 
 type entry struct {
-	Indx index  `json:"indx"`
+	Indx uint64 `json:"indx"`
 	Time int64  `json:"time"`
 	Text string `json:"text"`
 }
@@ -65,7 +65,7 @@ type ent struct {
 
 	history []entry
 	get     chan bool
-	start   int64
+	start   uint64
 }
 
 type sink struct {
@@ -94,10 +94,6 @@ func (s *sink) Stats() LogStats {
 }
 
 func (s *sink) log(lev uint8, facility string, a ...any) {
-
-	if lev == 0 {
-		fmt.Println(runtime.Caller(3))
-	}
 
 	now := time.Now()
 	text := fmt.Sprintln(a...)
@@ -138,7 +134,7 @@ func (s *sink) log(lev uint8, facility string, a ...any) {
 	s.e <- &ent{text: text, json: js, level: lev, facility: facility, time: now}
 }
 
-func (s *sink) get(start index) (h []entry) {
+func (s *sink) get(start uint64) (h []entry) {
 	l := &ent{get: make(chan bool), start: start}
 	s.e <- l
 	<-l.get
@@ -263,6 +259,7 @@ func (s *sink) start(l Logging) {
 						}
 					}
 				}
+
 				// send to syslog
 				if syslog != nil {
 					select {
@@ -270,6 +267,7 @@ func (s *sink) start(l Logging) {
 					default:
 					}
 				}
+
 				// send to elasticsearch
 				if elastic != nil {
 					select {
@@ -362,7 +360,7 @@ func webhookSink(url string, fail *atomic.Uint64) chan ent {
 
 func syslogSink() chan ent {
 
-	s, err := syslog.New(syslog.LOG_WARNING, "")
+	s, err := syslog.New(syslog.LOG_WARNING|syslog.LOG_DAEMON, "")
 
 	if err != nil {
 		return nil
@@ -371,21 +369,24 @@ func syslogSink() chan ent {
 	c := make(chan ent, 1000)
 
 	go func() {
-		orig := runtime.GOMAXPROCS(0)
+		// This is probably overkill, but remember hearing something about syslog blocking threads.
+		/*
+			orig := runtime.GOMAXPROCS(0)
 
-		runtime.GOMAXPROCS(orig + 1)
+			runtime.GOMAXPROCS(orig + 1)
 
-		procs := runtime.GOMAXPROCS(0)
+			procs := runtime.GOMAXPROCS(0)
 
-		fmt.Println("procs", orig, procs)
+			fmt.Println("procs", orig, procs)
 
-		runtime.LockOSThread()
+			runtime.LockOSThread()
 
-		defer func() {
-			runtime.UnlockOSThread()
-			defer runtime.GOMAXPROCS(orig)
-			defer fmt.Println("EXITING")
-		}()
+			defer func() {
+				runtime.UnlockOSThread()
+				defer runtime.GOMAXPROCS(orig)
+				defer fmt.Println("EXITING")
+			}()
+		*/
 
 		for e := range c {
 			switch e.level {
@@ -459,7 +460,7 @@ func history() chan *ent {
 				e.history = s // s will be in order of newest to oldest
 				close(e.get)
 			} else {
-				history = append(history, entry{Indx: int64(e.id), Text: e.text, Time: e.time.Unix()})
+				history = append(history, entry{Indx: e.id, Text: e.text, Time: e.time.Unix()})
 				for len(history) > 1000 {
 					history = history[1:]
 				}

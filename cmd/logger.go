@@ -35,7 +35,6 @@ const (
 
 type KV = map[string]any
 
-type index = int64
 type secret string
 
 func (s secret) MarshalText() ([]byte, error) { return []byte("************"), nil }
