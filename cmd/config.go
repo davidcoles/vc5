@@ -87,11 +87,15 @@ type Config struct {
 	Multicast  string        `json:"multicast,omitempty"`
 	Webserver  string        `json:"webserver,omitempty"`
 	Webroot    string        `json:"webroot,omitempty"`
-	Logging    logger        `json:"logging,omitempty"`
+	Logging    logging       `json:"logging,omitempty"`
 	Native     bool          `json:"native,omitempty"`
 	Untagged   bool          `json:"untagged,omitempty"`
 	Address    string        `json:"address,omitempty"`
 	Interfaces []string      `json:"interfaces,omitempty"`
+}
+
+func (c *Config) logging() Logging {
+	return c.Logging.logging()
 }
 
 func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {

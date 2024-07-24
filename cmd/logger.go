@@ -19,17 +19,17 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"log"
-	"log/syslog"
-	"net/http"
-	"os"
-	"sort"
-	"strings"
-	"sync"
-	"time"
+	//"bytes"
+	//"encoding/json"
+	//"fmt"
+	//"log"
+	//"log/syslog"
+	//"net/http"
+	//"os"
+	//"sort"
+	//"strings"
+	//"sync"
+	//"time"
 
 	"github.com/davidcoles/cue/bgp"
 )
@@ -45,7 +45,7 @@ const (
 	DEBUG   = 7
 )
 
-var HOSTNAME string
+//var HOSTNAME string
 
 type KV = map[string]any
 
@@ -60,25 +60,28 @@ type secret string
 func (s secret) MarshalText() ([]byte, error) { return []byte("************"), nil }
 func (s *secret) String() string              { return "************" }
 
-type logger struct {
+type logging struct {
 	Syslog        bool          `json:"syslog,omitempty"`
 	Slack         secret        `json:"slack,omitempty"`
 	Teams         secret        `json:"teams,omitempty"`
 	Alert         uint8         `json:"alert,omitempty"`
 	Elasticsearch Elasticsearch `json:"elasticsearch,omitempty"`
 
-	mutex   sync.Mutex
-	index   index
-	count   uint64
-	history []entry
+	//mutex   sync.Mutex
+	//index   index
+	//count   uint64
+	//history []entry
 
-	slack  chan string
-	teams  chan string
-	syslog *syslog.Writer
+	//slack  chan string
+	//teams  chan string
+	//syslog *syslog.Writer
+
+	//sink sink
 }
 
 type index = int64
 
+/*
 var syslogger *syslog.Writer
 
 func init() {
@@ -87,15 +90,43 @@ func init() {
 		HOSTNAME = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 }
+*/
 
 type LogStats struct {
-	ElasticsearchErrors uint64 `json:"elasticsearch_errors,omitempty"`
+	//ElasticsearchErrors uint64 `json:"elasticsearch_errors,omitempty"`
+	ElasticsearchErrors uint64 `json:"elasticsearch_errors"`
+	WebhookErrors       uint64 `json:"webhook_errors"`
 }
 
+/*
 func (l *logger) Stats() LogStats {
 	return LogStats{
 		ElasticsearchErrors: l.Elasticsearch.Fail(),
 	}
+}
+*/
+
+func (l *logging) logging() Logging {
+	logging := Logging{
+		Elasticsearch: l.Elasticsearch,
+	}
+
+	logging.Webhooks = map[secret]Webhook{}
+
+	if l.Teams != "" {
+		logging.Webhooks[l.Teams] = Webhook{Level: l.Alert, Type: "teams"}
+	}
+
+	if l.Slack != "" {
+		logging.Webhooks[l.Slack] = Webhook{Level: l.Alert, Type: "slack"}
+	}
+
+	return logging
+}
+
+/*
+func (l *logger) start() {
+	l.sink.start(l.logging())
 }
 
 func (l *logger) console(text string) {
@@ -118,6 +149,10 @@ func (l *logger) console(text string) {
 }
 
 func (l *logger) log(lev uint8, f string, a ...any) {
+
+	l.sink.log(lev, f, a...)
+
+	return
 
 	text := fmt.Sprintln(a...)
 
@@ -320,8 +355,14 @@ func webhook(dest secret, text string) bool {
 
 	return true
 }
+*/
 
+/*
 func (l *logger) get(start index) (s []entry) {
+	return l.sink.get(start)
+}
+
+func (l *logger) xget(start index) (s []entry) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
@@ -339,6 +380,7 @@ func (l *logger) get(start index) (s []entry) {
 
 	return
 }
+*/
 
 func level(l uint8) string {
 	a := []string{"EMERG", "ALERT", "CRIT", "ERR", "WARNING", "NOTICE", "INFO", "DEBUG"}
@@ -350,6 +392,7 @@ func level(l uint8) string {
 	return "UNKNOWN"
 }
 
+/*
 func (l *logger) sub(f string) *sub { return &sub{parent: l, facility: f} }
 
 func (l *logger) EMERG(s string, a ...any)   { l.log(EMERG, s, a...) }
@@ -360,9 +403,15 @@ func (l *logger) WARNING(s string, a ...any) { l.log(WARNING, s, a...) }
 func (l *logger) NOTICE(s string, a ...any)  { l.log(NOTICE, s, a...) }
 func (l *logger) INFO(s string, a ...any)    { l.log(INFO, s, a...) }
 func (l *logger) DEBUG(s string, a ...any)   { l.log(DEBUG, s, a...) }
+*/
+
+type parent interface {
+	log(uint8, string, ...any)
+}
 
 type sub struct {
-	parent   *logger
+	//parent   *logger
+	parent   parent
 	facility string
 }
 
@@ -393,4 +442,5 @@ func (l *sub) BGPSession(peer string, local bool, reason string) {
 	}
 }
 
-type Logger = *sub
+//type Logger = *sub
+type Logger = logger

@@ -89,7 +89,11 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := &(config.Logging)
+	//logs := &(config.Logging)
+	//logs.start()
+
+	logs := &sink{}
+	logs.start(config.logging())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 

@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
+	//"errors"
+	"bytes"
 	"fmt"
 	//"log"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
+	//"time"
 
 	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v7/esapi"
@@ -30,10 +31,13 @@ type Elasticsearch struct {
 	fail    atomic.Uint64
 }
 
+/*
 func (e *Elasticsearch) Fail() uint64 {
 	return e.fail.Load()
 }
+*/
 
+/*
 func (e *Elasticsearch) log(l string, hostname string) (err error) {
 
 	e.mutex.Lock()
@@ -79,7 +83,9 @@ func (e *Elasticsearch) log(l string, hostname string) (err error) {
 
 	return nil
 }
+*/
 
+/*
 func elastic(client *elasticsearch.Client, index, hostname string, fail *atomic.Uint64) chan string {
 
 	id := uint64(time.Now().UnixNano())
@@ -100,6 +106,7 @@ func elastic(client *elasticsearch.Client, index, hostname string, fail *atomic.
 
 	return in
 }
+*/
 
 func indexRequest(ctx context.Context, client *elasticsearch.Client, id uint64, index, host, message string) bool {
 
@@ -122,4 +129,47 @@ func indexRequest(ctx context.Context, client *elasticsearch.Client, id uint64, 
 	}
 
 	return false
+}
+
+func (e *Elasticsearch) start() error {
+
+	client, err := elasticsearch.NewClient(elasticsearch.Config{
+		Addresses: e.Addresses,
+		Username:  string(e.Username),
+		Password:  string(e.Password),
+	})
+
+	if err != nil {
+		return err
+	}
+
+	e.client = client
+
+	return nil
+}
+
+func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
+	ctx := context.Background()
+	//return indexRequest(ctx, e.client, id, e.Index, host, message)
+
+	req := esapi.IndexRequest{
+		Index:      e.Index,
+		DocumentID: fmt.Sprintf("%s-%d", host, id),
+		//Body:       strings.NewReader(message),
+		Body:    bytes.NewReader(body),
+		Refresh: "true",
+	}
+
+	res, err := req.Do(ctx, e.client)
+
+	if err == nil {
+		res.Body.Close()
+
+		if res.StatusCode == 201 {
+			return true
+		}
+	}
+
+	return false
+
 }

@@ -179,7 +179,8 @@ func vipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
 	return
 }
 
-func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs *logger) map[netip.Addr]State {
+//func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs *logger) map[netip.Addr]State {
+func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs logger) map[netip.Addr]State {
 	facility := "vips"
 
 	rib := map[netip.Addr]bool{}
