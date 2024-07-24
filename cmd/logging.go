@@ -44,12 +44,10 @@ type Logging struct {
 	Syslog        bool               `json:"syslog,omitempty"`
 }
 
-type sink struct {
-	e chan *ent
-	l chan Logging
-
-	webhook atomic.Uint64
-	elastic atomic.Uint64
+type entry struct {
+	Indx index  `json:"indx"`
+	Time int64  `json:"time"`
+	Text string `json:"text"`
 }
 
 type ent struct {
@@ -70,55 +68,32 @@ type ent struct {
 	start   int64
 }
 
-func payload(l ent) []byte {
-	switch l.typ {
-	case "teams":
-		js, _ := adaptiveCard(fmt.Sprintf("%s %s[%s]:", l.host, l.facility, level(l.level)), l.text)
-		return js
-	case "slack":
-		fallthrough
-	default:
-		js, _ := simpleMessage(fmt.Sprintf("%s %s[%s]: %s", l.host, l.facility, level(l.level), l.text))
-		return js
-	}
+type sink struct {
+	e chan *ent
+	l chan Logging
 
-	return nil
+	webhook atomic.Uint64
+	elastic atomic.Uint64
 }
 
-func deliver(dest string, js []byte) bool {
+func (s *sink) sub(f string) *sub          { return &sub{parent: s, facility: f} }
+func (s *sink) EMERG(f string, a ...any)   { s.log(EMERG, f, a...) }
+func (s *sink) ALERT(f string, a ...any)   { s.log(ALERT, f, a...) }
+func (s *sink) CRIT(f string, a ...any)    { s.log(CRIT, f, a...) }
+func (s *sink) ERR(f string, a ...any)     { s.log(ERR, f, a...) }
+func (s *sink) WARNING(f string, a ...any) { s.log(WARNING, f, a...) }
+func (s *sink) NOTICE(f string, a ...any)  { s.log(NOTICE, f, a...) }
+func (s *sink) INFO(f string, a ...any)    { s.log(INFO, f, a...) }
+func (s *sink) DEBUG(f string, a ...any)   { s.log(DEBUG, f, a...) }
 
-	res, err := http.Post(string(dest), "application/json", bytes.NewReader(js))
-
-	if err != nil {
-		fmt.Println(err)
-		return false
+func (s *sink) Stats() LogStats {
+	return LogStats{
+		ElasticsearchErrors: s.elastic.Load(),
+		WebhookErrors:       s.webhook.Load(),
 	}
-
-	defer res.Body.Close()
-
-	// Slack returns 200, Teams returns 202
-	if res.StatusCode != 200 && res.StatusCode != 202 {
-		return false
-	}
-
-	return true
 }
 
-func webhook_(url string, fail *atomic.Uint64) chan ent {
-	c := make(chan ent, 1000)
-	go func() {
-		for l := range c {
-			// could batch here
-			m := payload(l)
-			if !deliver(url, m) {
-				fail.Add(1)
-			}
-		}
-	}()
-	return c
-}
-
-func (s *sink) _log(lev uint8, facility string, a ...any) {
+func (s *sink) log(lev uint8, facility string, a ...any) {
 
 	if lev == 0 {
 		fmt.Println(runtime.Caller(3))
@@ -169,7 +144,7 @@ func (s *sink) get(start index) (h []entry) {
 	<-l.get
 	//return l.history
 	h = l.history
-	// reverse h ... simpler to do thing in Javascript, perhaps?
+	// reverse h ... simpler to do this in Javascript, perhaps?
 	for i, j := 0, len(h)-1; i < j; i, j = i+1, j-1 {
 		h[i], h[j] = h[j], h[i]
 	}
@@ -201,7 +176,6 @@ func (s *sink) start(l Logging) {
 		console := history()
 
 		config := func(l Logging) {
-			fmt.Println(l)
 
 			if l.Elasticsearch.Index == "" {
 				if elastic != nil {
@@ -210,13 +184,13 @@ func (s *sink) start(l Logging) {
 				}
 			} else {
 				if elastic == nil {
-					elastic = elasticsink(l.Elasticsearch, &(s.elastic))
+					elastic = elasticSink(l.Elasticsearch, &(s.elastic))
 				} else {
 					select {
 					case elastic <- ent{es: &(l.Elasticsearch)}:
 					default: // get rid of blocking channel
 						close(elastic)
-						elastic = elasticsink(l.Elasticsearch, &(s.elastic))
+						elastic = elasticSink(l.Elasticsearch, &(s.elastic))
 					}
 				}
 			}
@@ -224,7 +198,7 @@ func (s *sink) start(l Logging) {
 			for k, v := range l.Webhooks {
 				if x, ok := webhooks[k]; !ok {
 					// does not exist
-					v.ent = webhook_(string(k), &(s.webhook))
+					v.ent = webhookSink(string(k), &(s.webhook))
 					webhooks[k] = v
 				} else {
 					// does exist - update
@@ -291,13 +265,9 @@ func (s *sink) start(l Logging) {
 				}
 				// send to syslog
 				if syslog != nil {
-					if e.level == 0 {
-						fmt.Println("EMERG", e)
-					} else {
-						select {
-						case syslog <- *e:
-						default:
-						}
+					select {
+					case syslog <- *e:
+					default:
 					}
 				}
 				// send to elasticsearch
@@ -305,6 +275,7 @@ func (s *sink) start(l Logging) {
 					select {
 					case elastic <- *e:
 					default:
+						s.elastic.Add(1)
 					}
 				}
 			}
@@ -344,6 +315,49 @@ func adaptiveCard(lines ...string) ([]byte, error) {
 			},
 		},
 	}, " ", " ")
+}
+
+func payload(l ent) []byte {
+	switch l.typ {
+	case "teams":
+		js, _ := adaptiveCard(fmt.Sprintf("%s %s[%s]:", l.host, l.facility, level(l.level)), l.text)
+		return js
+	case "slack":
+		fallthrough
+	default:
+		js, _ := simpleMessage(fmt.Sprintf("%s %s[%s]: %s", l.host, l.facility, level(l.level), l.text))
+		return js
+	}
+
+	return nil
+}
+
+func deliver(dest string, js []byte) bool {
+
+	res, err := http.Post(string(dest), "application/json", bytes.NewReader(js))
+
+	if err != nil {
+		return false
+	}
+
+	defer res.Body.Close()
+
+	// Slack returns 200, Teams returns 202 - return true if either of these
+	return res.StatusCode == 200 || res.StatusCode == 202
+}
+
+func webhookSink(url string, fail *atomic.Uint64) chan ent {
+	c := make(chan ent, 1000)
+	go func() {
+		for l := range c {
+			// could batch here
+			m := payload(l)
+			if !deliver(url, m) {
+				fail.Add(1)
+			}
+		}
+	}()
+	return c
 }
 
 func syslogSink() chan ent {
@@ -398,7 +412,7 @@ func syslogSink() chan ent {
 	return c
 }
 
-func elasticsink(es Elasticsearch, f *atomic.Uint64) chan ent {
+func elasticSink(es Elasticsearch, f *atomic.Uint64) chan ent {
 	c := make(chan ent, 1000)
 
 	err := es.start()
@@ -410,10 +424,9 @@ func elasticsink(es Elasticsearch, f *atomic.Uint64) chan ent {
 	go func() {
 		for e := range c {
 
-			if e.es != nil {
-				// reconfigure
+			if e.es != nil { // reconfigure
 				es = *(e.es)
-				fmt.Println("ELASTIC", es.start())
+				es.start()
 			} else {
 				if !es.log(e.host, e.id, e.json) {
 					f.Add(1)
@@ -429,10 +442,9 @@ func history() chan *ent {
 	c := make(chan *ent, 1000)
 
 	go func() {
-		var history []entry
+		var history []entry // oldest log entry first
 
 		for e := range c {
-
 			if e.get != nil {
 				// find entries newer than l.start
 				var s []entry
@@ -444,7 +456,7 @@ func history() chan *ent {
 					}
 					s = append(s, h)
 				}
-				e.history = s
+				e.history = s // s will be in order of newest to oldest
 				close(e.get)
 			} else {
 				history = append(history, entry{Indx: int64(e.id), Text: e.text, Time: e.time.Unix()})
@@ -458,25 +470,7 @@ func history() chan *ent {
 	return c
 }
 
-func (s *sink) log(l uint8, f string, a ...any) { s._log(l, f, a...) }
-func (s *sink) sub(f string) *sub               { return &sub{parent: s, facility: f} }
-func (s *sink) EMERG(f string, a ...any)        { s.log(EMERG, f, a...) }
-func (s *sink) ALERT(f string, a ...any)        { s.log(ALERT, f, a...) }
-func (s *sink) CRIT(f string, a ...any)         { s.log(CRIT, f, a...) }
-func (s *sink) ERR(f string, a ...any)          { s.log(ERR, f, a...) }
-func (s *sink) WARNING(f string, a ...any)      { s.log(WARNING, f, a...) }
-func (s *sink) NOTICE(f string, a ...any)       { s.log(NOTICE, f, a...) }
-func (s *sink) INFO(f string, a ...any)         { s.log(INFO, f, a...) }
-func (s *sink) DEBUG(f string, a ...any)        { s.log(DEBUG, f, a...) }
-
-func (s *sink) Stats() LogStats {
-	return LogStats{
-		ElasticsearchErrors: s.elastic.Load(),
-		WebhookErrors:       s.webhook.Load(),
-	}
-}
-
-type logger interface {
+type Logger interface {
 	//EMERG(f string, a ...any)
 	ALERT(f string, a ...any)
 	CRIT(f string, a ...any)
