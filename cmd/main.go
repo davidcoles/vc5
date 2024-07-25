@@ -89,7 +89,11 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := &(config.Logging)
+	//logs := &(config.Logging)
+	//logs.start()
+
+	logs := &sink{}
+	logs.start(config.logging())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -278,7 +282,7 @@ func main() {
 			}
 
 			mutex.Lock()
-			vip = vipState(services, vip, logs)
+			vip = vipState(services, vip, config.priorities(), logs)
 			rib = adjRIBOut(vip, initialised)
 			mutex.Unlock()
 
@@ -315,7 +319,7 @@ func main() {
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
 
 		start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
-		logs := logs.get(index(start))
+		logs := logs.get(start)
 		js, err := json.MarshalIndent(&logs, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -475,6 +479,7 @@ func main() {
 				client.UpdateVLANs(config.vlans())
 				director.Configure(config.parse())
 				pool.Configure(config.bgp(uint16(*asn), *mp))
+				logs.configure(conf.logging())
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)

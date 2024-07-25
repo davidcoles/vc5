@@ -52,7 +52,8 @@ type reply struct {
 }
 
 // spawn a server (specified by args) which runs in the network namespace - if it dies then restart it
-func spawn(logs *logger, netns string, args ...string) {
+//func spawn(logs *logger, netns string, args ...string) {
+func spawn(logs Logger, netns string, args ...string) {
 	F := "netns"
 	for {
 		logs.DEBUG(F, "Spawning daemon", args)

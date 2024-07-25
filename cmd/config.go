@@ -54,11 +54,13 @@ type Service struct {
 	// A short description of the service
 	Description string `json:"description,omitempty"`
 
-	// The minimum number of real servers which need to be health to consider this service viable
+	// critical, high, medium or low (default is critical)
+	Priority priority `json:"priority"`
+
+	// The minimum number of real servers which need to be healthy to consider this service viable
 	Need uint8 `json:"need,omitempty"`
 
-	// The set of backend server addresses and corresponding healthchecks which comprise this service
-	//RIPs map[string]Checks `json:"rips,omitempty"`
+	// Backend servers and corresponding health checks
 	Destinations map[ipport]Real `json:"reals,omitempty"`
 
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
@@ -85,11 +87,15 @@ type Config struct {
 	Multicast  string        `json:"multicast,omitempty"`
 	Webserver  string        `json:"webserver,omitempty"`
 	Webroot    string        `json:"webroot,omitempty"`
-	Logging    logger        `json:"logging,omitempty"`
+	Logging    logging       `json:"logging,omitempty"`
 	Native     bool          `json:"native,omitempty"`
 	Untagged   bool          `json:"untagged,omitempty"`
 	Address    string        `json:"address,omitempty"`
 	Interfaces []string      `json:"interfaces,omitempty"`
+}
+
+func (c *Config) logging() Logging {
+	return c.Logging.logging()
 }
 
 func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {
@@ -108,6 +114,26 @@ func (c *Config) vlans() map[uint16]net.IPNet {
 	}
 
 	return ret
+}
+
+func (c *Config) priorities() map[netip.Addr]priority {
+
+	priorities := map[netip.Addr]priority{}
+
+	for k, v := range c.Services {
+		p, ok := priorities[k.Address]
+
+		if !ok {
+			p = LOW
+			priorities[k.Address] = p
+		}
+
+		if v.Priority < p {
+			priorities[k.Address] = v.Priority
+		}
+	}
+
+	return priorities
 }
 
 // Reads the load-balancer configuration from a JSON file. Returns a
@@ -464,4 +490,44 @@ func (p protocol) string() string {
 		return "udp"
 	}
 	return fmt.Sprintf("%d", p)
+}
+
+type priority uint8
+
+const CRITICAL = 0
+const HIGH = 1
+const MEDIUM = 2
+const LOW = 3
+
+func (p *priority) UnmarshalText(data []byte) error {
+
+	text := string(data)
+
+	switch text {
+	case "critical":
+		*p = CRITICAL
+	case "high":
+		*p = HIGH
+	case "medium":
+		*p = MEDIUM
+	case "low":
+		*p = LOW
+	default:
+		return errors.New("Invalid prority")
+	}
+	return nil
+}
+
+func (p priority) MarshalText() ([]byte, error) {
+	switch p {
+	case CRITICAL:
+		return []byte("critcal"), nil
+	case HIGH:
+		return []byte("high"), nil
+	case MEDIUM:
+		return []byte("medium"), nil
+	case LOW:
+		return []byte("low"), nil
+	}
+	return nil, errors.New("Invalid prority")
 }

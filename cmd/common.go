@@ -179,8 +179,9 @@ func vipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
 	return
 }
 
-func vipState(services []cue.Service, old map[netip.Addr]State, logs *logger) map[netip.Addr]State {
-	F := "vips"
+//func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs *logger) map[netip.Addr]State {
+func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
+	facility := "vips"
 
 	rib := map[netip.Addr]bool{}
 	new := map[netip.Addr]State{}
@@ -190,19 +191,32 @@ func vipState(services []cue.Service, old map[netip.Addr]State, logs *logger) ma
 	}
 
 	for _, v := range cue.AllVIPs(services) {
+		p, _ := priorities[v]
+		log := logs.ERR
+
+		switch p {
+		case CRITICAL:
+			log = logs.ERR
+		case HIGH:
+			log = logs.WARNING
+		case MEDIUM:
+			log = logs.NOTICE
+		case LOW:
+			log = logs.INFO
+		}
 
 		if o, ok := old[v]; ok {
 			up, _ := rib[v]
 
 			if o.up != up {
 				new[v] = State{up: up, time: time.Now()}
-				logs.WARNING(F, KV{"vip": v, "state": updown(up), "event": "vip"})
+				log(facility, KV{"vip": v, "state": updown(up), "event": "vip"})
 			} else {
 				new[v] = o
 			}
 
 		} else {
-			logs.NOTICE(F, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
+			log(facility, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
 			new[v] = State{up: rib[v], time: time.Now()}
 		}
 	}
