@@ -30,10 +30,70 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/davidcoles/cue/bgp"
 )
 
+const (
+	EMERG   = 0
+	ALERT   = 1
+	CRIT    = 2
+	ERR     = 3
+	WARNING = 4
+	NOTICE  = 5
+	INFO    = 6
+	DEBUG   = 7
+)
+
+// old config, to be deprecated
+type logging struct {
+	Syslog        bool          `json:"syslog,omitempty"`
+	Slack         secret        `json:"slack,omitempty"`
+	Teams         secret        `json:"teams,omitempty"`
+	Alert         level         `json:"alert,omitempty"`
+	Elasticsearch Elasticsearch `json:"elasticsearch,omitempty"`
+}
+
+func (l *logging) logging() Logging {
+	logging := Logging{
+		Elasticsearch: l.Elasticsearch,
+		Syslog:        l.Syslog,
+	}
+
+	logging.Webhooks = map[secret]Webhook{}
+
+	if l.Teams != "" {
+		logging.Webhooks[l.Teams] = Webhook{Level: l.Alert, Type: "teams"}
+	}
+
+	if l.Slack != "" {
+		logging.Webhooks[l.Slack] = Webhook{Level: l.Alert, Type: "slack"}
+	}
+
+	return logging
+}
+
+type KV = map[string]any
+
+type secret string
+
+func (s secret) MarshalText() ([]byte, error) { return []byte("************"), nil }
+func (s *secret) String() string              { return "************" }
+
+type level uint8
+
+func (l level) String() string {
+	a := []string{"EMERG", "ALERT", "CRIT", "ERR", "WARNING", "NOTICE", "INFO", "DEBUG"}
+
+	if int(l) < len(a) {
+		return a[l]
+	}
+
+	return "UNKNOWN"
+}
+
 type Webhook struct {
-	Level uint8  `json:"level,omitempty"`
+	Level level  `json:"level,omitempty"`
 	Type  string `json:"type,omitempty"`
 	ent   chan ent
 }
@@ -54,7 +114,7 @@ type ent struct {
 	id   uint64
 	host string
 
-	level    uint8
+	level    level
 	facility string
 	text     string
 	json     []byte
@@ -86,6 +146,11 @@ func (s *sink) NOTICE(f string, a ...any)  { s.log(NOTICE, f, a...) }
 func (s *sink) INFO(f string, a ...any)    { s.log(INFO, f, a...) }
 func (s *sink) DEBUG(f string, a ...any)   { s.log(DEBUG, f, a...) }
 
+type LogStats struct {
+	ElasticsearchErrors uint64 `json:"elasticsearch_errors"`
+	WebhookErrors       uint64 `json:"webhook_errors"`
+}
+
 func (s *sink) Stats() LogStats {
 	return LogStats{
 		ElasticsearchErrors: s.elastic.Load(),
@@ -94,6 +159,7 @@ func (s *sink) Stats() LogStats {
 }
 
 func (s *sink) log(lev uint8, facility string, a ...any) {
+	level := level(lev)
 
 	now := time.Now()
 	text := fmt.Sprintln(a...)
@@ -126,12 +192,12 @@ func (s *sink) log(lev uint8, facility string, a ...any) {
 	}
 
 	kv["date"] = now.UnixNano() / int64(time.Millisecond)
-	kv["level"] = level(lev)
+	kv["level"] = level.String()
 	kv["facility"] = facility
 
 	js, _ := json.Marshal(kv)
 
-	s.e <- &ent{text: text, json: js, level: lev, facility: facility, time: now}
+	s.e <- &ent{text: text, json: js, level: level, facility: facility, time: now}
 }
 
 func (s *sink) get(start uint64) (h []entry) {
@@ -480,4 +546,39 @@ type Logger interface {
 	NOTICE(f string, a ...any)
 	INFO(f string, a ...any)
 	DEBUG(f string, a ...any)
+}
+
+type parent interface {
+	log(uint8, string, ...any)
+}
+
+type sub struct {
+	parent   parent
+	facility string
+}
+
+func (l *sub) log(n uint8, s string, a ...any) { l.parent.log(n, l.facility+"."+s, a...) }
+func (l *sub) EMERG(s string, a ...any)        { l.log(EMERG, s, a...) }
+func (l *sub) ALERT(s string, a ...any)        { l.log(ALERT, s, a...) }
+func (l *sub) CRIT(s string, a ...any)         { l.log(CRIT, s, a...) }
+func (l *sub) ERR(s string, a ...any)          { l.log(ERR, s, a...) }
+func (l *sub) WARNING(s string, a ...any)      { l.log(WARNING, s, a...) }
+func (l *sub) NOTICE(s string, a ...any)       { l.log(NOTICE, s, a...) }
+func (l *sub) INFO(s string, a ...any)         { l.log(INFO, s, a...) }
+func (l *sub) DEBUG(s string, a ...any)        { l.log(DEBUG, s, a...) }
+
+func (l *sub) BGPPeer(peer string, params bgp.Parameters, add bool) {
+	if add {
+		l.NOTICE("add", KV{"peer": peer})
+	} else {
+		l.NOTICE("remove", KV{"peer": peer})
+	}
+}
+
+func (l *sub) BGPSession(peer string, local bool, reason string) {
+	if local {
+		l.NOTICE("local", KV{"peer": peer, "reason": reason})
+	} else {
+		l.ERR("remote", KV{"peer": peer, "reason": reason})
+	}
 }
