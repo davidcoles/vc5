@@ -16,7 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package vc5
 
 import (
 	"bytes"
@@ -46,6 +46,7 @@ const (
 )
 
 // old config, to be deprecated
+type Logging_ = logging
 type logging struct {
 	Syslog        bool          `json:"syslog,omitempty"`
 	Slack         secret        `json:"slack,omitempty"`
@@ -54,7 +55,7 @@ type logging struct {
 	Elasticsearch Elasticsearch `json:"elasticsearch,omitempty"`
 }
 
-func (l *logging) logging() Logging {
+func (l *logging) Logging() Logging {
 	logging := Logging{
 		Elasticsearch: l.Elasticsearch,
 		Syslog:        l.Syslog,
@@ -128,6 +129,7 @@ type ent struct {
 	start   uint64
 }
 
+type Sink = sink
 type sink struct {
 	e chan *ent
 	l chan Logging
@@ -136,6 +138,7 @@ type sink struct {
 	elastic atomic.Uint64
 }
 
+func (s *sink) Sub(f string) *sub          { return &sub{parent: s, facility: f} }
 func (s *sink) sub(f string) *sub          { return &sub{parent: s, facility: f} }
 func (s *sink) EMERG(f string, a ...any)   { s.log(EMERG, f, a...) }
 func (s *sink) ALERT(f string, a ...any)   { s.log(ALERT, f, a...) }
@@ -200,7 +203,7 @@ func (s *sink) log(lev uint8, facility string, a ...any) {
 	s.e <- &ent{text: text, json: js, level: level, facility: facility, time: now}
 }
 
-func (s *sink) get(start uint64) (h []entry) {
+func (s *sink) Get(start uint64) (h []entry) {
 	l := &ent{get: make(chan bool), start: start}
 	s.e <- l
 	<-l.get
@@ -213,11 +216,11 @@ func (s *sink) get(start uint64) (h []entry) {
 	return h
 }
 
-func (s *sink) configure(l Logging) {
+func (s *sink) Configure(l Logging) {
 	s.l <- l
 }
 
-func (s *sink) start(l Logging) {
+func (s *sink) Start(l Logging) {
 	s.e = make(chan *ent, 1000)
 	s.l = make(chan Logging, 1000)
 
@@ -552,6 +555,7 @@ type parent interface {
 	log(uint8, string, ...any)
 }
 
+type Sub = sub
 type sub struct {
 	parent   parent
 	facility string

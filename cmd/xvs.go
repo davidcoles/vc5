@@ -37,6 +37,8 @@ import (
 	"time"
 
 	"github.com/davidcoles/cue/mon"
+
+	"vc5"
 )
 
 // XVS specific routines
@@ -53,7 +55,7 @@ type reply struct {
 
 // spawn a server (specified by args) which runs in the network namespace - if it dies then restart it
 //func spawn(logs *logger, netns string, args ...string) {
-func spawn(logs Logger, netns string, args ...string) {
+func spawn(logs vc5.Logger, netns string, args ...string) {
 	F := "netns"
 	for {
 		logs.DEBUG(F, "Spawning daemon", args)
@@ -227,7 +229,8 @@ func mac(m [6]byte) string {
 	return fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x", m[0], m[1], m[2], m[3], m[4], m[5])
 }
 
-type Debug struct{ Log *sub }
+type KV = map[string]any
+type Debug struct{ Log vc5.Logger }
 
 var foo atomic.Uint64
 
@@ -370,7 +373,7 @@ func multicast_recv(c Client, address string) {
 	}
 }
 
-func readCommands(sock net.Listener, client Client, log *sub) {
+func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 	// eg.: echo enp130s0f0 | socat - UNIX-CLIENT:/var/run/vc5
 
 	re := regexp.MustCompile(`\s+`)

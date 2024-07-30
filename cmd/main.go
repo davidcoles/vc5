@@ -40,6 +40,8 @@ import (
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/xvs"
+
+	"vc5"
 )
 
 // TODO:
@@ -92,8 +94,8 @@ func main() {
 	//logs := &(config.Logging)
 	//logs.start()
 
-	logs := &sink{}
-	logs.start(config.logging())
+	logs := &vc5.Sink{}
+	logs.Start(config.logging())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -150,7 +152,7 @@ func main() {
 		if err != nil {
 			log.Fatal("Couldn't listen on BGP port", err)
 		}
-		go bgpListener(l, logs.sub("bgp"))
+		go bgpListener(l, logs.Sub("bgp"))
 	}
 
 	var cmd_sock net.Listener
@@ -176,7 +178,7 @@ func main() {
 		VLANs:      config.vlans(),
 		InitDelay:  uint8(*delay),
 		NAT:        true,
-		Debug:      &Debug{Log: logs.sub("xvs")},
+		Debug:      &Debug{Log: logs.Sub("xvs")},
 		MaxFlows:   uint32(*flows),
 	}
 
@@ -188,7 +190,7 @@ func main() {
 	}
 
 	if cmd_sock != nil {
-		go readCommands(cmd_sock, client, logs.sub("command"))
+		go readCommands(cmd_sock, client, logs.Sub("command"))
 	}
 
 	routerID := address.As4()
@@ -197,7 +199,7 @@ func main() {
 		routerID = [4]byte{127, 0, 0, 1}
 	}
 
-	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn), *mp), nil, logs.sub("bgp"))
+	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
 
 	if pool == nil {
 		log.Fatal("BGP pool fail")
@@ -207,7 +209,7 @@ func main() {
 
 	balancer := &Balancer{
 		NetNS:  NetNS(socket.Name()),
-		Logger: logs.sub("balancer"),
+		Logger: logs.Sub("balancer"),
 		Client: client,
 	}
 
@@ -319,7 +321,7 @@ func main() {
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
 
 		start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
-		logs := logs.get(start)
+		logs := logs.Get(start)
 		js, err := json.MarshalIndent(&logs, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -422,7 +424,7 @@ func main() {
 			BGP      map[string]bgp.Status `json:"bgp"`
 			VIP      []VIPStats            `json:"vip"`
 			RIB      []netip.Addr          `json:"rib"`
-			Logging  LogStats              `json:"logging"`
+			Logging  vc5.LogStats          `json:"logging"`
 		}{
 			Summary:  summary,
 			Services: services,
@@ -479,7 +481,7 @@ func main() {
 				client.UpdateVLANs(config.vlans())
 				director.Configure(config.parse())
 				pool.Configure(config.bgp(uint16(*asn), *mp))
-				logs.configure(conf.logging())
+				logs.Configure(conf.logging())
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)

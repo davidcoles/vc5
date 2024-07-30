@@ -26,6 +26,8 @@ import (
 
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/mon"
+
+	"vc5"
 )
 
 type Serv struct {
@@ -179,8 +181,7 @@ func vipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
 	return
 }
 
-//func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs *logger) map[netip.Addr]State {
-func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
+func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs vc5.Logger) map[netip.Addr]State {
 	facility := "vips"
 
 	rib := map[netip.Addr]bool{}
@@ -265,7 +266,7 @@ func (s *Summary) update(n Summary, start time.Time) {
 	}
 }
 
-func bgpListener(l net.Listener, logs Logger) {
+func bgpListener(l net.Listener, logs vc5.Logger) {
 	F := "listener"
 
 	for {

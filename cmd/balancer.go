@@ -26,12 +26,14 @@ import (
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/mon"
 	"github.com/davidcoles/xvs"
+
+	"vc5"
 )
 
 type Client = *xvs.Client
 type Balancer struct {
 	NetNS  *nns
-	Logger *sub
+	Logger *vc5.Sub
 	Client *xvs.Client
 }
 
