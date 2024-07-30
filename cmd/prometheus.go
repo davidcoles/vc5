@@ -63,8 +63,7 @@ func prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips 
 
 	for _, x := range services {
 		for _, s := range x {
-			//serv := fmt.Sprintf("%s:%d:%s", s.Address, s.Port, s.Protocol.string())
-			serv := fmt.Sprintf("%s:%s:%d", s.Address, s.Protocol.string(), s.Port)
+			serv := fmt.Sprintf("%s:%s:%d", s.Address, s.Protocol, s.Port)
 			name := s.Name
 			stat := s.Stats
 			up := zeroone(s.Up)

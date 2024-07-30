@@ -37,6 +37,11 @@ type Balancer struct {
 	Client *xvs.Client
 }
 
+type tuple = vc5.Tuple
+
+const TCP = vc5.TCP
+const UDP = vc5.UDP
+
 // interface method called by the director when the load balancer needs to be reconfigured
 func (b *Balancer) configure(services []cue.Service) error {
 

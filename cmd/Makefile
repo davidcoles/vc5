@@ -11,7 +11,7 @@ default: vc5 config.json
 race:
 	$(MAKE) default FLAGS=-race
 
-vc5: libbpf/bpf/libbpf.a *.go static/*
+vc5: libbpf/bpf/libbpf.a *.go
 	CGO_CFLAGS="-I$(LIBBPF)" CGO_LDFLAGS="-L$(LIBBPF)/bpf" go build $(FLAGS) -o $@
 
 # avoid clobbering an existing config file when make is run with -B

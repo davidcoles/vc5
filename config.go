@@ -16,9 +16,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package vc5
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,9 +34,13 @@ import (
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/cue/mon"
-
-	"vc5"
 )
+
+//go:embed static/*
+var STATIC embed.FS
+
+type Priority = priority
+type Protocol = protocol
 
 const (
 	TCP = 0x06
@@ -89,18 +94,18 @@ type Config struct {
 	Multicast  string        `json:"multicast,omitempty"`
 	Webserver  string        `json:"webserver,omitempty"`
 	Webroot    string        `json:"webroot,omitempty"`
-	Logging    vc5.Logging_  `json:"logging,omitempty"`
+	Logging    Logging_      `json:"logging,omitempty"`
 	Native     bool          `json:"native,omitempty"`
 	Untagged   bool          `json:"untagged,omitempty"`
 	Address    string        `json:"address,omitempty"`
 	Interfaces []string      `json:"interfaces,omitempty"`
 }
 
-func (c *Config) logging() vc5.Logging {
+func (c *Config) Logging_() Logging {
 	return c.Logging.Logging()
 }
 
-func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {
+func (c *Config) Bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 	if asn > 0 {
 		return map[string]bgp.Parameters{"127.0.0.1": bgp.Parameters{ASNumber: asn, HoldTime: 4, Multiprotocol: mp}}
 	}
@@ -108,7 +113,7 @@ func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 	return c.BGP
 }
 
-func (c *Config) vlans() map[uint16]net.IPNet {
+func (c *Config) Vlans() map[uint16]net.IPNet {
 	ret := map[uint16]net.IPNet{}
 
 	for k, v := range c.VLANs {
@@ -118,7 +123,7 @@ func (c *Config) vlans() map[uint16]net.IPNet {
 	return ret
 }
 
-func (c *Config) priorities() map[netip.Addr]priority {
+func (c *Config) Priorities() map[netip.Addr]priority {
 
 	priorities := map[netip.Addr]priority{}
 
@@ -435,7 +440,7 @@ func (p *Prefix) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (c *Config) parse() []cue.Service {
+func (c *Config) Parse() []cue.Service {
 
 	var services []cue.Service
 
@@ -485,6 +490,16 @@ func (p protocol) MarshalText() ([]byte, error) {
 }
 
 func (p protocol) string() string {
+	switch p {
+	case TCP:
+		return "tcp"
+	case UDP:
+		return "udp"
+	}
+	return fmt.Sprintf("%d", p)
+}
+
+func (p protocol) String() string {
 	switch p {
 	case TCP:
 		return "tcp"

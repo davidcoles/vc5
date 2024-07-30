@@ -19,7 +19,6 @@
 package main
 
 import (
-	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -45,9 +44,6 @@ import (
 )
 
 // TODO:
-
-//go:embed static/*
-var STATIC embed.FS
 
 func main() {
 
@@ -85,7 +81,7 @@ func main() {
 	file := args[0]
 	nics := args[1:]
 
-	config, err := Load(file)
+	config, err := vc5.Load(file)
 
 	if err != nil {
 		log.Fatal("Couldn't load config file:", config, err)
@@ -95,7 +91,7 @@ func main() {
 	//logs.start()
 
 	logs := &vc5.Sink{}
-	logs.Start(config.logging())
+	logs.Start(config.Logging_())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -175,7 +171,7 @@ func main() {
 		Interfaces: nics,
 		Address:    address,
 		Native:     *native,
-		VLANs:      config.vlans(),
+		VLANs:      config.Vlans(),
 		InitDelay:  uint8(*delay),
 		NAT:        true,
 		Debug:      &Debug{Log: logs.Sub("xvs")},
@@ -199,7 +195,7 @@ func main() {
 		routerID = [4]byte{127, 0, 0, 1}
 	}
 
-	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
+	pool := bgp.NewPool(routerID, config.Bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
 
 	if pool == nil {
 		log.Fatal("BGP pool fail")
@@ -222,7 +218,7 @@ func main() {
 		multicast(client, config.Multicast)
 	}
 
-	err = director.Start(config.parse())
+	err = director.Start(config.Parse())
 
 	if err != nil {
 		logs.EMERG(F, "Couldn't start director:", err)
@@ -284,7 +280,7 @@ func main() {
 			}
 
 			mutex.Lock()
-			vip = vipState(services, vip, config.priorities(), logs)
+			vip = vipState(services, vip, config.Priorities(), logs)
 			rib = adjRIBOut(vip, initialised)
 			mutex.Unlock()
 
@@ -292,7 +288,7 @@ func main() {
 		}
 	}()
 
-	static := http.FS(STATIC)
+	static := http.FS(vc5.STATIC)
 	var fs http.FileSystem
 
 	if *webroot != "" {
@@ -474,14 +470,14 @@ func main() {
 			fallthrough
 		case syscall.SIGUSR2:
 			logs.NOTICE(F, "Reload signal received")
-			conf, err := Load(file)
+			conf, err := vc5.Load(file)
 			if err == nil {
 				mutex.Lock()
 				config = conf
-				client.UpdateVLANs(config.vlans())
-				director.Configure(config.parse())
-				pool.Configure(config.bgp(uint16(*asn), *mp))
-				logs.Configure(conf.logging())
+				client.UpdateVLANs(config.Vlans())
+				director.Configure(config.Parse())
+				pool.Configure(config.Bgp(uint16(*asn), *mp))
+				logs.Configure(conf.Logging_())
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)

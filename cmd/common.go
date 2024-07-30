@@ -30,6 +30,9 @@ import (
 	"vc5"
 )
 
+type priority = vc5.Priority
+type protocol = vc5.Protocol
+
 type Serv struct {
 	Name         string     `json:"name,omitempty"`
 	Description  string     `json:"description"`
@@ -196,13 +199,13 @@ func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 		log := logs.ERR
 
 		switch p {
-		case CRITICAL:
+		case vc5.CRITICAL:
 			log = logs.ERR
-		case HIGH:
+		case vc5.HIGH:
 			log = logs.WARNING
-		case MEDIUM:
+		case vc5.MEDIUM:
 			log = logs.NOTICE
-		case LOW:
+		case vc5.LOW:
 			log = logs.INFO
 		}
 
@@ -284,7 +287,7 @@ func bgpListener(l net.Listener, logs vc5.Logger) {
 	}
 }
 
-func serviceStatus(config *Config, balancer *Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
+func serviceStatus(config *vc5.Config, balancer *Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
 
 	var current uint64
 
@@ -294,7 +297,7 @@ func serviceStatus(config *Config, balancer *Balancer, director *cue.Director, o
 
 	for _, svc := range director.Status() {
 
-		t := Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
+		t := vc5.Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
 		cnf, _ := config.Services[t]
 
 		available := svc.Available()
