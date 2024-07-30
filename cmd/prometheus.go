@@ -23,9 +23,11 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	"vc5"
 )
 
-func prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips map[netip.Addr]State) []string {
+func prometheus(p string, services map[netip.Addr][]vc5.Serv, summary vc5.Summary, vips map[netip.Addr]vc5.State) []string {
 	r := []string{help(p)}
 
 	var defcon uint8
@@ -57,8 +59,8 @@ func prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips 
 	now := time.Now()
 
 	for vip, s := range vips {
-		r = metric(r, p+`_vip_status{vip="%s"} %d`, vip, zeroone(s.up))
-		r = metric(r, p+`_vip_status_duration{vip="%s",status="%s"} %d`, vip, updown(s.up), now.Sub(s.time)/time.Second)
+		r = metric(r, p+`_vip_status{vip="%s"} %d`, vip, zeroone(s.Up()))
+		r = metric(r, p+`_vip_status_duration{vip="%s",status="%s"} %d`, vip, updown(s.Up()), now.Sub(s.Time())/time.Second)
 	}
 
 	for _, x := range services {

@@ -85,7 +85,7 @@ func (b *Balancer) configure(services []cue.Service) error {
 	return nil
 }
 
-func (b *Balancer) Stats(s xvs.Stats) (r Stats) {
+func (b *Balancer) Stats(s xvs.Stats) (r vc5.Stats) {
 
 	r.IngressOctets = s.Octets
 	r.IngressPackets = s.Packets
@@ -130,8 +130,8 @@ func (b *Balancer) MAC(d xvs.DestinationExtended) string {
 	return d.MAC.String()
 }
 
-func (b *Balancer) TCPStats() map[mon.Instance]tcpstats {
-	tcp := map[mon.Instance]tcpstats{}
+func (b *Balancer) TCPStats() map[mon.Instance]vc5.TCPStats {
+	tcp := map[mon.Instance]vc5.TCPStats{}
 	svcs, _ := b.Client.Services()
 	for _, se := range svcs {
 		s := se.Service
@@ -142,14 +142,14 @@ func (b *Balancer) TCPStats() map[mon.Instance]tcpstats {
 				Service:     mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol},
 				Destination: mon.Destination{Address: d.Address, Port: s.Port},
 			}
-			tcp[i] = tcpstats{ESTABLISHED: de.Stats.Current}
+			tcp[i] = vc5.TCPStats{ESTABLISHED: de.Stats.Current}
 		}
 	}
 
 	return tcp
 }
 
-func (b *Balancer) summary() (s Summary) {
+func (b *Balancer) summary() (s vc5.Summary) {
 	u := b.Client.Info()
 	s.Latency = u.Latency
 	s.Dropped = u.Dropped
@@ -207,6 +207,13 @@ func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok
 	}
 
 	return ok, diagnostic
+}
+
+func updown(b bool) string {
+	if b {
+		return "up"
+	}
+	return "down"
 }
 
 func notifyLog(instance mon.Instance, status bool) map[string]any {

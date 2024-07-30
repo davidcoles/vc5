@@ -227,20 +227,20 @@ func main() {
 
 	done := make(chan bool)
 
-	vip := map[netip.Addr]State{}
+	vip := map[netip.Addr]vc5.State{}
 
 	var rib []netip.Addr
-	var summary Summary
+	var summary vc5.Summary
 
-	services, old, _ := serviceStatus(config, balancer, director, nil)
+	services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
 
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		for {
 			mutex.Lock()
-			summary.update(balancer.summary(), start)
-			services, old, summary.Current = serviceStatus(config, balancer, director, old)
+			summary.Update(balancer.summary(), start)
+			services, old, summary.Current = vc5.ServiceStatus(config, balancer, director, old)
 			mutex.Unlock()
 			select {
 			case <-ticker.C:
@@ -280,8 +280,8 @@ func main() {
 			}
 
 			mutex.Lock()
-			vip = vipState(services, vip, config.Priorities(), logs)
-			rib = adjRIBOut(vip, initialised)
+			vip = vc5.VipState(services, vip, config.Priorities(), logs)
+			rib = vc5.AdjRIBOut(vip, initialised)
 			mutex.Unlock()
 
 			pool.RIB(rib)
@@ -415,17 +415,17 @@ func main() {
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		mutex.Lock()
 		js, err := json.MarshalIndent(struct {
-			Summary  Summary               `json:"summary"`
-			Services map[VIP][]Serv        `json:"services"`
-			BGP      map[string]bgp.Status `json:"bgp"`
-			VIP      []VIPStats            `json:"vip"`
-			RIB      []netip.Addr          `json:"rib"`
-			Logging  vc5.LogStats          `json:"logging"`
+			Summary  vc5.Summary            `json:"summary"`
+			Services map[vc5.VIP][]vc5.Serv `json:"services"`
+			BGP      map[string]bgp.Status  `json:"bgp"`
+			VIP      []vc5.VIPStats         `json:"vip"`
+			RIB      []netip.Addr           `json:"rib"`
+			Logging  vc5.LogStats           `json:"logging"`
 		}{
 			Summary:  summary,
 			Services: services,
 			BGP:      pool.Status(),
-			VIP:      vipStatus(services, vip),
+			VIP:      vc5.VipStatus(services, vip),
 			RIB:      rib,
 			Logging:  logs.Stats(),
 		}, " ", " ")
@@ -491,6 +491,24 @@ func main() {
 			time.Sleep(4 * time.Second)
 			logs.ALERT(F, "Shutting down")
 			return
+		}
+	}
+}
+
+func bgpListener(l net.Listener, logs vc5.Logger) {
+	F := "listener"
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			logs.ERR(F, "Failed to accept connection", err)
+		} else {
+			go func(c net.Conn) {
+				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
+				defer c.Close()
+				time.Sleep(time.Second * 10)
+			}(conn)
 		}
 	}
 }

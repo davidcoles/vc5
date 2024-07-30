@@ -16,22 +16,20 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package vc5
 
 import (
-	"net"
 	"net/netip"
 	"sort"
 	"time"
 
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/mon"
-
-	"vc5"
+	"github.com/davidcoles/xvs"
 )
 
-type priority = vc5.Priority
-type protocol = vc5.Protocol
+//type priority = vc5.Priority
+//type protocol = vc5.Protocol
 
 type Serv struct {
 	Name         string     `json:"name,omitempty"`
@@ -69,6 +67,9 @@ type State struct {
 	up   bool
 	time time.Time
 }
+
+func (s *State) Up() bool        { return s.up }
+func (s *State) Time() time.Time { return s.time }
 
 type Stats struct {
 	IngressOctets  uint64 `json:"ingress_octets"`
@@ -161,7 +162,7 @@ func vipStatus_(in map[VIP][]Serv, rib []netip.Addr) (out []VIPStats) {
 	return
 }
 
-func vipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
+func VipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
 
 	for vip, list := range in {
 		var stats Stats
@@ -184,7 +185,7 @@ func vipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
 	return
 }
 
-func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs vc5.Logger) map[netip.Addr]State {
+func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
 	facility := "vips"
 
 	rib := map[netip.Addr]bool{}
@@ -199,13 +200,13 @@ func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 		log := logs.ERR
 
 		switch p {
-		case vc5.CRITICAL:
+		case CRITICAL:
 			log = logs.ERR
-		case vc5.HIGH:
+		case HIGH:
 			log = logs.WARNING
-		case vc5.MEDIUM:
+		case MEDIUM:
 			log = logs.NOTICE
-		case vc5.LOW:
+		case LOW:
 			log = logs.INFO
 		}
 
@@ -228,7 +229,7 @@ func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 	return new
 }
 
-func adjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
+func AdjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
 	for v, s := range vip {
 		if initialised && s.up && time.Now().Sub(s.time) > time.Second*5 {
 			r = append(r, v)
@@ -244,7 +245,7 @@ func updown(b bool) string {
 	return "down"
 }
 
-func (s *Summary) update(n Summary, start time.Time) {
+func (s *Summary) Update(n Summary, start time.Time) {
 
 	o := *s
 	*s = n
@@ -269,25 +270,21 @@ func (s *Summary) update(n Summary, start time.Time) {
 	}
 }
 
-func bgpListener(l net.Listener, logs vc5.Logger) {
-	F := "listener"
+type Balancer interface {
+	TCPStats() map[mon.Instance]TCPStats
+	ServiceInstance(s cue.Service) mon.Instance
+	DestinationInstance(s cue.Service, d cue.Destination) mon.Instance
+	Destination(dst cue.Destination) mon.Destination
 
-	for {
-		conn, err := l.Accept()
-
-		if err != nil {
-			logs.ERR(F, "Failed to accept connection", err)
-		} else {
-			go func(c net.Conn) {
-				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
-				defer c.Close()
-				time.Sleep(time.Second * 10)
-			}(conn)
-		}
-	}
+	/* needs converting*/
+	Dest(s xvs.Service, d xvs.Destination) mon.Destination
+	Service(s cue.Service) (xvs.ServiceExtended, error)
+	Destinations(s cue.Service) ([]xvs.DestinationExtended, error)
+	MAC(d xvs.DestinationExtended) string
+	Stats(s xvs.Stats) (r Stats)
 }
 
-func serviceStatus(config *vc5.Config, balancer *Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
+func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
 
 	var current uint64
 
@@ -297,7 +294,7 @@ func serviceStatus(config *vc5.Config, balancer *Balancer, director *cue.Directo
 
 	for _, svc := range director.Status() {
 
-		t := vc5.Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
+		t := Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
 		cnf, _ := config.Services[t]
 
 		available := svc.Available()
@@ -387,6 +384,7 @@ func calculateRate(s Stats, o Stats) Stats {
 	return s
 }
 
+type TCPStats = tcpstats
 type tcpstats struct {
 	SYN_RECV    uint64
 	ESTABLISHED uint64
