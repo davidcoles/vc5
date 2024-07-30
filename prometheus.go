@@ -16,18 +16,16 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package vc5
 
 import (
 	"fmt"
 	"net/netip"
 	"strings"
 	"time"
-
-	"vc5"
 )
 
-func prometheus(p string, services map[netip.Addr][]vc5.Serv, summary vc5.Summary, vips map[netip.Addr]vc5.State) []string {
+func Prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips map[netip.Addr]State) []string {
 	r := []string{help(p)}
 
 	var defcon uint8

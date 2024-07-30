@@ -443,7 +443,7 @@ func main() {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 
 		mutex.Lock()
-		metrics := prometheus("vc5", services, summary, vip)
+		metrics := vc5.Prometheus("vc5", services, summary, vip)
 		mutex.Unlock()
 
 		w.Header().Set("Content-Type", "text/plain")
