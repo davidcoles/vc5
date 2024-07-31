@@ -25,7 +25,7 @@ import (
 
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/mon"
-	"github.com/davidcoles/xvs"
+	//"github.com/davidcoles/xvs"
 )
 
 //type priority = vc5.Priority
@@ -85,6 +85,7 @@ type Stats struct {
 	EgressPacketsPerSecond  uint64 `json:"egress_packets_per_second"`
 	FlowsPerSecond          uint64 `json:"flows_per_second"`
 	time                    time.Time
+	MAC                     string `json:"mac,omitempty"`
 }
 
 type Summary struct {
@@ -270,99 +271,25 @@ func (s *Summary) Update(n Summary, start time.Time) {
 	}
 }
 
-type Balancer interface {
-	TCPStats() map[mon.Instance]TCPStats
-	ServiceInstance(s cue.Service) mon.Instance
-	DestinationInstance(s cue.Service, d cue.Destination) mon.Instance
-	Destination(dst cue.Destination) mon.Destination
-
-	/* needs converting*/
-	Dest(s xvs.Service, d xvs.Destination) mon.Destination
-	Service(s cue.Service) (xvs.ServiceExtended, error)
-	Destinations(s cue.Service) ([]xvs.DestinationExtended, error)
-	MAC(d xvs.DestinationExtended) string
-	Stats(s xvs.Stats) (r Stats)
+type Service struct {
+	Address  netip.Addr
+	Port     uint16
+	Protocol Protocol
 }
 
-func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
+type Destination struct {
+	Address netip.Addr
+	Port    uint16
+}
 
-	var current uint64
+type Instance struct {
+	Service     Service
+	Destination Destination
+}
 
-	stats := map[mon.Instance]Stats{}
-	status := map[netip.Addr][]Serv{}
-	tcpstats := balancer.TCPStats()
-
-	for _, svc := range director.Status() {
-
-		t := Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
-		cnf, _ := config.Services[t]
-
-		available := svc.Available()
-
-		key := balancer.ServiceInstance(svc)
-		xse, _ := balancer.Service(svc)
-
-		serv := Serv{
-			Name:        cnf.Name,
-			Description: cnf.Description,
-			Address:     svc.Address,
-			Port:        svc.Port,
-			Protocol:    protocol(svc.Protocol),
-			Required:    svc.Required,
-			Available:   available,
-			Up:          svc.Up,
-			For:         uint64(time.Now().Sub(svc.When) / time.Second),
-			Sticky:      svc.Sticky,
-			Scheduler:   svc.Scheduler,
-			Stats:       calculateRate(balancer.Stats(xse.Stats), old[key]),
-		}
-
-		lbs := map[mon.Destination]Stats{}
-		mac := map[mon.Destination]string{}
-
-		de, _ := balancer.Destinations(svc)
-		for _, d := range de {
-			//key := mon.Destination{Address: d.Destination.Address, Port: svc.Port}
-			key := balancer.Dest(xse.Service, d.Destination)
-			lbs[key] = balancer.Stats(d.Stats)
-			mac[key] = balancer.MAC(d)
-		}
-
-		for _, dst := range svc.Destinations {
-			key := balancer.DestinationInstance(svc, dst)
-			dest := Dest{
-				Address:    dst.Address,
-				Port:       dst.Port,
-				Disabled:   dst.Disabled,
-				Up:         dst.Status.OK,
-				For:        uint64(time.Now().Sub(dst.Status.When) / time.Second),
-				Took:       uint64(dst.Status.Took / time.Millisecond),
-				Diagnostic: dst.Status.Diagnostic,
-				Weight:     dst.Weight,
-				Stats:      calculateRate(lbs[balancer.Destination(dst)], old[key]),
-				MAC:        mac[balancer.Destination(dst)],
-			}
-
-			if tcp, ok := tcpstats[key]; ok {
-				dest.Stats.Current = tcp.ESTABLISHED
-				serv.Stats.Current += tcp.ESTABLISHED
-				current += tcp.ESTABLISHED
-			}
-
-			stats[key] = dest.Stats
-			serv.Destinations = append(serv.Destinations, dest)
-		}
-
-		stats[key] = serv.Stats
-
-		sort.SliceStable(serv.Destinations, func(i, j int) bool {
-			return serv.Destinations[i].Address.Compare(serv.Destinations[j].Address) < 0
-		})
-
-		status[svc.Address] = append(status[svc.Address], serv)
-	}
-
-	return status, stats, current
+type Balancer interface {
+	TCPStats() map[Instance]TCPStats
+	Destinations(s Service) (map[Destination]Stats, error)
 }
 
 func calculateRate(s Stats, o Stats) Stats {
@@ -384,10 +311,112 @@ func calculateRate(s Stats, o Stats) Stats {
 	return s
 }
 
-type TCPStats = tcpstats
-type tcpstats struct {
+type TCPStats struct {
 	SYN_RECV    uint64
 	ESTABLISHED uint64
 	CLOSE       uint64
 	TIME_WAIT   uint64
+}
+
+func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[mon.Instance]Stats) (map[netip.Addr][]Serv, map[mon.Instance]Stats, uint64) {
+
+	var current uint64
+
+	stats := map[mon.Instance]Stats{}
+	status := map[netip.Addr][]Serv{}
+	tcpstats := balancer.TCPStats()
+
+	for _, svc := range director.Status() {
+
+		t := Tuple{Address: svc.Address, Port: svc.Port, Protocol: svc.Protocol}
+		cnf, _ := config.Services[t]
+
+		available := svc.Available()
+
+		key := serviceInstance(svc)
+		lbs, _ := balancer.Destinations(service(svc))
+		mac := map[Destination]string{}
+
+		var sum Stats
+		for k, s := range lbs {
+			sum.add(s)
+			mac[k] = s.MAC
+		}
+
+		serv := Serv{
+			Name:        cnf.Name,
+			Description: cnf.Description,
+			Address:     svc.Address,
+			Port:        svc.Port,
+			Protocol:    protocol(svc.Protocol),
+			Required:    svc.Required,
+			Available:   available,
+			Up:          svc.Up,
+			For:         uint64(time.Now().Sub(svc.When) / time.Second),
+			Sticky:      svc.Sticky,
+			Scheduler:   svc.Scheduler,
+			Stats:       calculateRate(sum, old[key]),
+		}
+
+		for _, dst := range svc.Destinations {
+			key := destinationInstance(svc, dst)
+			dest := Dest{
+				Address:    dst.Address,
+				Port:       dst.Port,
+				Disabled:   dst.Disabled,
+				Up:         dst.Status.OK,
+				For:        uint64(time.Now().Sub(dst.Status.When) / time.Second),
+				Took:       uint64(dst.Status.Took / time.Millisecond),
+				Diagnostic: dst.Status.Diagnostic,
+				Weight:     dst.Weight,
+				Stats:      calculateRate(lbs[destination(dst)], old[key]),
+				MAC:        mac[destination(dst)],
+			}
+
+			if tcp, ok := tcpstats[destinationInstance2(svc, dst)]; ok {
+				dest.Stats.Current = tcp.ESTABLISHED
+				serv.Stats.Current += tcp.ESTABLISHED
+				current += tcp.ESTABLISHED
+			}
+
+			stats[key] = dest.Stats
+			serv.Destinations = append(serv.Destinations, dest)
+		}
+
+		stats[key] = serv.Stats
+
+		sort.SliceStable(serv.Destinations, func(i, j int) bool {
+			return serv.Destinations[i].Address.Compare(serv.Destinations[j].Address) < 0
+		})
+
+		status[svc.Address] = append(status[svc.Address], serv)
+	}
+
+	return status, stats, current
+}
+
+func service(s cue.Service) Service {
+	return Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
+}
+
+func destination(dst cue.Destination) Destination {
+	return Destination{Address: dst.Address, Port: dst.Port}
+}
+
+func destinationInstance(s cue.Service, d cue.Destination) mon.Instance {
+	return mon.Instance{
+		Service:     mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol},
+		Destination: mon.Destination{Address: d.Address, Port: d.Port},
+	}
+}
+
+func destinationInstance2(s cue.Service, d cue.Destination) Instance {
+	return Instance{
+		Service:     Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)},
+		Destination: Destination{Address: d.Address, Port: d.Port},
+	}
+}
+
+func serviceInstance(s cue.Service) mon.Instance {
+	return mon.Instance{Service: mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}}
 }

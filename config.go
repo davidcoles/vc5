@@ -54,7 +54,7 @@ type Real struct {
 }
 
 // Describes a Layer 4 service
-type Service struct {
+type Service__ struct {
 	// The service name - should be a short identifier, suitable for using as a Prometheus label value
 	Name string `json:"name,omitempty"`
 
@@ -78,7 +78,7 @@ type Service struct {
 	Reset     bool   `json:"reset,omitempty"` // used in IPVS version
 }
 
-type services map[Tuple]Service
+type services map[Tuple]Service__
 
 // Load balancer configuration
 type Config struct {
