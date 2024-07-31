@@ -483,8 +483,8 @@ func main() {
 		case syscall.SIGQUIT:
 			fmt.Println("CLOSING")
 			close(done) // shut down BGP, etc
-			time.Sleep(4 * time.Second)
 			logs.ALERT(F, "Shutting down")
+			time.Sleep(4 * time.Second)
 			return
 		}
 	}
