@@ -1,15 +1,11 @@
 package vc5
 
 import (
-	"context"
-	//"errors"
 	"bytes"
+	"context"
 	"fmt"
-	//"log"
-	//"strings"
 	"sync"
 	"sync/atomic"
-	//"time"
 
 	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v7/esapi"

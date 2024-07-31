@@ -89,17 +89,6 @@ func (b *Balancer) configure(services []cue.Service) error {
 	return nil
 }
 
-func (b *Balancer) Stats(s xvs.Stats) (r vc5.Stats) {
-
-	r.IngressOctets = s.Octets
-	r.IngressPackets = s.Packets
-	r.EgressOctets = 0  // Not available in DSR
-	r.EgressPackets = 0 // Not available in DSR
-	r.Flows = s.Flows
-
-	return r
-}
-
 func _stats(s xvs.Stats, mac string) (r vc5.Stats) {
 
 	r.IngressOctets = s.Octets

@@ -43,8 +43,6 @@ import (
 	"vc5"
 )
 
-// TODO:
-
 func main() {
 
 	F := "vc5"
@@ -86,9 +84,6 @@ func main() {
 	if err != nil {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
-
-	//logs := &(config.Logging)
-	//logs.start()
 
 	logs := &vc5.Sink{}
 	logs.Start(config.Logging_())

@@ -54,7 +54,7 @@ type Real struct {
 }
 
 // Describes a Layer 4 service
-type Service__ struct {
+type ServiceDefinition struct {
 	// The service name - should be a short identifier, suitable for using as a Prometheus label value
 	Name string `json:"name,omitempty"`
 
@@ -68,7 +68,7 @@ type Service__ struct {
 	Need uint8 `json:"need,omitempty"`
 
 	// Backend servers and corresponding health checks
-	Destinations map[ipport]Real `json:"reals,omitempty"`
+	Destinations map[Destination]Real `json:"reals,omitempty"`
 
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
 	Sticky bool `json:"sticky,omitempty"`
@@ -78,7 +78,7 @@ type Service__ struct {
 	Reset     bool   `json:"reset,omitempty"` // used in IPVS version
 }
 
-type services map[Tuple]Service__
+type services map[Service]ServiceDefinition
 
 // Load balancer configuration
 type Config struct {
@@ -193,14 +193,17 @@ func Load(file string) (*Config, error) {
 	return &config, nil
 }
 
-type ipport = IPPort
+//type ipport = IPPort
 
-type IPPort struct {
-	Address netip.Addr
-	Port    uint16
-}
+//type IPPort struct {
+//	Address netip.Addr
+//	Port    uint16
+//}
 
-func (i *ipport) MarshalJSON() ([]byte, error) {
+type IPPort = Destination
+
+/*
+func (i *IPPort) MarshalJSON() ([]byte, error) {
 	text, err := i.MarshalText()
 
 	if err != nil {
@@ -210,7 +213,7 @@ func (i *ipport) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + string(text) + `"`), nil
 }
 
-func (i *ipport) UnmarshalJSON(data []byte) error {
+func (i *IPPort) UnmarshalJSON(data []byte) error {
 
 	l := len(data)
 
@@ -220,12 +223,13 @@ func (i *ipport) UnmarshalJSON(data []byte) error {
 
 	return i.UnmarshalText(data[1 : l-1])
 }
+*/
 
-func (i ipport) MarshalText() ([]byte, error) {
+func (i IPPort) MarshalText() ([]byte, error) {
 	return []byte(fmt.Sprintf("%s:%d", i.Address, i.Port)), nil
 }
 
-func (i *ipport) UnmarshalText(data []byte) error {
+func (i *IPPort) UnmarshalText(data []byte) error {
 
 	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
 
@@ -266,13 +270,16 @@ func (i *ipport) UnmarshalText(data []byte) error {
 
 /**********************************************************************/
 
-type tuple = Tuple
-type Tuple struct {
-	Address  netip.Addr
-	Port     uint16
-	Protocol uint8
-}
+//type tuple = Tuple
+//type Tuple struct {
+//	Address  netip.Addr
+//	Port     uint16
+//	Protocol uint8
+//}
 
+type Tuple = Service
+
+/*
 func (t *Tuple) string() string {
 	var p string
 
@@ -311,27 +318,29 @@ func (i *Tuple) Compare(j *Tuple) (r int) {
 
 	return 0
 }
+*/
 
-func (t *Tuple) MarshalJSON() ([]byte, error) {
-	text, err := t.MarshalText()
+// These may not be needed
+//func (t *Tuple) MarshalJSON() ([]byte, error) {
+//	text, err := t.MarshalText()
+//
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return []byte(`"` + string(text) + `"`), nil
+//}
 
-	if err != nil {
-		return nil, err
-	}
-
-	return []byte(`"` + string(text) + `"`), nil
-}
-
-func (t *Tuple) UnmarshalJSON(data []byte) error {
-
-	l := len(data)
-
-	if l < 3 || data[0] != '"' || data[l-1] != '"' {
-		return errors.New("Badly formed ip:port")
-	}
-
-	return t.UnmarshalText(data[1 : l-1])
-}
+//func (t *Tuple) UnmarshalJSON(data []byte) error {
+//
+//	l := len(data)
+//
+//	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+//		return errors.New("Badly formed ip:port")
+//	}
+//
+//	return t.UnmarshalText(data[1 : l-1])
+//}
 
 func (t Tuple) MarshalText() ([]byte, error) {
 
@@ -449,7 +458,7 @@ func (c *Config) Parse() []cue.Service {
 		service := cue.Service{
 			Address:   ipp.Address,
 			Port:      ipp.Port,
-			Protocol:  ipp.Protocol,
+			Protocol:  uint8(ipp.Protocol),
 			Required:  svc.Need,
 			Scheduler: svc.Scheduler,
 			Persist:   svc.Persist,
