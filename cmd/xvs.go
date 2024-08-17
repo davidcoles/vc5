@@ -364,7 +364,7 @@ func multicast_recv(c Client, address string) {
 }
 
 func readCommands(sock net.Listener, client Client, log vc5.Logger) {
-	// eg.: echo enp130s0f0 | socat - UNIX-CLIENT:/var/run/vc5
+	// eg.: echo reattach enp130s0f0 | socat - UNIX-CLIENT:/var/run/vc5
 
 	re := regexp.MustCompile(`\s+`)
 
