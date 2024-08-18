@@ -16,9 +16,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package vc5
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,12 @@ import (
 	"github.com/davidcoles/cue/mon"
 )
 
+//go:embed static/*
+var STATIC embed.FS
+
+type Priority = priority
+type Protocol = protocol
+
 const (
 	TCP = 0x06
 	UDP = 0x11
@@ -47,7 +54,7 @@ type Real struct {
 }
 
 // Describes a Layer 4 service
-type Service struct {
+type ServiceDefinition struct {
 	// The service name - should be a short identifier, suitable for using as a Prometheus label value
 	Name string `json:"name,omitempty"`
 
@@ -61,7 +68,7 @@ type Service struct {
 	Need uint8 `json:"need,omitempty"`
 
 	// Backend servers and corresponding health checks
-	Destinations map[ipport]Real `json:"reals,omitempty"`
+	Destinations map[Destination]Real `json:"reals,omitempty"`
 
 	// If set to true, the backend selection algorithm will not include layer 4 port numbers
 	Sticky bool `json:"sticky,omitempty"`
@@ -71,7 +78,7 @@ type Service struct {
 	Reset     bool   `json:"reset,omitempty"` // used in IPVS version
 }
 
-type services map[Tuple]Service
+type services map[Service]ServiceDefinition
 
 // Load balancer configuration
 type Config struct {
@@ -87,18 +94,18 @@ type Config struct {
 	Multicast  string        `json:"multicast,omitempty"`
 	Webserver  string        `json:"webserver,omitempty"`
 	Webroot    string        `json:"webroot,omitempty"`
-	Logging    logging       `json:"logging,omitempty"`
+	Logging    Logging_      `json:"logging,omitempty"`
 	Native     bool          `json:"native,omitempty"`
 	Untagged   bool          `json:"untagged,omitempty"`
 	Address    string        `json:"address,omitempty"`
 	Interfaces []string      `json:"interfaces,omitempty"`
 }
 
-func (c *Config) logging() Logging {
-	return c.Logging.logging()
+func (c *Config) Logging_() Logging {
+	return c.Logging.Logging()
 }
 
-func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {
+func (c *Config) Bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 	if asn > 0 {
 		return map[string]bgp.Parameters{"127.0.0.1": bgp.Parameters{ASNumber: asn, HoldTime: 4, Multiprotocol: mp}}
 	}
@@ -106,7 +113,7 @@ func (c *Config) bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 	return c.BGP
 }
 
-func (c *Config) vlans() map[uint16]net.IPNet {
+func (c *Config) Vlans() map[uint16]net.IPNet {
 	ret := map[uint16]net.IPNet{}
 
 	for k, v := range c.VLANs {
@@ -116,7 +123,7 @@ func (c *Config) vlans() map[uint16]net.IPNet {
 	return ret
 }
 
-func (c *Config) priorities() map[netip.Addr]priority {
+func (c *Config) Priorities() map[netip.Addr]priority {
 
 	priorities := map[netip.Addr]priority{}
 
@@ -186,14 +193,17 @@ func Load(file string) (*Config, error) {
 	return &config, nil
 }
 
-type ipport = IPPort
+//type ipport = IPPort
 
-type IPPort struct {
-	Address netip.Addr
-	Port    uint16
-}
+//type IPPort struct {
+//	Address netip.Addr
+//	Port    uint16
+//}
 
-func (i *ipport) MarshalJSON() ([]byte, error) {
+type IPPort = Destination
+
+/*
+func (i *IPPort) MarshalJSON() ([]byte, error) {
 	text, err := i.MarshalText()
 
 	if err != nil {
@@ -203,7 +213,7 @@ func (i *ipport) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + string(text) + `"`), nil
 }
 
-func (i *ipport) UnmarshalJSON(data []byte) error {
+func (i *IPPort) UnmarshalJSON(data []byte) error {
 
 	l := len(data)
 
@@ -213,12 +223,13 @@ func (i *ipport) UnmarshalJSON(data []byte) error {
 
 	return i.UnmarshalText(data[1 : l-1])
 }
+*/
 
-func (i ipport) MarshalText() ([]byte, error) {
+func (i IPPort) MarshalText() ([]byte, error) {
 	return []byte(fmt.Sprintf("%s:%d", i.Address, i.Port)), nil
 }
 
-func (i *ipport) UnmarshalText(data []byte) error {
+func (i *IPPort) UnmarshalText(data []byte) error {
 
 	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
 
@@ -259,13 +270,16 @@ func (i *ipport) UnmarshalText(data []byte) error {
 
 /**********************************************************************/
 
-type tuple = Tuple
-type Tuple struct {
-	Address  netip.Addr
-	Port     uint16
-	Protocol uint8
-}
+//type tuple = Tuple
+//type Tuple struct {
+//	Address  netip.Addr
+//	Port     uint16
+//	Protocol uint8
+//}
 
+type Tuple = Service
+
+/*
 func (t *Tuple) string() string {
 	var p string
 
@@ -304,27 +318,29 @@ func (i *Tuple) Compare(j *Tuple) (r int) {
 
 	return 0
 }
+*/
 
-func (t *Tuple) MarshalJSON() ([]byte, error) {
-	text, err := t.MarshalText()
+// These may not be needed
+//func (t *Tuple) MarshalJSON() ([]byte, error) {
+//	text, err := t.MarshalText()
+//
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	return []byte(`"` + string(text) + `"`), nil
+//}
 
-	if err != nil {
-		return nil, err
-	}
-
-	return []byte(`"` + string(text) + `"`), nil
-}
-
-func (t *Tuple) UnmarshalJSON(data []byte) error {
-
-	l := len(data)
-
-	if l < 3 || data[0] != '"' || data[l-1] != '"' {
-		return errors.New("Badly formed ip:port")
-	}
-
-	return t.UnmarshalText(data[1 : l-1])
-}
+//func (t *Tuple) UnmarshalJSON(data []byte) error {
+//
+//	l := len(data)
+//
+//	if l < 3 || data[0] != '"' || data[l-1] != '"' {
+//		return errors.New("Badly formed ip:port")
+//	}
+//
+//	return t.UnmarshalText(data[1 : l-1])
+//}
 
 func (t Tuple) MarshalText() ([]byte, error) {
 
@@ -433,7 +449,7 @@ func (p *Prefix) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (c *Config) parse() []cue.Service {
+func (c *Config) Parse() []cue.Service {
 
 	var services []cue.Service
 
@@ -442,7 +458,7 @@ func (c *Config) parse() []cue.Service {
 		service := cue.Service{
 			Address:   ipp.Address,
 			Port:      ipp.Port,
-			Protocol:  ipp.Protocol,
+			Protocol:  uint8(ipp.Protocol),
 			Required:  svc.Need,
 			Scheduler: svc.Scheduler,
 			Persist:   svc.Persist,
@@ -483,6 +499,16 @@ func (p protocol) MarshalText() ([]byte, error) {
 }
 
 func (p protocol) string() string {
+	switch p {
+	case TCP:
+		return "tcp"
+	case UDP:
+		return "udp"
+	}
+	return fmt.Sprintf("%d", p)
+}
+
+func (p protocol) String() string {
 	switch p {
 	case TCP:
 		return "tcp"

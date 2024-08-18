@@ -26,17 +26,28 @@ import (
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/mon"
 	"github.com/davidcoles/xvs"
+
+	"vc5"
 )
 
 type Client = *xvs.Client
 type Balancer struct {
 	NetNS  *nns
-	Logger *sub
+	Logger *vc5.Sub
 	Client *xvs.Client
 }
 
+const TCP = vc5.TCP
+const UDP = vc5.UDP
+
 // interface method called by the director when the load balancer needs to be reconfigured
 func (b *Balancer) configure(services []cue.Service) error {
+
+	type tuple struct {
+		Address  netip.Addr
+		Port     uint16
+		Protocol uint8
+	}
 
 	target := map[tuple]cue.Service{}
 
@@ -78,71 +89,50 @@ func (b *Balancer) configure(services []cue.Service) error {
 	return nil
 }
 
-func (b *Balancer) Stats(s xvs.Stats) (r Stats) {
+func _stats(s xvs.Stats, mac string) (r vc5.Stats) {
 
 	r.IngressOctets = s.Octets
 	r.IngressPackets = s.Packets
 	r.EgressOctets = 0  // Not available in DSR
 	r.EgressPackets = 0 // Not available in DSR
 	r.Flows = s.Flows
+	r.MAC = mac
 
 	return r
 }
 
-func (b *Balancer) Service(s cue.Service) (xvs.ServiceExtended, error) {
-	xs := xvs.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}
-	return b.Client.Service(xs)
-}
-
-func (b *Balancer) Destinations(s cue.Service) ([]xvs.DestinationExtended, error) {
-	xs := xvs.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}
-	return b.Client.Destinations(xs)
-}
-
-func (b *Balancer) Destination(dst cue.Destination) mon.Destination {
-	return mon.Destination{Address: dst.Address, Port: dst.Port}
-}
-
-func (b *Balancer) Dest(s xvs.Service, d xvs.Destination) mon.Destination {
-	// DSR means no port mapping - use port from the service rather then dest
-	return mon.Destination{Address: d.Address, Port: s.Port}
-}
-
-func (b *Balancer) ServiceInstance(s cue.Service) mon.Instance {
-	return mon.Instance{Service: mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol}}
-}
-
-func (b *Balancer) DestinationInstance(s cue.Service, d cue.Destination) mon.Instance {
-	return mon.Instance{
-		Service:     mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol},
-		Destination: mon.Destination{Address: d.Address, Port: d.Port},
+func (b *Balancer) Destinations(s vc5.Service) (map[vc5.Destination]vc5.Stats, error) {
+	stats := map[vc5.Destination]vc5.Stats{}
+	xs := xvs.Service{Address: s.Address, Port: s.Port, Protocol: uint8(s.Protocol)}
+	ds, err := b.Client.Destinations(xs)
+	for _, d := range ds {
+		key := vc5.Destination{Address: d.Destination.Address, Port: s.Port}
+		stats[key] = _stats(d.Stats, d.MAC.String())
 	}
+
+	return stats, err
 }
 
-func (b *Balancer) MAC(d xvs.DestinationExtended) string {
-	return d.MAC.String()
-}
-
-func (b *Balancer) TCPStats() map[mon.Instance]tcpstats {
-	tcp := map[mon.Instance]tcpstats{}
+func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
+	tcp := map[vc5.Instance]vc5.TCPStats{}
 	svcs, _ := b.Client.Services()
 	for _, se := range svcs {
 		s := se.Service
 		dsts, _ := b.Client.Destinations(s)
 		for _, de := range dsts {
 			d := de.Destination
-			i := mon.Instance{
-				Service:     mon.Service{Address: s.Address, Port: s.Port, Protocol: s.Protocol},
-				Destination: mon.Destination{Address: d.Address, Port: s.Port},
+			i := vc5.Instance{
+				Service:     vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)},
+				Destination: vc5.Destination{Address: d.Address, Port: s.Port},
 			}
-			tcp[i] = tcpstats{ESTABLISHED: de.Stats.Current}
+			tcp[i] = vc5.TCPStats{ESTABLISHED: de.Stats.Current}
 		}
 	}
 
 	return tcp
 }
 
-func (b *Balancer) summary() (s Summary) {
+func (b *Balancer) summary() (s vc5.Summary) {
 	u := b.Client.Info()
 	s.Latency = u.Latency
 	s.Dropped = u.Dropped
@@ -200,6 +190,13 @@ func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok
 	}
 
 	return ok, diagnostic
+}
+
+func updown(b bool) string {
+	if b {
+		return "up"
+	}
+	return "down"
 }
 
 func notifyLog(instance mon.Instance, status bool) map[string]any {

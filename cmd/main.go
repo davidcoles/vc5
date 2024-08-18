@@ -19,7 +19,6 @@
 package main
 
 import (
-	"embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -40,12 +39,9 @@ import (
 	"github.com/davidcoles/cue"
 	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/xvs"
+
+	"vc5"
 )
-
-// TODO:
-
-//go:embed static/*
-var STATIC embed.FS
 
 func main() {
 
@@ -83,17 +79,14 @@ func main() {
 	file := args[0]
 	nics := args[1:]
 
-	config, err := Load(file)
+	config, err := vc5.Load(file)
 
 	if err != nil {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	//logs := &(config.Logging)
-	//logs.start()
-
-	logs := &sink{}
-	logs.start(config.logging())
+	logs := &vc5.Sink{}
+	logs.Start(config.Logging_())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -150,7 +143,7 @@ func main() {
 		if err != nil {
 			log.Fatal("Couldn't listen on BGP port", err)
 		}
-		go bgpListener(l, logs.sub("bgp"))
+		go bgpListener(l, logs.Sub("bgp"))
 	}
 
 	var cmd_sock net.Listener
@@ -173,10 +166,10 @@ func main() {
 		Interfaces: nics,
 		Address:    address,
 		Native:     *native,
-		VLANs:      config.vlans(),
+		VLANs:      config.Vlans(),
 		InitDelay:  uint8(*delay),
 		NAT:        true,
-		Debug:      &Debug{Log: logs.sub("xvs")},
+		Debug:      &Debug{Log: logs.Sub("xvs")},
 		MaxFlows:   uint32(*flows),
 	}
 
@@ -188,7 +181,7 @@ func main() {
 	}
 
 	if cmd_sock != nil {
-		go readCommands(cmd_sock, client, logs.sub("command"))
+		go readCommands(cmd_sock, client, logs.Sub("command"))
 	}
 
 	routerID := address.As4()
@@ -197,7 +190,7 @@ func main() {
 		routerID = [4]byte{127, 0, 0, 1}
 	}
 
-	pool := bgp.NewPool(routerID, config.bgp(uint16(*asn), *mp), nil, logs.sub("bgp"))
+	pool := bgp.NewPool(routerID, config.Bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
 
 	if pool == nil {
 		log.Fatal("BGP pool fail")
@@ -207,7 +200,7 @@ func main() {
 
 	balancer := &Balancer{
 		NetNS:  NetNS(socket.Name()),
-		Logger: logs.sub("balancer"),
+		Logger: logs.Sub("balancer"),
 		Client: client,
 	}
 
@@ -220,29 +213,29 @@ func main() {
 		multicast(client, config.Multicast)
 	}
 
-	err = director.Start(config.parse())
+	err = director.Start(config.Parse())
 
 	if err != nil {
 		logs.EMERG(F, "Couldn't start director:", err)
 		log.Fatal(err)
 	}
 
-	done := make(chan bool)
+	done := make(chan bool) // close this channel when we want to exit
 
-	vip := map[netip.Addr]State{}
+	vip := map[netip.Addr]vc5.State{}
 
 	var rib []netip.Addr
-	var summary Summary
+	var summary vc5.Summary
 
-	services, old, _ := serviceStatus(config, balancer, director, nil)
+	services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
 
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		for {
 			mutex.Lock()
-			summary.update(balancer.summary(), start)
-			services, old, summary.Current = serviceStatus(config, balancer, director, old)
+			summary.Update(balancer.summary(), start)
+			services, old, summary.Current = vc5.ServiceStatus(config, balancer, director, old)
 			mutex.Unlock()
 			select {
 			case <-ticker.C:
@@ -282,15 +275,15 @@ func main() {
 			}
 
 			mutex.Lock()
-			vip = vipState(services, vip, config.priorities(), logs)
-			rib = adjRIBOut(vip, initialised)
+			vip = vc5.VipState(services, vip, config.Priorities(), logs)
+			rib = vc5.AdjRIBOut(vip, initialised)
 			mutex.Unlock()
 
 			pool.RIB(rib)
 		}
 	}()
 
-	static := http.FS(STATIC)
+	static := http.FS(vc5.STATIC)
 	var fs http.FileSystem
 
 	if *webroot != "" {
@@ -319,7 +312,7 @@ func main() {
 	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
 
 		start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
-		logs := logs.get(start)
+		logs := logs.Get(start)
 		js, err := json.MarshalIndent(&logs, " ", " ")
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -417,17 +410,17 @@ func main() {
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		mutex.Lock()
 		js, err := json.MarshalIndent(struct {
-			Summary  Summary               `json:"summary"`
-			Services map[VIP][]Serv        `json:"services"`
-			BGP      map[string]bgp.Status `json:"bgp"`
-			VIP      []VIPStats            `json:"vip"`
-			RIB      []netip.Addr          `json:"rib"`
-			Logging  LogStats              `json:"logging"`
+			Summary  vc5.Summary            `json:"summary"`
+			Services map[vc5.VIP][]vc5.Serv `json:"services"`
+			BGP      map[string]bgp.Status  `json:"bgp"`
+			VIP      []vc5.VIPStats         `json:"vip"`
+			RIB      []netip.Addr           `json:"rib"`
+			Logging  vc5.LogStats           `json:"logging"`
 		}{
 			Summary:  summary,
 			Services: services,
 			BGP:      pool.Status(),
-			VIP:      vipStatus(services, vip),
+			VIP:      vc5.VipStatus(services, vip),
 			RIB:      rib,
 			Logging:  logs.Stats(),
 		}, " ", " ")
@@ -445,7 +438,7 @@ func main() {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 
 		mutex.Lock()
-		metrics := prometheus("vc5", services, summary, vip)
+		metrics := vc5.Prometheus("vc5", services, summary, vip)
 		mutex.Unlock()
 
 		w.Header().Set("Content-Type", "text/plain")
@@ -472,14 +465,14 @@ func main() {
 			fallthrough
 		case syscall.SIGUSR2:
 			logs.NOTICE(F, "Reload signal received")
-			conf, err := Load(file)
+			conf, err := vc5.Load(file)
 			if err == nil {
 				mutex.Lock()
 				config = conf
-				client.UpdateVLANs(config.vlans())
-				director.Configure(config.parse())
-				pool.Configure(config.bgp(uint16(*asn), *mp))
-				logs.configure(conf.logging())
+				client.UpdateVLANs(config.Vlans())
+				director.Configure(config.Parse())
+				pool.Configure(config.Bgp(uint16(*asn), *mp))
+				logs.Configure(conf.Logging_())
 				mutex.Unlock()
 			} else {
 				logs.ALERT(F, "Couldn't load config file:", file, err)
@@ -490,9 +483,27 @@ func main() {
 		case syscall.SIGQUIT:
 			fmt.Println("CLOSING")
 			close(done) // shut down BGP, etc
-			time.Sleep(4 * time.Second)
 			logs.ALERT(F, "Shutting down")
+			time.Sleep(4 * time.Second)
 			return
+		}
+	}
+}
+
+func bgpListener(l net.Listener, logs vc5.Logger) {
+	F := "listener"
+
+	for {
+		conn, err := l.Accept()
+
+		if err != nil {
+			logs.ERR(F, "Failed to accept connection", err)
+		} else {
+			go func(c net.Conn) {
+				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
+				defer c.Close()
+				time.Sleep(time.Second * 10)
+			}(conn)
 		}
 	}
 }

@@ -16,7 +16,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-package main
+package vc5
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-func prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips map[netip.Addr]State) []string {
+func Prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips map[netip.Addr]State) []string {
 	r := []string{help(p)}
 
 	var defcon uint8
@@ -57,14 +57,13 @@ func prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips 
 	now := time.Now()
 
 	for vip, s := range vips {
-		r = metric(r, p+`_vip_status{vip="%s"} %d`, vip, zeroone(s.up))
-		r = metric(r, p+`_vip_status_duration{vip="%s",status="%s"} %d`, vip, updown(s.up), now.Sub(s.time)/time.Second)
+		r = metric(r, p+`_vip_status{vip="%s"} %d`, vip, zeroone(s.Up()))
+		r = metric(r, p+`_vip_status_duration{vip="%s",status="%s"} %d`, vip, updown(s.Up()), now.Sub(s.Time())/time.Second)
 	}
 
 	for _, x := range services {
 		for _, s := range x {
-			//serv := fmt.Sprintf("%s:%d:%s", s.Address, s.Port, s.Protocol.string())
-			serv := fmt.Sprintf("%s:%s:%d", s.Address, s.Protocol.string(), s.Port)
+			serv := fmt.Sprintf("%s:%s:%d", s.Address, s.Protocol, s.Port)
 			name := s.Name
 			stat := s.Stats
 			up := zeroone(s.Up)
