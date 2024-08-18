@@ -199,7 +199,7 @@ func updown(b bool) string {
 	return "down"
 }
 
-func notifyLog(instance mon.Instance, status bool) map[string]any {
+func notifyLog(instance mon.Instance, state bool) map[string]any {
 
 	proto := func(p uint8) string {
 		switch instance.Service.Protocol {
@@ -212,12 +212,19 @@ func notifyLog(instance mon.Instance, status bool) map[string]any {
 	}
 
 	return map[string]any{
-		"state": updown(status),
+		"state": updown(state),
 		"proto": proto(instance.Service.Protocol),
 		"saddr": instance.Service.Address.String(),
 		"sport": instance.Service.Port,
 		"daddr": instance.Destination.Address.String(),
 		"dport": instance.Destination.Port,
+
+		//"state": updown(state),
+		//"service.protocol": proto(instance.Service.Protocol),
+		//"service.ip": instance.Service.Address.String(),
+		//"service.port": instance.Service.Port,
+		//"server.ip": instance.Destination.Address.String(),
+		//"server.port": instance.Destination.Port,
 	}
 }
 
@@ -231,6 +238,7 @@ func probeLog(instance mon.Instance, addr netip.Addr, check string, status bool,
 	r := resultLog(instance, status, diagnostic)
 	r["check"] = check
 	r["paddr"] = addr
+	//r["server.nat.ip"] = addr
 	return r
 }
 

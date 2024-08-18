@@ -25,7 +25,8 @@ import (
 	"time"
 )
 
-func Prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips map[netip.Addr]State) []string {
+//func Prometheus(p string, services map[netip.Addr][]Serv, summary Summary, vips map[netip.Addr]State) []string {
+func Prometheus(p string, services Services, summary Summary, vips map[netip.Addr]State) []string {
 	r := []string{help(p)}
 
 	var defcon uint8

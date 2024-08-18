@@ -409,21 +409,24 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		mutex.Lock()
-		js, err := json.MarshalIndent(struct {
-			Summary  vc5.Summary            `json:"summary"`
-			Services map[vc5.VIP][]vc5.Serv `json:"services"`
-			BGP      map[string]bgp.Status  `json:"bgp"`
-			VIP      []vc5.VIPStats         `json:"vip"`
-			RIB      []netip.Addr           `json:"rib"`
-			Logging  vc5.LogStats           `json:"logging"`
-		}{
-			Summary:  summary,
-			Services: services,
-			BGP:      pool.Status(),
-			VIP:      vc5.VipStatus(services, vip),
-			RIB:      rib,
-			Logging:  logs.Stats(),
-		}, " ", " ")
+		js, err := vc5.JSONStatus(summary, services, vip, pool, rib, logs.Stats())
+		/*
+			js, err := json.MarshalIndent(struct {
+				Summary  vc5.Summary           `json:"summary"`
+				Services vc5.Services          `json:"services"`
+				BGP      map[string]bgp.Status `json:"bgp"`
+				VIP      []vc5.VIPStats        `json:"vip"`
+				RIB      []netip.Addr          `json:"rib"`
+				Logging  vc5.LogStats          `json:"logging"`
+			}{
+				Summary:  summary,
+				Services: services,
+				BGP:      pool.Status(),
+				VIP:      vc5.VipStatus(services, vip),
+				RIB:      rib,
+				Logging:  logs.Stats(),
+			}, " ", " ")
+		*/
 		mutex.Unlock()
 
 		if err != nil {
@@ -431,8 +434,8 @@ func main() {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		js = append(js, 0x0a) // add a newline
 		w.Write(js)
-		w.Write([]byte("\n"))
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {

@@ -19,14 +19,19 @@
 package vc5
 
 import (
+	"encoding/json"
 	"net/netip"
 	"sort"
 	"time"
 
 	"github.com/davidcoles/cue"
+	"github.com/davidcoles/cue/bgp"
 )
 
-type Serv struct {
+type Services map[VIP][]serv
+
+//type Serv = serv
+type serv struct {
 	Name         string     `json:"name,omitempty"`
 	Description  string     `json:"description"`
 	Address      netip.Addr `json:"address"`
@@ -35,7 +40,7 @@ type Serv struct {
 	Required     uint8      `json:"required"`
 	Available    uint8      `json:"available"`
 	Stats        Stats      `json:"stats"`
-	Destinations []Dest     `json:"destinations,omitempty"`
+	Destinations []dest     `json:"destinations,omitempty"`
 	Up           bool       `json:"up"`
 	For          uint64     `json:"for"`
 	Last         uint64     `json:"last"`
@@ -43,7 +48,8 @@ type Serv struct {
 	Scheduler    string     `json:"scheduler"`
 }
 
-type Dest struct {
+//type Dest = dest
+type dest struct {
 	Address    netip.Addr `json:"address"`
 	Port       uint16     `json:"port"`
 	Stats      Stats      `json:"stats"`
@@ -134,7 +140,8 @@ type VIPStats struct {
 	For   uint64 `json:"for"`
 }
 
-func VipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
+//func VipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
+func VipStatus(in Services, foo map[netip.Addr]State) (out []VIPStats) {
 
 	for vip, list := range in {
 		var stats Stats
@@ -289,12 +296,13 @@ type TCPStats struct {
 	TIME_WAIT   uint64
 }
 
-func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (map[netip.Addr][]Serv, map[Instance]Stats, uint64) {
+//func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (map[netip.Addr][]Serv, map[Instance]Stats, uint64) {
+func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (Services, map[Instance]Stats, uint64) {
 
 	var current uint64
 
 	stats := map[Instance]Stats{}
-	status := map[netip.Addr][]Serv{}
+	status := Services{} //map[netip.Addr][]Serv{}
 	tcpstats := balancer.TCPStats()
 
 	for _, svc := range director.Status() {
@@ -308,7 +316,7 @@ func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 			sum.add(s)
 		}
 
-		serv := Serv{
+		serv := serv{
 			Name:        cnf.Name,
 			Description: cnf.Description,
 			Address:     svc.Address,
@@ -325,7 +333,7 @@ func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 
 		for _, dst := range svc.Destinations {
 			key := destinationInstance(svc, dst)
-			dest := Dest{
+			dest := dest{
 				Address:    dst.Address,
 				Port:       dst.Port,
 				Disabled:   dst.Disabled,
@@ -376,4 +384,22 @@ func destinationInstance(s cue.Service, d cue.Destination) Instance {
 }
 func serviceInstance(s cue.Service) Instance {
 	return Instance{Service: Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}}
+}
+
+func JSONStatus(summary Summary, services Services, vips map[netip.Addr]State, pool *bgp.Pool, rib []netip.Addr, logstats LogStats) ([]byte, error) {
+	return json.MarshalIndent(struct {
+		Summary  Summary               `json:"summary"`
+		Services Services              `json:"services"`
+		BGP      map[string]bgp.Status `json:"bgp"`
+		VIP      []VIPStats            `json:"vip"`
+		RIB      []netip.Addr          `json:"rib"`
+		Logging  LogStats              `json:"logging"`
+	}{
+		Summary:  summary,
+		Services: services,
+		BGP:      pool.Status(),
+		VIP:      VipStatus(services, vips),
+		RIB:      rib,
+		Logging:  logstats,
+	}, " ", " ")
 }
