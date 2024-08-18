@@ -344,14 +344,14 @@ sub service() {
     my($type, $tcp, $port, $policy, $defaults) = @_;
     my $protocol = $tcp ? "tcp" : "udp";
 
-    my %defaults = %$defaults if defined $defaults;
+    my %defaults = %$defaults if defined $defaults; # SUSPECT
     
     $defaults{_host} = $policy->{'host'}   if exists $policy->{'host'};
     $defaults{_path} = $policy->{'path'}   if exists $policy->{'path'};
     $defaults{_meth} = $policy->{'method'} if exists $policy->{'method'};
     $defaults{_expc} = $policy->{'expect'} if exists $policy->{'expect'};
 
-    my @checks = @{$policy->{'checks'}} if defined $policy->{'checks'};
+    my @checks = @{$policy->{'checks'}} if defined $policy->{'checks'}; # SUSPECT
     
     return {
 	_prot => $protocol,
@@ -481,13 +481,17 @@ sub new_rhi {
     my($rhi, $map) = @_;
 
     my $default = params($rhi);
-    my %peers = map { $_ => $default } @{$rhi->{'peers'}} if defined $rhi->{'peers'};
+    my %peers = map { $_ => $default } @{$rhi->{'peers'}} if defined $rhi->{'peers'}; # SUSPECT
     
 
     if(defined $rhi->{'groups'}) {
 	foreach my $g (@{$rhi->{'groups'}}) {
-	    my @accept = map { filter($map, $_) } @{$g->{'accept'}} if defined $g->{'accept'};
-	    my @reject = map { filter($map, $_) } @{$g->{'reject'}} if defined $g->{'reject'};
+	    #my @accept = map { filter($map, $_) } @{$g->{'accept'}} if defined $g->{'accept'};
+	    #my @reject = map { filter($map, $_) } @{$g->{'reject'}} if defined $g->{'reject'};
+	    my @accept;
+	    my @reject;
+	    @accept = map { filter($map, $_) } @{$g->{'accept'}} if defined $g->{'accept'};
+	    @reject = map { filter($map, $_) } @{$g->{'reject'}} if defined $g->{'reject'};
 	    
 	    my $d = params($g, %$default);
 	    

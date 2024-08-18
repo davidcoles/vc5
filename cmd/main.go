@@ -220,7 +220,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	done := make(chan bool)
+	done := make(chan bool) // close this channel when we want to exit
 
 	vip := map[netip.Addr]vc5.State{}
 
