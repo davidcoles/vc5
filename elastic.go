@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 
@@ -15,10 +16,11 @@ import (
 // https://www.elastic.co/guide/en/elasticsearch/reference/7.17/security-minimal-setup.html
 
 type Elasticsearch struct {
-	Index     string   `json:"index,omitempty"`
-	Addresses []string `json:"addresses,omitempty"`
-	Username  secret   `json:"username,omitempty"`
-	Password  secret   `json:"password,omitempty"`
+	Index      string   `json:"index,omitempty"`
+	Addresses  []string `json:"addresses,omitempty"`
+	Username   secret   `json:"username,omitempty"`
+	Password   secret   `json:"password,omitempty"`
+	DataStream bool     `json:"data_stream,omitempty"`
 
 	c       chan string
 	mutex   sync.Mutex
@@ -49,10 +51,14 @@ func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
 
 	ctx := context.Background()
 	req := esapi.IndexRequest{
-		Index:      e.Index,
-		DocumentID: fmt.Sprintf("%s-%d", host, id),
-		Body:       bytes.NewReader(body),
-		Refresh:    "true",
+		Index: e.Index,
+		//DocumentID: fmt.Sprintf("%s-%d", host, id),
+		Body:    bytes.NewReader(body),
+		Refresh: "true",
+	}
+
+	if !e.DataStream {
+		req.DocumentID = fmt.Sprintf("%s-%d", host, id)
 	}
 
 	res, err := req.Do(ctx, e.client)
@@ -62,6 +68,10 @@ func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
 	}
 
 	defer res.Body.Close()
+
+	if res.StatusCode != 201 {
+		log.Println(err, res.StatusCode, string(body))
+	}
 
 	return res.StatusCode == 201
 }

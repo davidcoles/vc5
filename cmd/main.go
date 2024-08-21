@@ -91,8 +91,9 @@ func main() {
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
 	if err != nil {
-		logs.EMERG(F, "socket", err)
-		log.Fatal(err)
+		//logs.EMERG(F, "socket", err)
+		//log.Fatal(err)
+		logs.Fatal(F, "socket", KV{"error.message": err.Error()})
 	}
 
 	defer os.Remove(socket.Name())
@@ -118,15 +119,17 @@ func main() {
 	}
 
 	if len(nics) < 1 {
-		logs.EMERG(F, "No interfaces defined")
-		log.Fatal("No interfaces defined")
+		//logs.EMERG(F, "No interfaces defined")
+		//log.Fatal("No interfaces defined")
+		logs.Fatal(F, "args", KV{"error.message": "No interfaces defined"})
 	}
 
 	address := netip.MustParseAddr(*addr)
 
 	if !address.Is4() {
-		logs.EMERG(F, "Address is not IPv4:", address)
-		log.Fatal("Address is not IPv4: ", address)
+		//logs.EMERG(F, "Address is not IPv4:", address)
+		//log.Fatal("Address is not IPv4: ", address)
+		logs.Fatal(F, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
 	}
 
 	var listener net.Listener
@@ -176,12 +179,13 @@ func main() {
 	err = client.Start()
 
 	if err != nil {
-		logs.EMERG(F, "Couldn't start client:", err)
-		log.Fatal("Couldn't start client: ", err)
+		//logs.EMERG(F, "Couldn't start client:", err)
+		//log.Fatal("Couldn't start client: ", err)
+		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
 	if cmd_sock != nil {
-		go readCommands(cmd_sock, client, logs.Sub("command"))
+		go readCommands(cmd_sock, client, logs.Sub("xvs"))
 	}
 
 	routerID := address.As4()
@@ -216,8 +220,9 @@ func main() {
 	err = director.Start(config.Parse())
 
 	if err != nil {
-		logs.EMERG(F, "Couldn't start director:", err)
-		log.Fatal(err)
+		//logs.EMERG(F, "Couldn't start director:", err)
+		//log.Fatal(err)
+		logs.Fatal(F, "director", KV{"error.message": "Couldn't start director: " + err.Error()})
 	}
 
 	done := make(chan bool) // close this channel when we want to exit
@@ -228,6 +233,8 @@ func main() {
 	var summary vc5.Summary
 
 	services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
+
+	vipmap := vc5.VipMap(nil)
 
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
@@ -262,6 +269,11 @@ func main() {
 		for {
 			select {
 			case <-ticker.C: // check for matured VIPs
+				mutex.Lock()
+				//vc5.VipMap(director.Status())
+				vipmap = vc5.VipLog(director.Status(), vipmap, config.Priorities(), logs)
+				mutex.Unlock()
+
 			case <-director.C: // a backend has changed state
 				mutex.Lock()
 				services = director.Status()
@@ -270,7 +282,9 @@ func main() {
 			case <-done: // shuting down
 				return
 			case <-timer.C:
-				logs.NOTICE(F, KV{"event": "Learn timer expired"})
+				//logs.NOTICE(F, KV{"event": "Learn timer expired"})
+				//logs.NOTICE(F, KV{"event.action": "learn-timer-expired"})
+				logs.Alert(vc5.NOTICE, F, "learn-timer-expired", KV{})
 				initialised = true
 			}
 
@@ -452,12 +466,14 @@ func main() {
 		for {
 			server := http.Server{}
 			err := server.Serve(listener)
-			logs.ALERT(F, "Webserver exited: "+err.Error())
+			//logs.ALERT(F, "Webserver exited: "+err.Error())
+			logs.Alert(vc5.ALERT, F, "webserver", KV{"error.message": err.Error()})
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	logs.ALERT(F, "Initialised")
+	//logs.ALERT(F, "Initialised")
+	logs.Alert(vc5.ALERT, F, "initialised", KV{})
 
 	sig := make(chan os.Signal, 10)
 	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
@@ -467,7 +483,8 @@ func main() {
 		case syscall.SIGINT:
 			fallthrough
 		case syscall.SIGUSR2:
-			logs.NOTICE(F, "Reload signal received")
+			//logs.NOTICE(F, "Reload signal received")
+			logs.Alert(vc5.NOTICE, F, "reload", KV{})
 			conf, err := vc5.Load(file)
 			if err == nil {
 				mutex.Lock()
@@ -478,7 +495,8 @@ func main() {
 				logs.Configure(conf.Logging_())
 				mutex.Unlock()
 			} else {
-				logs.ALERT(F, "Couldn't load config file:", file, err)
+				//logs.ALERT(F, "Couldn't load config file:", file, err)
+				logs.Alert(vc5.ALERT, F, "config", KV{"error.message": fmt.Sprint("Couldn't load config file:", file, err)})
 			}
 
 		case syscall.SIGTERM:
@@ -486,7 +504,8 @@ func main() {
 		case syscall.SIGQUIT:
 			fmt.Println("CLOSING")
 			close(done) // shut down BGP, etc
-			logs.ALERT(F, "Shutting down")
+			//logs.ALERT(F, "Shutting down")
+			logs.Alert(vc5.ALERT, F, "exiting", KV{})
 			time.Sleep(4 * time.Second)
 			return
 		}
@@ -500,10 +519,12 @@ func bgpListener(l net.Listener, logs vc5.Logger) {
 		conn, err := l.Accept()
 
 		if err != nil {
-			logs.ERR(F, "Failed to accept connection", err)
+			//logs.ERR(F, "Failed to accept connection", err)
+			logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
 		} else {
 			go func(c net.Conn) {
-				logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
+				//logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
+				logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
 				defer c.Close()
 				time.Sleep(time.Second * 10)
 			}(conn)

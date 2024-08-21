@@ -20,6 +20,7 @@ package vc5
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/netip"
 	"sort"
 	"time"
@@ -165,7 +166,7 @@ func VipStatus(in Services, foo map[netip.Addr]State) (out []VIPStats) {
 }
 
 func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
-	facility := "vips"
+	facility := "vip"
 
 	rib := map[netip.Addr]bool{}
 	new := map[netip.Addr]State{}
@@ -176,17 +177,22 @@ func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 
 	for _, v := range cue.AllVIPs(services) {
 		p, _ := priorities[v]
-		log := logs.ERR
+		//log := logs.ERR
+		var severity uint8 = 7
 
 		switch p {
 		case CRITICAL:
-			log = logs.ERR
+			//log = logs.ERR
+			severity = 3
 		case HIGH:
-			log = logs.WARNING
+			//log = logs.WARNING
+			severity = 4
 		case MEDIUM:
-			log = logs.NOTICE
+			//log = logs.NOTICE
+			severity = 5
 		case LOW:
-			log = logs.INFO
+			//log = logs.INFO
+			severity = 6
 		}
 
 		updown := func(b bool) string {
@@ -201,18 +207,92 @@ func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 
 			if o.up != up {
 				new[v] = State{up: up, time: time.Now()}
-				log(facility, KV{"vip": v, "state": updown(up), "event": "vip"})
+				//log(facility, KV{"vip": v, "state": updown(up), "event": "vip"})
+				//log(facility, KV{"service.ip": v, "service.state": updown(up), "event.action": "state-change"})
+				////logs.Event(severity, facility, "state-change", KV{"service.ip": v, "service.state": updown(up)})
 			} else {
 				new[v] = o
+				// previous logging only reports when VIP changes state - it would be goog to keep a continuous record of state also
+				//logs.DEBUG(facility, KV{"service.ip": v, "service.state": updown(up)})
+				////logs.Event(7, facility, "state", KV{"service.ip": v, "service.state": updown(up)})
+
 			}
 
 		} else {
-			log(facility, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
+			//log(facility, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
+			//log(facility, KV{"service.ip": v, "service.state": updown(rib[v]), "event.action": "created"})
+			////logs.Event(severity, facility, "created", KV{"service.ip": v, "service.state": updown(rib[v])})
 			new[v] = State{up: rib[v], time: time.Now()}
 		}
 	}
 
 	return new
+}
+
+func VipMap(services []cue.Service) map[netip.Addr]bool {
+
+	m := map[netip.Addr]bool{}
+
+	for _, v := range cue.AllVIPs(services) {
+		m[v] = false
+	}
+
+	for _, v := range cue.HealthyVIPs(services) {
+		m[v] = true
+	}
+
+	fmt.Println(m)
+
+	return m
+}
+
+func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]bool {
+
+	f := "vip"
+
+	updown := func(b bool) string {
+		if b {
+			return "up"
+		}
+		return "down"
+	}
+
+	m := VipMap(services)
+
+	for vip, state := range m {
+
+		p, _ := priorities[vip]
+		var severity uint8 = ERR
+
+		switch p {
+		case CRITICAL:
+			severity = ERR
+		case HIGH:
+			severity = WARNING
+		case MEDIUM:
+			severity = NOTICE
+		case LOW:
+			severity = INFO
+		}
+
+		if was, exists := old[vip]; exists {
+			if state != was {
+				logs.Alert(severity, f, "state", KV{"service.ip": vip, "service.state": updown(state)})
+			}
+		} else {
+			logs.Alert(INFO, f, "added", KV{"service.ip": vip, "service.state": updown(state)})
+		}
+
+		logs.Event(DEBUG, f, "state", KV{"service.ip": vip, "service.state": updown(state)})
+	}
+
+	for vip, _ := range old {
+		if _, exists := m[vip]; !exists {
+			logs.Alert(6, f, "deleted", KV{"service.ip": vip})
+		}
+	}
+
+	return m
 }
 
 func AdjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
@@ -266,8 +346,8 @@ type Instance struct {
 }
 
 type Balancer interface {
-	TCPStats() map[Instance]TCPStats
 	Destinations(s Service) (map[Destination]Stats, error)
+	TCPStats() map[Instance]TCPStats
 }
 
 func calculateRate(s Stats, o Stats) Stats {
