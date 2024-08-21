@@ -209,20 +209,27 @@ func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 				new[v] = State{up: up, time: time.Now()}
 				//log(facility, KV{"vip": v, "state": updown(up), "event": "vip"})
 				//log(facility, KV{"service.ip": v, "service.state": updown(up), "event.action": "state-change"})
-				////logs.Event(severity, facility, "state-change", KV{"service.ip": v, "service.state": updown(up)})
+				if false {
+					logs.Event(severity, facility, "state-change", KV{"service.ip": v, "service.state": updown(up)})
+				}
+
 			} else {
 				new[v] = o
 				// previous logging only reports when VIP changes state - it would be goog to keep a continuous record of state also
 				//logs.DEBUG(facility, KV{"service.ip": v, "service.state": updown(up)})
-				////logs.Event(7, facility, "state", KV{"service.ip": v, "service.state": updown(up)})
+				if false {
+					logs.Event(7, facility, "state", KV{"service.ip": v, "service.state": updown(up)})
+				}
 
 			}
 
 		} else {
 			//log(facility, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
 			//log(facility, KV{"service.ip": v, "service.state": updown(rib[v]), "event.action": "created"})
-			////logs.Event(severity, facility, "created", KV{"service.ip": v, "service.state": updown(rib[v])})
-			new[v] = State{up: rib[v], time: time.Now()}
+			logs.Event(severity, facility, "created", KV{"service.ip": v, "service.state": updown(rib[v])})
+			if false {
+				new[v] = State{up: rib[v], time: time.Now()}
+			}
 		}
 	}
 
