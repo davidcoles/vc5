@@ -226,10 +226,11 @@ func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 		} else {
 			//log(facility, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
 			//log(facility, KV{"service.ip": v, "service.state": updown(rib[v]), "event.action": "created"})
-			logs.Event(severity, facility, "created", KV{"service.ip": v, "service.state": updown(rib[v])})
 			if false {
-				new[v] = State{up: rib[v], time: time.Now()}
+				logs.Event(severity, facility, "created", KV{"service.ip": v, "service.state": updown(rib[v])})
 			}
+			new[v] = State{up: rib[v], time: time.Now()}
+
 		}
 	}
 
