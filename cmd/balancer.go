@@ -20,7 +20,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"net/netip"
 
 	"github.com/davidcoles/cue"
@@ -76,8 +75,7 @@ func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
 	return tcp
 }
 
-func (b *Balancer) Configure(services []cue.Service) error { return b.configure(services) }
-func (b *Balancer) configure(services []cue.Service) error {
+func (b *Balancer) Configure(services []cue.Service) error {
 
 	type tuple struct {
 		Address  netip.Addr
@@ -143,57 +141,6 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 	return
 }
 
-// event.module:
-// - health-check: state-change state check
-// - vip-status
-// - service-status
-//
-
-func _cs(s mon.Service) vc5.Service {
-	return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
-}
-
-func _cd(d mon.Destination) vc5.Destination {
-	return vc5.Destination{Address: d.Address, Port: d.Port}
-}
-
-type _s bool
-
-func (s _s) String() string {
-	if s {
-		return "up"
-	}
-	return "down"
-}
-
-// interface method called by mon when a destination's health status transitions up or down
-func (b *Balancer) Notify(instance mon.Instance, state bool) {
-	if logger := b.Logger; logger != nil {
-		text := fmt.Sprintf("Backend %s for service %s went %s", _cd(instance.Destination), _cs(instance.Service), _s(state))
-		logger.Alert(5, "healthcheck", "state", notifyLog(instance, state), text)
-	}
-}
-
-// interface method called by mon every time a round of checks for a service on a destination is completed
-func (b *Balancer) Result(instance mon.Instance, state bool, diagnostic string) {
-	if logger := b.Logger; logger != nil {
-		logger.Event(7, "healthcheck", "state", resultLog(instance, state, diagnostic))
-	}
-}
-
-func (b *Balancer) Check(instance mon.Instance, check string, round uint64, state bool, diagnostic string) {
-	nat, _ := b.Client.NATAddress(instance.Service.Address, instance.Destination.Address)
-
-	// check.type
-	// check.status
-	// check.port
-	// check.url
-
-	if logger := b.Logger; logger != nil {
-		logger.Event(7, "healthcheck", "check", checkLog(instance, state, diagnostic, check, round, nat))
-	}
-}
-
 // interface method called by mon when a destination needs to be probed - find the NAT address and probe that via the netns
 func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok bool, diagnostic string) {
 
@@ -208,49 +155,4 @@ func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok
 	}
 
 	return ok, diagnostic
-}
-
-func updown(b bool) string {
-	if b {
-		return "up"
-	}
-	return "down"
-}
-
-func notifyLog(instance mon.Instance, state bool) map[string]any {
-
-	proto := func(p uint8) string {
-		switch instance.Service.Protocol {
-		case TCP:
-			return "tcp"
-		case UDP:
-			return "udp"
-		}
-		return fmt.Sprintf("%d", p)
-	}
-
-	// https://www.elastic.co/guide/en/ecs/current/ecs-base.html
-	// https://github.com/elastic/ecs/blob/main/generated/csv/fields.csv
-	return map[string]any{
-		"service.state":    updown(state),
-		"service.protocol": proto(instance.Service.Protocol),
-		"service.ip":       instance.Service.Address.String(),
-		"service.port":     instance.Service.Port,
-		"destination.ip":   instance.Destination.Address.String(),
-		"destination.port": instance.Destination.Port,
-	}
-}
-
-func resultLog(instance mon.Instance, status bool, diagnostic string) map[string]any {
-	r := notifyLog(instance, status)
-	r["diagnostic"] = diagnostic
-	return r
-}
-
-func checkLog(instance mon.Instance, status bool, diagnostic string, check string, round uint64, nat netip.Addr) map[string]any {
-	r := resultLog(instance, status, diagnostic)
-	r["check"] = check
-	r["round"] = round
-	r["destination.nat.ip"] = nat
-	return r
 }

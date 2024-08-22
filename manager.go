@@ -44,15 +44,17 @@ type Manager struct {
 	rib      []netip.Addr
 	asn      uint16
 	mp       bool
+	nat      func(netip.Addr, netip.Addr) netip.Addr
 }
 
-func (m *Manager) Manage(notifier mon.Notifier, prober mon.Prober, routerID [4]byte, asn uint16, mp bool, done chan bool) error {
+func (m *Manager) Manage(nat func(netip.Addr, netip.Addr) netip.Addr, prober mon.Prober, routerID [4]byte, asn uint16, mp bool, done chan bool) error {
 
 	m.Director = &cue.Director{}
 
-	if notifier != nil {
-		m.Director.Notifier = notifier
-	}
+	//if notifier != nil {
+	//	m.Director.Notifier = notifier
+	//}
+	m.Director.Notifier = m
 
 	if prober != nil {
 		m.Director.Prober = prober
@@ -60,6 +62,7 @@ func (m *Manager) Manage(notifier mon.Notifier, prober mon.Prober, routerID [4]b
 
 	m.asn = asn
 	m.mp = mp
+	m.nat = nat
 
 	m.Pool = bgp.NewPool(routerID, m.Config.Bgp(asn, mp), nil, m.Logs.Sub("bgp"))
 
@@ -74,16 +77,12 @@ func (m *Manager) Manage(notifier mon.Notifier, prober mon.Prober, routerID [4]b
 	start := time.Now()
 	F := "vc5"
 
-	m.vip = map[netip.Addr]State{}
-
-	//var rib []netip.Addr
-	//var summary Summary
-
 	var old map[Instance]Stats
+
+	m.vip = map[netip.Addr]State{}
 	m.services, old, _ = ServiceStatus(m.Config, m.Balancer, m.Director, nil)
 
-	//vipmap := VipMap(nil) // test, but need to move vip management into man lb library
-
+	// Collect stats
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
@@ -124,7 +123,7 @@ func (m *Manager) Manage(notifier mon.Notifier, prober mon.Prober, routerID [4]b
 			case <-m.Director.C: // a backend has changed state
 				m.mutex.Lock()
 				services = m.Director.Status()
-				m.Balancer.Configure(services)
+				m.Balancer.Configure(services) // may want to do this outside of log with a deep copy of services
 				m.mutex.Unlock()
 			case <-done: // shuting down
 				return
@@ -165,7 +164,7 @@ func (m *Manager) Cue() ([]byte, error) {
 func (m *Manager) JSONStatus() ([]byte, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	return JSONStatus(m.summary, m.services, m.vip, m.Pool, m.rib, m.Logs.Stats())
+	return jsonStatus(m.summary, m.services, m.vip, m.Pool, m.rib, m.Logs.Stats())
 }
 
 //func Prometheus(p string, services Services, summary Summary, vips map[netip.Addr]State) []string {
@@ -173,4 +172,108 @@ func (m *Manager) Prometheus(s string) []string {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return Prometheus(s, m.services, m.summary, m.vip)
+}
+
+func jsonStatus(summary Summary, services Services, vips map[netip.Addr]State, pool *bgp.Pool, rib []netip.Addr, logstats LogStats) ([]byte, error) {
+	return json.MarshalIndent(struct {
+		Summary  Summary               `json:"summary"`
+		Services Services              `json:"services"`
+		BGP      map[string]bgp.Status `json:"bgp"`
+		VIP      []VIPStats            `json:"vip"`
+		RIB      []netip.Addr          `json:"rib"`
+		Logging  LogStats              `json:"logging"`
+	}{
+		Summary:  summary,
+		Services: services,
+		BGP:      pool.Status(),
+		VIP:      VipStatus(services, vips),
+		RIB:      rib,
+		Logging:  logstats,
+	}, " ", " ")
+}
+
+/**********************************************************************/
+
+func _cs(s mon.Service) Service {
+	return Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
+}
+
+func _cd(d mon.Destination) Destination {
+	return Destination{Address: d.Address, Port: d.Port}
+}
+
+type _s bool
+
+func (s _s) String() string {
+	if s {
+		return "up"
+	}
+	return "down"
+}
+
+// interface method called by mon when a destination's health status transitions up or down
+func (m *Manager) Notify(instance mon.Instance, state bool) {
+	text := fmt.Sprintf("Backend %s for service %s went %s", _cd(instance.Destination), _cs(instance.Service), _s(state))
+	m.Logs.Alert(5, "healthcheck", "state", notifyLog(instance, state), text)
+}
+
+// interface method called by mon every time a round of checks for a service on a destination is completed
+func (m *Manager) Result(instance mon.Instance, state bool, diagnostic string) {
+	m.Logs.Event(7, "healthcheck", "state", resultLog(instance, state, diagnostic))
+}
+
+func (m *Manager) Check(instance mon.Instance, check string, round uint64, state bool, diagnostic string) {
+	if m.nat == nil {
+		m.Logs.Event(7, "healthcheck", "check", checkLog(instance, state, diagnostic, check, round))
+	} else {
+		nat := m.nat(instance.Service.Address, instance.Destination.Address)
+		m.Logs.Event(7, "healthcheck", "check", natLog(instance, state, diagnostic, check, round, nat))
+	}
+
+}
+
+func notifyLog(instance mon.Instance, state bool) map[string]any {
+
+	proto := func(p uint8) string {
+		switch instance.Service.Protocol {
+		case TCP:
+			return "tcp"
+		case UDP:
+			return "udp"
+		}
+		return fmt.Sprintf("%d", p)
+	}
+
+	// https://www.elastic.co/guide/en/ecs/current/ecs-base.html
+	// https://github.com/elastic/ecs/blob/main/generated/csv/fields.csv
+	return map[string]any{
+		"service.state":    updown(state),
+		"service.protocol": proto(instance.Service.Protocol),
+		"service.ip":       instance.Service.Address.String(),
+		"service.port":     instance.Service.Port,
+		"destination.ip":   instance.Destination.Address.String(),
+		"destination.port": instance.Destination.Port,
+	}
+}
+
+func resultLog(instance mon.Instance, status bool, diagnostic string) map[string]any {
+	r := notifyLog(instance, status)
+	r["diagnostic"] = diagnostic
+	return r
+}
+
+func checkLog(instance mon.Instance, status bool, diagnostic string, check string, round uint64) map[string]any {
+	r := resultLog(instance, status, diagnostic)
+	r["check"] = check
+	r["round"] = round
+	//r["destination.nat.ip"] = nat
+	return r
+}
+
+func natLog(instance mon.Instance, status bool, diagnostic string, check string, round uint64, nat netip.Addr) map[string]any {
+	r := resultLog(instance, status, diagnostic)
+	r["check"] = check
+	r["round"] = round
+	r["destination.nat.ip"] = nat
+	return r
 }

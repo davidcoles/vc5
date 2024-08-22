@@ -19,14 +19,12 @@
 package vc5
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/netip"
 	"sort"
 	"time"
 
 	"github.com/davidcoles/cue"
-	"github.com/davidcoles/cue/bgp"
 )
 
 type Services map[VIP][]serv
@@ -455,22 +453,4 @@ func destinationInstance(s cue.Service, d cue.Destination) Instance {
 }
 func serviceInstance(s cue.Service) Instance {
 	return Instance{Service: Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}}
-}
-
-func JSONStatus(summary Summary, services Services, vips map[netip.Addr]State, pool *bgp.Pool, rib []netip.Addr, logstats LogStats) ([]byte, error) {
-	return json.MarshalIndent(struct {
-		Summary  Summary               `json:"summary"`
-		Services Services              `json:"services"`
-		BGP      map[string]bgp.Status `json:"bgp"`
-		VIP      []VIPStats            `json:"vip"`
-		RIB      []netip.Addr          `json:"rib"`
-		Logging  LogStats              `json:"logging"`
-	}{
-		Summary:  summary,
-		Services: services,
-		BGP:      pool.Status(),
-		VIP:      VipStatus(services, vips),
-		RIB:      rib,
-		Logging:  logstats,
-	}, " ", " ")
 }

@@ -199,24 +199,18 @@ func main() {
 
 	done := make(chan bool) // close this channel when we want to exit
 
-	/*
-		pool := bgp.NewPool(routerID, config.Bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
-
-		if pool == nil {
-			log.Fatal("BGP pool fail")
-		}
-	*/
+	nat := func(vip, rip netip.Addr) netip.Addr {
+		nat, _ := client.NATAddress(vip, rip)
+		return nat
+	}
 
 	manager := vc5.Manager{
 		Config:   config,
 		Balancer: balancer,
-		//Pool:     pool,
-		Logs: logs,
+		Logs:     logs,
 	}
 
-	err = manager.Manage(balancer, balancer, routerID, uint16(*asn), *mp, done)
-
-	if err != nil {
+	if err := manager.Manage(nat, balancer, routerID, uint16(*asn), *mp, done); err != nil {
 		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
 
