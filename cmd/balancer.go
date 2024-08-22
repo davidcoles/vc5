@@ -76,6 +76,7 @@ func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
 	return tcp
 }
 
+func (b *Balancer) Configure(services []cue.Service) error { return b.configure(services) }
 func (b *Balancer) configure(services []cue.Service) error {
 
 	type tuple struct {
@@ -124,7 +125,8 @@ func (b *Balancer) configure(services []cue.Service) error {
 	return nil
 }
 
-func (b *Balancer) summary() (s vc5.Summary) {
+//func (b *Balancer) summary() (s vc5.Summary) {
+func (b *Balancer) Summary() (s vc5.Summary) {
 	u := b.Client.Info()
 	s.Latency = u.Latency
 	s.Dropped = u.Dropped

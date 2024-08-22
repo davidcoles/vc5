@@ -49,7 +49,7 @@ func main() {
 
 	var mutex sync.Mutex
 
-	start := time.Now()
+	//start := time.Now()
 	webroot := flag.String("r", "", "webserver root directory")
 	webserver := flag.String("w", ":80", "webserver listen address")
 	sock := flag.String("s", "", "socket") // used internally
@@ -227,74 +227,86 @@ func main() {
 
 	done := make(chan bool) // close this channel when we want to exit
 
-	vip := map[netip.Addr]vc5.State{}
+	manager := vc5.Manager{
+		Config:   config,
+		Director: director,
+		Balancer: balancer,
+		Pool:     pool,
+		Logs:     logs,
+	}
 
-	var rib []netip.Addr
-	var summary vc5.Summary
+	manager.Manage(done)
 
-	services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
+	/*
+		vip := map[netip.Addr]vc5.State{}
 
-	//vipmap := vc5.VipMap(nil) // test, but need to move vip management into man lb library
+		var rib []netip.Addr
+		var summary vc5.Summary
 
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		for {
-			mutex.Lock()
-			summary.Update(balancer.summary(), start)
-			services, old, summary.Current = vc5.ServiceStatus(config, balancer, director, old)
-			mutex.Unlock()
-			select {
-			case <-ticker.C:
-			case <-done:
-				return
+		services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
+
+		//vipmap := vc5.VipMap(nil) // test, but need to move vip management into man lb library
+
+		go func() {
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				mutex.Lock()
+				summary.Update(balancer.summary(), start)
+				services, old, summary.Current = vc5.ServiceStatus(config, balancer, director, old)
+				mutex.Unlock()
+				select {
+				case <-ticker.C:
+				case <-done:
+					return
+				}
 			}
-		}
-	}()
-
-	go func() { // advertise VIPs via BGP
-		timer := time.NewTimer(config.Learn * time.Second)
-		ticker := time.NewTicker(5 * time.Second)
-		services := director.Status()
-
-		defer func() {
-			ticker.Stop()
-			timer.Stop()
-			pool.RIB(nil)
-			time.Sleep(2 * time.Second)
-			pool.Close()
 		}()
 
-		var initialised bool
-		for {
-			select {
-			case <-ticker.C: // check for matured VIPs
-				//mutex.Lock()
-				//vipmap = vc5.VipLog(director.Status(), vipmap, config.Priorities(), logs)
-				//mutex.Unlock()
+		go func() { // advertise VIPs via BGP
+			timer := time.NewTimer(config.Learn * time.Second)
+			ticker := time.NewTicker(5 * time.Second)
+			services := director.Status()
 
-			case <-director.C: // a backend has changed state
+			defer func() {
+				ticker.Stop()
+				timer.Stop()
+				pool.RIB(nil)
+				time.Sleep(2 * time.Second)
+				pool.Close()
+			}()
+
+			var initialised bool
+			for {
+				select {
+				case <-ticker.C: // check for matured VIPs
+					//mutex.Lock()
+					//vipmap = vc5.VipLog(director.Status(), vipmap, config.Priorities(), logs)
+					//mutex.Unlock()
+
+				case <-director.C: // a backend has changed state
+					mutex.Lock()
+					services = director.Status()
+					balancer.configure(services)
+					mutex.Unlock()
+				case <-done: // shuting down
+					return
+				case <-timer.C:
+					//logs.NOTICE(F, KV{"event": "Learn timer expired"})
+					//logs.NOTICE(F, KV{"event.action": "learn-timer-expired"})
+					logs.Alert(vc5.NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
+					initialised = true
+				}
+
 				mutex.Lock()
-				services = director.Status()
-				balancer.configure(services)
+				vip = vc5.VipState(services, vip, config.Priorities(), logs)
+				rib = vc5.AdjRIBOut(vip, initialised)
 				mutex.Unlock()
-			case <-done: // shuting down
-				return
-			case <-timer.C:
-				//logs.NOTICE(F, KV{"event": "Learn timer expired"})
-				//logs.NOTICE(F, KV{"event.action": "learn-timer-expired"})
-				logs.Alert(vc5.NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
-				initialised = true
+
+				pool.RIB(rib)
 			}
-
-			mutex.Lock()
-			vip = vc5.VipState(services, vip, config.Priorities(), logs)
-			rib = vc5.AdjRIBOut(vip, initialised)
-			mutex.Unlock()
-
-			pool.RIB(rib)
-		}
-	}()
+		}()
+	*/
 
 	static := http.FS(vc5.STATIC)
 	var fs http.FileSystem
@@ -410,7 +422,8 @@ func main() {
 	})
 
 	http.HandleFunc("/cue.json", func(w http.ResponseWriter, r *http.Request) {
-		js, err := json.MarshalIndent(director.Status(), " ", " ")
+		//js, err := json.MarshalIndent(director.Status(), " ", " ")
+		js, err := manager.Cue()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -422,7 +435,8 @@ func main() {
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
 		mutex.Lock()
-		js, err := vc5.JSONStatus(summary, services, vip, pool, rib, logs.Stats())
+		//js, err := vc5.JSONStatus(summary, services, vip, pool, rib, logs.Stats())
+		js, err := manager.JSONStatus()
 		mutex.Unlock()
 
 		if err != nil {
@@ -437,7 +451,8 @@ func main() {
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 
 		mutex.Lock()
-		metrics := vc5.Prometheus("vc5", services, summary, vip)
+		//metrics := vc5.Prometheus("vc5", services, summary, vip)
+		metrics := manager.Prometheus("vc5")
 		mutex.Unlock()
 
 		w.Header().Set("Content-Type", "text/plain")
@@ -472,9 +487,10 @@ func main() {
 				mutex.Lock()
 				config = conf
 				client.UpdateVLANs(config.Vlans())
-				director.Configure(config.Parse())
 				pool.Configure(config.Bgp(uint16(*asn), *mp))
-				logs.Configure(conf.Logging_())
+				//director.Configure(config.Parse())
+				//logs.Configure(conf.Logging_())
+				manager.Configure(config)
 				mutex.Unlock()
 			} else {
 				//logs.ALERT(F, "Couldn't load config file:", file, err)
