@@ -36,8 +36,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/davidcoles/cue"
-	"github.com/davidcoles/cue/bgp"
+	//"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/xvs"
 
 	"vc5"
@@ -91,8 +90,6 @@ func main() {
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
 	if err != nil {
-		//logs.EMERG(F, "socket", err)
-		//log.Fatal(err)
 		logs.Fatal(F, "socket", KV{"error.message": err.Error()})
 	}
 
@@ -119,16 +116,12 @@ func main() {
 	}
 
 	if len(nics) < 1 {
-		//logs.EMERG(F, "No interfaces defined")
-		//log.Fatal("No interfaces defined")
 		logs.Fatal(F, "args", KV{"error.message": "No interfaces defined"})
 	}
 
 	address := netip.MustParseAddr(*addr)
 
 	if !address.Is4() {
-		//logs.EMERG(F, "Address is not IPv4:", address)
-		//log.Fatal("Address is not IPv4: ", address)
 		logs.Fatal(F, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
 	}
 
@@ -179,8 +172,6 @@ func main() {
 	err = client.Start()
 
 	if err != nil {
-		//logs.EMERG(F, "Couldn't start client:", err)
-		//log.Fatal("Couldn't start client: ", err)
 		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
@@ -194,12 +185,6 @@ func main() {
 		routerID = [4]byte{127, 0, 0, 1}
 	}
 
-	pool := bgp.NewPool(routerID, config.Bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
-
-	if pool == nil {
-		log.Fatal("BGP pool fail")
-	}
-
 	go spawn(logs, client.Namespace(), os.Args[0], "-s", socket.Name(), client.NamespaceAddress())
 
 	balancer := &Balancer{
@@ -208,105 +193,32 @@ func main() {
 		Client: client,
 	}
 
-	director := &cue.Director{
-		Notifier: balancer,
-		Prober:   balancer,
-	}
-
 	if config.Multicast != "" {
 		multicast(client, config.Multicast)
 	}
 
-	err = director.Start(config.Parse())
-
-	if err != nil {
-		//logs.EMERG(F, "Couldn't start director:", err)
-		//log.Fatal(err)
-		logs.Fatal(F, "director", KV{"error.message": "Couldn't start director: " + err.Error()})
-	}
-
 	done := make(chan bool) // close this channel when we want to exit
+
+	/*
+		pool := bgp.NewPool(routerID, config.Bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
+
+		if pool == nil {
+			log.Fatal("BGP pool fail")
+		}
+	*/
 
 	manager := vc5.Manager{
 		Config:   config,
-		Director: director,
 		Balancer: balancer,
-		Pool:     pool,
-		Logs:     logs,
+		//Pool:     pool,
+		Logs: logs,
 	}
 
-	manager.Manage(done)
+	err = manager.Manage(balancer, balancer, routerID, uint16(*asn), *mp, done)
 
-	/*
-		vip := map[netip.Addr]vc5.State{}
-
-		var rib []netip.Addr
-		var summary vc5.Summary
-
-		services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
-
-		//vipmap := vc5.VipMap(nil) // test, but need to move vip management into man lb library
-
-		go func() {
-			ticker := time.NewTicker(1 * time.Second)
-			defer ticker.Stop()
-			for {
-				mutex.Lock()
-				summary.Update(balancer.summary(), start)
-				services, old, summary.Current = vc5.ServiceStatus(config, balancer, director, old)
-				mutex.Unlock()
-				select {
-				case <-ticker.C:
-				case <-done:
-					return
-				}
-			}
-		}()
-
-		go func() { // advertise VIPs via BGP
-			timer := time.NewTimer(config.Learn * time.Second)
-			ticker := time.NewTicker(5 * time.Second)
-			services := director.Status()
-
-			defer func() {
-				ticker.Stop()
-				timer.Stop()
-				pool.RIB(nil)
-				time.Sleep(2 * time.Second)
-				pool.Close()
-			}()
-
-			var initialised bool
-			for {
-				select {
-				case <-ticker.C: // check for matured VIPs
-					//mutex.Lock()
-					//vipmap = vc5.VipLog(director.Status(), vipmap, config.Priorities(), logs)
-					//mutex.Unlock()
-
-				case <-director.C: // a backend has changed state
-					mutex.Lock()
-					services = director.Status()
-					balancer.configure(services)
-					mutex.Unlock()
-				case <-done: // shuting down
-					return
-				case <-timer.C:
-					//logs.NOTICE(F, KV{"event": "Learn timer expired"})
-					//logs.NOTICE(F, KV{"event.action": "learn-timer-expired"})
-					logs.Alert(vc5.NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
-					initialised = true
-				}
-
-				mutex.Lock()
-				vip = vc5.VipState(services, vip, config.Priorities(), logs)
-				rib = vc5.AdjRIBOut(vip, initialised)
-				mutex.Unlock()
-
-				pool.RIB(rib)
-			}
-		}()
-	*/
+	if err != nil {
+		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
+	}
 
 	static := http.FS(vc5.STATIC)
 	var fs http.FileSystem
@@ -407,7 +319,6 @@ func main() {
 		config.Address = *addr
 		config.Interfaces = nics
 		config.Native = *native
-		//config.Untagged = *untagged
 		config.Webserver = *webserver
 		config.Webroot = *webroot
 
@@ -434,10 +345,11 @@ func main() {
 	})
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
-		mutex.Lock()
+		//mutex.Lock()
 		//js, err := vc5.JSONStatus(summary, services, vip, pool, rib, logs.Stats())
+		//mutex.Unlock()
+
 		js, err := manager.JSONStatus()
-		mutex.Unlock()
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -449,11 +361,11 @@ func main() {
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-
-		mutex.Lock()
+		//mutex.Lock()
 		//metrics := vc5.Prometheus("vc5", services, summary, vip)
+		//mutex.Unlock()
+
 		metrics := manager.Prometheus("vc5")
-		mutex.Unlock()
 
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
@@ -463,13 +375,11 @@ func main() {
 		for {
 			server := http.Server{}
 			err := server.Serve(listener)
-			//logs.ALERT(F, "Webserver exited: "+err.Error())
 			logs.Alert(vc5.ALERT, F, "webserver", KV{"error.message": err.Error()}, "Webserver exited: "+err.Error())
 			time.Sleep(10 * time.Second)
 		}
 	}()
 
-	//logs.ALERT(F, "Initialised")
 	logs.Alert(vc5.ALERT, F, "initialised", KV{}, "Initialised")
 
 	sig := make(chan os.Signal, 10)
@@ -480,17 +390,16 @@ func main() {
 		case syscall.SIGINT:
 			fallthrough
 		case syscall.SIGUSR2:
-			//logs.NOTICE(F, "Reload signal received")
 			logs.Alert(vc5.NOTICE, F, "reload", KV{}, "Reload signal received")
 			conf, err := vc5.Load(file)
 			if err == nil {
 				mutex.Lock()
 				config = conf
-				client.UpdateVLANs(config.Vlans())
-				pool.Configure(config.Bgp(uint16(*asn), *mp))
+				client.UpdateVLANs(conf.Vlans())
+				//pool.Configure(config.Bgp(uint16(*asn), *mp))
 				//director.Configure(config.Parse())
 				//logs.Configure(conf.Logging_())
-				manager.Configure(config)
+				manager.Configure(conf)
 				mutex.Unlock()
 			} else {
 				//logs.ALERT(F, "Couldn't load config file:", file, err)
@@ -500,9 +409,7 @@ func main() {
 		case syscall.SIGTERM:
 			fallthrough
 		case syscall.SIGQUIT:
-			fmt.Println("CLOSING")
 			close(done) // shut down BGP, etc
-			//logs.ALERT(F, "Shutting down")
 			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
 			time.Sleep(4 * time.Second)
 			return
@@ -517,11 +424,9 @@ func bgpListener(l net.Listener, logs vc5.Logger) {
 		conn, err := l.Accept()
 
 		if err != nil {
-			//logs.ERR(F, "Failed to accept connection", err)
 			logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
 		} else {
 			go func(c net.Conn) {
-				//logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
 				logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
 				defer c.Close()
 				time.Sleep(time.Second * 10)

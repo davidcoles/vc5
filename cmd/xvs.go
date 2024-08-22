@@ -58,7 +58,6 @@ type reply struct {
 func spawn(logs vc5.Logger, netns string, args ...string) {
 	F := "netns"
 	for {
-		//logs.DEBUG(F, "Spawning daemon", args)
 		logs.Event(vc5.INFO, F, "spawn", KV{"args": fmt.Sprint(args)})
 
 		cmd := exec.Command("ip", append([]string{"netns", "exec", netns}, args...)...)
@@ -69,7 +68,6 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 		reader := func(s string, fh io.ReadCloser) {
 			scanner := bufio.NewScanner(fh)
 			for scanner.Scan() {
-				//logs.WARNING(F, s, scanner.Text())
 				logs.Event(vc5.WARNING, F, "child", KV{s: scanner.Text()})
 			}
 		}
@@ -77,7 +75,6 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 		go reader("stderr", stderr)
 
 		if err := cmd.Start(); err != nil {
-			// logs.ERR(F, "Daemon", err)
 			logs.Event(vc5.ERR, F, "daemon", KV{"error.message": err.Error()})
 		} else {
 			reader("stdout", stdout)
@@ -88,7 +85,6 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 			}
 		}
 
-		// logs.ERR(F, "Daemon exited")
 		logs.Event(vc5.ERR, F, "exit", KV{})
 
 		time.Sleep(1 * time.Second)
@@ -243,25 +239,19 @@ func (d *Debug) NAT(tag map[netip.Addr]int16, arp map[netip.Addr][6]byte, vrn ma
 
 	f := foo.Add(1)
 
-	//fmt.Println("NAT")
-	//d.Log.DEBUG("nat", KV{"run": f})
 	for k, v := range tag {
-		//d.Log.DEBUG("tag", KV{"run": f, "rip": k, "tag": v})
 		d.Log.Event(vc5.DEBUG, "vlan", "update", KV{"run": f, "destintation.ip": k, "vlan.id": v})
 	}
 
 	for k, v := range arp {
-		//d.Log.DEBUG("arp", KV{"run": f, "rip": k, "mac": mac(v)})
 		d.Log.Event(vc5.DEBUG, "arp", "update", KV{"run": f, "destintation.ip": k, "destintation.mac": mac(v)})
 	}
 
 	for k, v := range vrn {
-		//d.Log.DEBUG("map", KV{"run": f, "vip": k[0], "rip": k[1], "nat": v})
 		d.Log.Event(vc5.DEBUG, "map", "update", KV{"run": f, "service.ip": k[0], "destination.ip": k[1], "destination.nat.ip": v})
 	}
 
 	for k, v := range nat {
-		//d.Log.DEBUG("nat", KV{"run": f, "nat": k, "info": v})
 		d.Log.Event(vc5.DEBUG, "nat", "update", KV{"run": f, "nat": k, "info": v})
 	}
 
@@ -381,7 +371,6 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 	for {
 		conn, err := sock.Accept()
 		if err != nil {
-			//log.ERR("accept", err.Error())
 			log.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
 		} else {
 			go func() {
@@ -414,15 +403,12 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 
 						nic := cmd[1]
 						if err := client.ReattachBPF(nic); err != nil {
-							//log.ERR(cmd[0], fmt.Sprintf("%s: %s\n", nic, err.Error()))
 							log.Event(vc5.NOTICE, F, cmd[0], KV{"interface.name": nic, "error.message": err.Error()})
 						} else {
-							//log.NOTICE(cmd[0], fmt.Sprintf("%s: OK\n", nic))
 							log.Event(vc5.NOTICE, F, cmd[0], KV{"interface.name": nic})
 						}
 
 					default:
-						// log.ERR("unknown", fmt.Sprintf("Unknown command: %s", cmd[0]))
 						log.Event(vc5.NOTICE, F, cmd[0], KV{"error.message": "Unknown command"})
 					}
 				}

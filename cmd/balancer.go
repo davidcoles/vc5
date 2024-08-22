@@ -125,7 +125,6 @@ func (b *Balancer) configure(services []cue.Service) error {
 	return nil
 }
 
-//func (b *Balancer) summary() (s vc5.Summary) {
 func (b *Balancer) Summary() (s vc5.Summary) {
 	u := b.Client.Info()
 	s.Latency = u.Latency
@@ -170,8 +169,6 @@ func (s _s) String() string {
 // interface method called by mon when a destination's health status transitions up or down
 func (b *Balancer) Notify(instance mon.Instance, state bool) {
 	if logger := b.Logger; logger != nil {
-		//logger.NOTICE("notify", notifyLog(instance, state))
-		//logger.Event(5, "healthcheck", "state-change", notifyLog(instance, state))
 		text := fmt.Sprintf("Backend %s for service %s went %s", _cd(instance.Destination), _cs(instance.Service), _s(state))
 		logger.Alert(5, "healthcheck", "state", notifyLog(instance, state), text)
 	}
@@ -180,7 +177,6 @@ func (b *Balancer) Notify(instance mon.Instance, state bool) {
 // interface method called by mon every time a round of checks for a service on a destination is completed
 func (b *Balancer) Result(instance mon.Instance, state bool, diagnostic string) {
 	if logger := b.Logger; logger != nil {
-		//logger.DEBUG("result", resultLog(instance, state, diagnostic))
 		logger.Event(7, "healthcheck", "state", resultLog(instance, state, diagnostic))
 	}
 }
@@ -194,7 +190,6 @@ func (b *Balancer) Check(instance mon.Instance, check string, round uint64, stat
 	// check.url
 
 	if logger := b.Logger; logger != nil {
-		//logger.DEBUG("check", checkLog(instance, state, diagnostic, check, round, nat))
 		logger.Event(7, "healthcheck", "check", checkLog(instance, state, diagnostic, check, round, nat))
 	}
 }
@@ -211,10 +206,6 @@ func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok
 	} else {
 		ok, diagnostic = b.NetNS.Probe(nat, check)
 	}
-
-	//if b.Logger != nil {
-	//	b.Logger.DEBUG("probe", probeLog(instance, nat, fmt.Sprint(check), ok, diagnostic))
-	//}
 
 	return ok, diagnostic
 }
@@ -241,13 +232,6 @@ func notifyLog(instance mon.Instance, state bool) map[string]any {
 	// https://www.elastic.co/guide/en/ecs/current/ecs-base.html
 	// https://github.com/elastic/ecs/blob/main/generated/csv/fields.csv
 	return map[string]any{
-		//"state": updown(state),
-		//"proto": proto(instance.Service.Protocol),
-		//"saddr": instance.Service.Address.String(),
-		//"sport": instance.Service.Port,
-		//"daddr": instance.Destination.Address.String(),
-		//"dport": instance.Destination.Port,
-
 		"service.state":    updown(state),
 		"service.protocol": proto(instance.Service.Protocol),
 		"service.ip":       instance.Service.Address.String(),
@@ -262,14 +246,6 @@ func resultLog(instance mon.Instance, status bool, diagnostic string) map[string
 	r["diagnostic"] = diagnostic
 	return r
 }
-
-//func probeLog(instance mon.Instance, addr netip.Addr, check string, status bool, diagnostic string) map[string]any {
-//	r := resultLog(instance, status, diagnostic)
-//	r["check"] = check
-//	//r["paddr"] = addr
-//	r["destination.nat.ip"] = addr
-//	return r
-//}
 
 func checkLog(instance mon.Instance, status bool, diagnostic string, check string, round uint64, nat netip.Addr) map[string]any {
 	r := resultLog(instance, status, diagnostic)
