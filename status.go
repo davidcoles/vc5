@@ -254,34 +254,36 @@ func VipMap(services []cue.Service) map[netip.Addr]bool {
 	return m
 }
 
+func updown(b bool) string {
+	if b {
+		return "up"
+	}
+	return "down"
+}
+
+func p2s(p priority) uint8 {
+	switch p {
+	case CRITICAL:
+		return ERR
+	case HIGH:
+		return WARNING
+	case MEDIUM:
+		return NOTICE
+	case LOW:
+		return INFO
+	}
+	return ERR
+}
+
 func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]bool {
 
 	f := "vip"
-
-	updown := func(b bool) string {
-		if b {
-			return "up"
-		}
-		return "down"
-	}
 
 	m := VipMap(services)
 
 	for vip, state := range m {
 
-		p, _ := priorities[vip]
-		var severity uint8 = ERR
-
-		switch p {
-		case CRITICAL:
-			severity = ERR
-		case HIGH:
-			severity = WARNING
-		case MEDIUM:
-			severity = NOTICE
-		case LOW:
-			severity = INFO
-		}
+		severity := p2s(priorities[vip])
 
 		if was, exists := old[vip]; exists {
 			if state != was {
