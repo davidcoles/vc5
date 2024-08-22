@@ -11,3 +11,4 @@ require (
 require github.com/elastic/go-elasticsearch/v7 v7.17.10 // indirect
 
 replace vc5 => ../.
+//replace github.com/davidcoles/cue => ../../cue

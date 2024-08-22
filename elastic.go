@@ -3,7 +3,8 @@ package vc5
 import (
 	"bytes"
 	"context"
-	"fmt"
+	//"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 
@@ -49,10 +50,10 @@ func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
 
 	ctx := context.Background()
 	req := esapi.IndexRequest{
-		Index:      e.Index,
-		DocumentID: fmt.Sprintf("%s-%d", host, id),
-		Body:       bytes.NewReader(body),
-		Refresh:    "true",
+		Index: e.Index,
+		//DocumentID: fmt.Sprintf("%s-%d", host, id), // don't think that this was ever really needed ...
+		Body:    bytes.NewReader(body),
+		Refresh: "true",
 	}
 
 	res, err := req.Do(ctx, e.client)
@@ -62,6 +63,10 @@ func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
 	}
 
 	defer res.Body.Close()
+
+	if res.StatusCode != 201 {
+		log.Println(err, res.StatusCode, string(body))
+	}
 
 	return res.StatusCode == 201
 }
