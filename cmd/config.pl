@@ -61,10 +61,10 @@ if(defined $conf->{'bgp'} && $conf->{'bgp'}->{'learn'} > 0) {
 if(defined $json->{'logging'}) {
     $json->{'logging'}->{'alert'}+=0;
 
-    if(defined $json->{'logging'}->{'elasticsearch'}) {
-	my $val = jsonbool($json->{'logging'}->{'elasticsearch'}->{'data_stream'});
-	$json->{'logging'}->{'elasticsearch'}->{'data_stream'} = $val;
-    }
+#    if(defined $json->{'logging'}->{'elasticsearch'}) {
+#	my $val = jsonbool($json->{'logging'}->{'elasticsearch'}->{'data_stream'});
+#	$json->{'logging'}->{'elasticsearch'}->{'data_stream'} = $val;
+ #   }
 }
 
 if(defined $json->{'logging'}) {

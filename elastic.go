@@ -3,7 +3,7 @@ package vc5
 import (
 	"bytes"
 	"context"
-	"fmt"
+	//"fmt"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -16,11 +16,10 @@ import (
 // https://www.elastic.co/guide/en/elasticsearch/reference/7.17/security-minimal-setup.html
 
 type Elasticsearch struct {
-	Index      string   `json:"index,omitempty"`
-	Addresses  []string `json:"addresses,omitempty"`
-	Username   secret   `json:"username,omitempty"`
-	Password   secret   `json:"password,omitempty"`
-	DataStream bool     `json:"data_stream,omitempty"`
+	Index     string   `json:"index,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
+	Username  secret   `json:"username,omitempty"`
+	Password  secret   `json:"password,omitempty"`
 
 	c       chan string
 	mutex   sync.Mutex
@@ -52,13 +51,9 @@ func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
 	ctx := context.Background()
 	req := esapi.IndexRequest{
 		Index: e.Index,
-		//DocumentID: fmt.Sprintf("%s-%d", host, id),
+		//DocumentID: fmt.Sprintf("%s-%d", host, id), // don't think that this was ever really needed ...
 		Body:    bytes.NewReader(body),
 		Refresh: "true",
-	}
-
-	if !e.DataStream {
-		req.DocumentID = fmt.Sprintf("%s-%d", host, id)
 	}
 
 	res, err := req.Do(ctx, e.client)

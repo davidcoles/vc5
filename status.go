@@ -166,7 +166,7 @@ func VipStatus(in Services, foo map[netip.Addr]State) (out []VIPStats) {
 }
 
 func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
-	facility := "vip"
+	F := "vip"
 
 	rib := map[netip.Addr]bool{}
 	new := map[netip.Addr]State{}
@@ -176,82 +176,35 @@ func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[n
 	}
 
 	for _, v := range cue.AllVIPs(services) {
-		p, _ := priorities[v]
-		//log := logs.ERR
-		var severity uint8 = 7
 
-		switch p {
-		case CRITICAL:
-			//log = logs.ERR
-			severity = 3
-		case HIGH:
-			//log = logs.WARNING
-			severity = 4
-		case MEDIUM:
-			//log = logs.NOTICE
-			severity = 5
-		case LOW:
-			//log = logs.INFO
-			severity = 6
-		}
-
-		updown := func(b bool) string {
-			if b {
-				return "up"
-			}
-			return "down"
-		}
+		up, _ := rib[v]
+		severity := p2s(priorities[v])
 
 		if o, ok := old[v]; ok {
-			up, _ := rib[v]
 
 			if o.up != up {
 				new[v] = State{up: up, time: time.Now()}
-				//log(facility, KV{"vip": v, "state": updown(up), "event": "vip"})
-				//log(facility, KV{"service.ip": v, "service.state": updown(up), "event.action": "state-change"})
-				if false {
-					logs.Event(severity, facility, "state-change", KV{"service.ip": v, "service.state": updown(up)})
-				}
-
+				text := fmt.Sprintf("VIP %s went %s", v, updown(up))
+				logs.Alert(severity, F, "state", KV{"service.ip": v, "service.state": updown(up)}, text)
 			} else {
 				new[v] = o
-				// previous logging only reports when VIP changes state - it would be goog to keep a continuous record of state also
-				//logs.DEBUG(facility, KV{"service.ip": v, "service.state": updown(up)})
-				if false {
-					logs.Event(7, facility, "state", KV{"service.ip": v, "service.state": updown(up)})
-				}
-
 			}
 
 		} else {
-			//log(facility, KV{"vip": v, "state": updown(rib[v]), "event": "vip"})
-			//log(facility, KV{"service.ip": v, "service.state": updown(rib[v]), "event.action": "created"})
-			if false {
-				logs.Event(severity, facility, "created", KV{"service.ip": v, "service.state": updown(rib[v])})
-			}
 			new[v] = State{up: rib[v], time: time.Now()}
+			logs.Event(DEBUG, F, "added", KV{"service.ip": v, "service.state": updown(up)})
+		}
 
+		logs.Event(DEBUG, F, "state", KV{"service.ip": v, "service.state": updown(up)})
+	}
+
+	for vip, _ := range old {
+		if _, exists := new[vip]; !exists {
+			logs.Event(DEBUG, F, "removed", KV{"service.ip": vip})
 		}
 	}
 
 	return new
-}
-
-func VipMap(services []cue.Service) map[netip.Addr]bool {
-
-	m := map[netip.Addr]bool{}
-
-	for _, v := range cue.AllVIPs(services) {
-		m[v] = false
-	}
-
-	for _, v := range cue.HealthyVIPs(services) {
-		m[v] = true
-	}
-
-	fmt.Println(m)
-
-	return m
 }
 
 func updown(b bool) string {
@@ -273,6 +226,24 @@ func p2s(p priority) uint8 {
 		return INFO
 	}
 	return ERR
+}
+
+/*
+func VipMap(services []cue.Service) map[netip.Addr]bool {
+
+	m := map[netip.Addr]bool{}
+
+	for _, v := range cue.AllVIPs(services) {
+		m[v] = false
+	}
+
+	for _, v := range cue.HealthyVIPs(services) {
+		m[v] = true
+	}
+
+	fmt.Println(m)
+
+	return m
 }
 
 func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]bool {
@@ -298,13 +269,13 @@ func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[neti
 
 	for vip, _ := range old {
 		if _, exists := m[vip]; !exists {
-			logs.Alert(6, f, "deleted", KV{"service.ip": vip})
+			logs.Alert(6, f, "removed", KV{"service.ip": vip})
 		}
 	}
 
 	return m
 }
-
+*/
 func AdjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
 	for v, s := range vip {
 		if initialised && s.up && time.Now().Sub(s.time) > time.Second*5 {
@@ -345,9 +316,17 @@ type Service struct {
 	Protocol Protocol
 }
 
+func (s Service) String() string {
+	return fmt.Sprintf("%s:%d:%s", s.Address, s.Port, s.Protocol)
+}
+
 type Destination struct {
 	Address netip.Addr
 	Port    uint16
+}
+
+func (d Destination) String() string {
+	return fmt.Sprintf("%s:%d", d.Address, d.Port)
 }
 
 type Instance struct {

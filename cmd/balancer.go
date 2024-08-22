@@ -148,12 +148,30 @@ func (b *Balancer) summary() (s vc5.Summary) {
 // - service-status
 //
 
+func _cs(s mon.Service) vc5.Service {
+	return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
+}
+
+func _cd(d mon.Destination) vc5.Destination {
+	return vc5.Destination{Address: d.Address, Port: d.Port}
+}
+
+type _s bool
+
+func (s _s) String() string {
+	if s {
+		return "up"
+	}
+	return "down"
+}
+
 // interface method called by mon when a destination's health status transitions up or down
 func (b *Balancer) Notify(instance mon.Instance, state bool) {
 	if logger := b.Logger; logger != nil {
 		//logger.NOTICE("notify", notifyLog(instance, state))
 		//logger.Event(5, "healthcheck", "state-change", notifyLog(instance, state))
-		logger.Alert(5, "healthcheck", "state", notifyLog(instance, state))
+		text := fmt.Sprintf("Backend %s for service %s went %s", _cd(instance.Destination), _cs(instance.Service), _s(state))
+		logger.Alert(5, "healthcheck", "state", notifyLog(instance, state), text)
 	}
 }
 

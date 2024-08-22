@@ -128,21 +128,23 @@ type ent struct {
 	history []entry
 	get     chan bool
 	start   uint64
+	alert   bool
 }
 
 type Sink = sink
 type sink struct {
-	e chan *ent
-	l chan Logging
+	e    chan *ent
+	l    chan Logging
+	host string
 
 	webhook atomic.Uint64
 	elastic atomic.Uint64
 }
 
-func (s *sink) Sub(f string) *sub                            { return &sub{parent: s, facility: f} }
-func (s *sink) sub(f string) *sub                            { return &sub{parent: s, facility: f} }
-func (s *sink) Event(n uint8, f, a string, e map[string]any) { s.event(n, f, a, e) }
-func (s *sink) Alert(n uint8, f, a string, e map[string]any) { s.alert(n, f, a, e) }
+func (s *sink) Sub(f string) *sub                                         { return &sub{parent: s, facility: f} }
+func (s *sink) sub(f string) *sub                                         { return &sub{parent: s, facility: f} }
+func (s *sink) Event(n uint8, f, a string, e map[string]any)              { s.event(n, f, a, e) }
+func (s *sink) Alert(n uint8, f, a string, e map[string]any, t ...string) { s.alert(n, f, a, e, t...) }
 
 //func (s *sink) EMERG(f string, a ...any) { s.log(EMERG, f, a...) }
 //func (s *sink) ALERT(f string, a ...any)                     { s.log(ALERT, f, a...) }
@@ -238,11 +240,11 @@ func (s *sink) event(lev uint8, facility string, action string, event map[string
 	s._event(false, lev, facility, action, event)
 }
 
-func (s *sink) alert(lev uint8, facility string, action string, event map[string]any) {
-	s._event(true, lev, facility, action, event)
+func (s *sink) alert(lev uint8, facility string, action string, event map[string]any, t ...string) {
+	s._event(true, lev, facility, action, event, t...)
 }
 
-func (s *sink) _event(alert bool, lev uint8, facility string, action string, event map[string]any) {
+func (s *sink) _event(alert bool, lev uint8, facility string, action string, event map[string]any, hrt ...string) {
 	level := level(lev)
 
 	now := time.Now()
@@ -254,9 +256,11 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 		event["event.reason"] = reason.(string)
 	}
 
-	//event["date"] = now.UnixNano() / int64(time.Millisecond)
+	event["host.id"] = s.host
+	//event["host.hostname"] = s.host
+
+	event["date"] = now.UnixNano() / int64(time.Millisecond)
 	event["@timestamp"] = now.UnixNano() / int64(time.Millisecond)
-	//event["@timestamp"] = now.Format(time.RFC3339)
 	event["level"] = level.String()
 	event["event.module"] = facility
 	event["event.action"] = action
@@ -280,9 +284,13 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 	sort.Strings(t)
 	text := strings.Join(t, " ")
 
+	if len(hrt) > 0 {
+		text = hrt[0]
+	}
+
 	js, _ := json.Marshal(event)
 
-	s.e <- &ent{text: text, json: js, level: level, facility: facility, time: now}
+	s.e <- &ent{text: text, json: js, level: level, facility: facility, time: now, alert: alert}
 }
 
 func (s *sink) Get(start uint64) (h []entry) {
@@ -316,6 +324,7 @@ func (s *sink) Start(l Logging) {
 		if host == "" {
 			host = fmt.Sprintf("%d", time.Now().UnixNano())
 		}
+		s.host = host
 
 		webhooks := map[secret]Webhook{}
 		var elastic chan ent
@@ -388,7 +397,7 @@ func (s *sink) Start(l Logging) {
 				id++
 
 				// send to console
-				if console != nil && e.level < DEBUG {
+				if console != nil && ((e.alert && e.level < DEBUG) || e.get != nil) {
 					select {
 					case console <- e:
 					default:
@@ -401,7 +410,7 @@ func (s *sink) Start(l Logging) {
 
 				// send to webhooks
 				for _, v := range webhooks {
-					if e.level <= v.Level {
+					if e.alert && e.level <= v.Level {
 						e.typ = v.Type
 						select {
 						case v.ent <- *e: // copy by value, .typ won't get modified later
@@ -625,7 +634,7 @@ func history() chan *ent {
 type Logger interface {
 	//lev uint8, facility string, action string
 	Event(l uint8, f, a string, e map[string]any)
-	Alert(l uint8, f, a string, e map[string]any)
+	Alert(l uint8, f, a string, e map[string]any, text ...string) // a single text arg is used for human readable log lines if present
 	//EMERG(f string, a ...any)
 	//ALERT(f string, a ...any)
 	//CRIT(f string, a ...any)
@@ -639,7 +648,7 @@ type Logger interface {
 type parent interface {
 	log(uint8, string, ...any)
 	event(l uint8, f, a string, e map[string]any)
-	alert(l uint8, f, a string, e map[string]any)
+	alert(l uint8, f, a string, e map[string]any, t ...string)
 }
 
 type Sub = sub
@@ -649,8 +658,10 @@ type sub struct {
 }
 
 func (l *sub) Event(n uint8, f, a string, e map[string]any) { l.parent.event(n, l.facility+"."+f, a, e) }
-func (l *sub) Alert(n uint8, f, a string, e map[string]any) { l.parent.alert(n, l.facility+"."+f, a, e) }
-func (l *sub) log(n uint8, s string, a ...any)              { l.parent.log(n, l.facility+"."+s, a...) }
+func (l *sub) Alert(n uint8, f, a string, e map[string]any, t ...string) {
+	l.parent.alert(n, l.facility+"."+f, a, e, t...)
+}
+func (l *sub) log(n uint8, s string, a ...any) { l.parent.log(n, l.facility+"."+s, a...) }
 
 //func (l *sub) EMERG(s string, a ...any)                     { l.log(EMERG, s, a...) }
 //func (l *sub) ALERT(s string, a ...any)                     { l.log(ALERT, s, a...) }
@@ -665,20 +676,21 @@ func (l *sub) BGPPeer(peer string, params bgp.Parameters, add bool) {
 	F := "peer"
 	if add {
 		//l.NOTICE("add", KV{"peer": peer})
-		l.Alert(NOTICE, F, "add", KV{"server.address": peer})
+		l.Event(NOTICE, F, "add", KV{"server.address": peer})
 	} else {
 		//l.NOTICE("remove", KV{"peer": peer})
-		l.Alert(NOTICE, F, "remove", KV{"server.address": peer})
+		l.Event(NOTICE, F, "remove", KV{"server.address": peer})
 	}
 }
 
 func (l *sub) BGPSession(peer string, local bool, reason string) {
 	F := "session"
+	text := fmt.Sprintf("BGP session with %s: %s", peer, reason)
 	if local {
 		//l.NOTICE("local", KV{"peer": peer, "reason": reason})
-		l.Alert(NOTICE, F, "local", KV{"server.address": peer, "error.message": reason})
+		l.Alert(NOTICE, F, "local", KV{"server.address": peer, "error.message": reason}, text)
 	} else {
 		//l.ERR("remote", KV{"peer": peer, "reason": reason})
-		l.Alert(ERR, F, "remote", KV{"server.address": peer, "error.message": reason})
+		l.Alert(ERR, F, "remote", KV{"server.address": peer, "error.message": reason}, text)
 	}
 }
