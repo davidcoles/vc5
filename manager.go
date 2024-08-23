@@ -21,7 +21,12 @@ package vc5
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"net/netip"
+	"runtime/debug"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +41,7 @@ type Manager struct {
 	Balancer Balancer
 	Pool     *bgp.Pool
 	Logs     *Sink
+	WebRoot  string
 
 	mutex    sync.Mutex
 	services Services
@@ -44,10 +50,23 @@ type Manager struct {
 	rib      []netip.Addr
 	asn      uint16
 	mp       bool
-	nat      func(netip.Addr, netip.Addr) netip.Addr
+	NAT      func(netip.Addr, netip.Addr) netip.Addr
+	Prober   func(Instance, Check) (bool, string)
 }
 
-func (m *Manager) Manage(nat func(netip.Addr, netip.Addr) netip.Addr, prober mon.Prober, routerID [4]byte, asn uint16, mp bool, done chan bool) error {
+type Check = mon.Check
+
+func Monitor(addr netip.Addr) (*mon.Mon, error) {
+	return mon.New(addr, nil, nil, nil)
+}
+
+func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, diagnostic string) {
+	s := Service{Address: i.Service.Address, Port: i.Service.Port, Protocol: Protocol(i.Service.Protocol)}
+	d := Destination{Address: i.Destination.Address, Port: i.Destination.Port}
+	return m.Prober(Instance{Service: s, Destination: d}, check)
+}
+
+func (m *Manager) Manage(listener net.Listener, routerID [4]byte, asn uint16, mp bool, done chan bool) error {
 
 	m.Director = &cue.Director{}
 
@@ -56,13 +75,17 @@ func (m *Manager) Manage(nat func(netip.Addr, netip.Addr) netip.Addr, prober mon
 	//}
 	m.Director.Notifier = m
 
-	if prober != nil {
-		m.Director.Prober = prober
+	if m.Probe != nil {
+		m.Director.Prober = m
 	}
+
+	//if prober != nil {
+	//	m.Director.Prober = prober
+	//}
 
 	m.asn = asn
 	m.mp = mp
-	m.nat = nat
+	//m.nat = nat
 
 	m.Pool = bgp.NewPool(routerID, m.Config.Bgp(asn, mp), nil, m.Logs.Sub("bgp"))
 
@@ -140,6 +163,119 @@ func (m *Manager) Manage(nat func(netip.Addr, netip.Addr) netip.Addr, prober mon
 			m.mutex.Unlock()
 
 			m.Pool.RIB(m.rib)
+		}
+	}()
+
+	manager := m
+
+	static := http.FS(STATIC)
+	var fs http.FileSystem
+
+	webroot := m.WebRoot
+
+	if webroot != "" {
+		fs = http.FileSystem(http.Dir(webroot))
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
+		if fs != nil {
+			file := r.URL.Path
+			if file == "/" {
+				file = "/index.html"
+			}
+
+			if f, err := fs.Open(file); err == nil {
+				f.Close()
+				http.FileServer(fs).ServeHTTP(w, r)
+				return
+			}
+		}
+
+		r.URL.Path = "static/" + r.URL.Path
+		http.FileServer(static).ServeHTTP(w, r)
+	})
+
+	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
+
+		start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
+		logs := m.Logs.Get(start)
+		js, err := json.MarshalIndent(&logs, " ", " ")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	http.HandleFunc("/build.json", func(w http.ResponseWriter, r *http.Request) {
+		info, ok := debug.ReadBuildInfo()
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		js, err := json.MarshalIndent(info, " ", " ")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	http.HandleFunc("/cue.json", func(w http.ResponseWriter, r *http.Request) {
+		js, err := manager.Cue()
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
+		js, err := manager.JSONStatus()
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		js = append(js, 0x0a) // add a newline
+		w.Write(js)
+	})
+
+	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		metrics := manager.Prometheus("vc5")
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
+	})
+
+	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
+		m.mutex.Lock()
+		js, err := json.MarshalIndent(m.Config, " ", " ")
+		m.mutex.Unlock()
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	go func() {
+		for {
+			server := http.Server{}
+			err := server.Serve(listener)
+			m.Logs.Alert(ALERT, F, "webserver", KV{"error.message": err.Error()}, "Webserver exited: "+err.Error())
+			time.Sleep(10 * time.Second)
 		}
 	}()
 
@@ -223,10 +359,10 @@ func (m *Manager) Result(instance mon.Instance, state bool, diagnostic string) {
 }
 
 func (m *Manager) Check(instance mon.Instance, check string, round uint64, state bool, diagnostic string) {
-	if m.nat == nil {
+	if m.NAT == nil {
 		m.Logs.Event(7, "healthcheck", "check", checkLog(instance, state, diagnostic, check, round))
 	} else {
-		nat := m.nat(instance.Service.Address, instance.Destination.Address)
+		nat := m.NAT(instance.Service.Address, instance.Destination.Address)
 		m.Logs.Event(7, "healthcheck", "check", natLog(instance, state, diagnostic, check, round, nat))
 	}
 

@@ -332,11 +332,13 @@ type Instance struct {
 	Destination Destination
 }
 
+type CService = cue.Service
 type Balancer interface {
 	Destinations(s Service) (map[Destination]Stats, error)
 	TCPStats() map[Instance]TCPStats
 	Summary() Summary
-	Configure([]cue.Service) error
+	//Configure([]cue.Service) error
+	Configure([]CService) error
 }
 
 func calculateRate(s Stats, o Stats) Stats {

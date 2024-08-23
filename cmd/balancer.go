@@ -22,8 +22,6 @@ import (
 	"errors"
 	"net/netip"
 
-	"github.com/davidcoles/cue"
-	"github.com/davidcoles/cue/mon"
 	"github.com/davidcoles/xvs"
 
 	"vc5"
@@ -75,7 +73,8 @@ func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
 	return tcp
 }
 
-func (b *Balancer) Configure(services []cue.Service) error {
+//func (b *Balancer) Configure(services []cue.Service) error {
+func (b *Balancer) Configure(services []vc5.CService) error {
 
 	type tuple struct {
 		Address  netip.Addr
@@ -83,7 +82,7 @@ func (b *Balancer) Configure(services []cue.Service) error {
 		Protocol uint8
 	}
 
-	target := map[tuple]cue.Service{}
+	target := map[tuple]vc5.CService{}
 
 	for _, s := range services {
 		target[tuple{Address: s.Address, Port: s.Port, Protocol: s.Protocol}] = s
@@ -141,6 +140,7 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 	return
 }
 
+/*
 // interface method called by mon when a destination needs to be probed - find the NAT address and probe that via the netns
 func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok bool, diagnostic string) {
 
@@ -156,3 +156,4 @@ func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok
 
 	return ok, diagnostic
 }
+*/

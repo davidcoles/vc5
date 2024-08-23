@@ -36,8 +36,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davidcoles/cue/mon"
-
 	"vc5"
 )
 
@@ -45,7 +43,7 @@ import (
 
 type query struct {
 	Address string    `json:"address"`
-	Check   mon.Check `json:"check"`
+	Check   vc5.Check `json:"check"`
 }
 
 type reply struct {
@@ -107,7 +105,7 @@ func NetNS(socket string) *nns {
 	}
 }
 
-func (n *nns) Probe(addr netip.Addr, check mon.Check) (bool, string) {
+func (n *nns) Probe(addr netip.Addr, check vc5.Check) (bool, string) {
 
 	buff := new(bytes.Buffer)
 	err := json.NewEncoder(buff).Encode(&query{Address: addr.String(), Check: check})
@@ -155,7 +153,8 @@ func netns(socket string, addr netip.Addr) {
 		}
 	}()
 
-	monitor, err := mon.New(addr, nil, nil, nil)
+	//monitor, err := mon.New(addr, nil, nil, nil)
+	monitor, err := vc5.Monitor(addr)
 
 	if err != nil {
 		log.Fatal(err)
