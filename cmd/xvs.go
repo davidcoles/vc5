@@ -154,7 +154,7 @@ func netns(socket string, addr netip.Addr) {
 	}()
 
 	//monitor, err := mon.New(addr, nil, nil, nil)
-	monitor, err := vc5.Monitor(addr)
+	monitor, err := vc5.Monitor(addr, true) // addr is the IP address of the namespace, true indicates to use "SNI" mode
 
 	if err != nil {
 		log.Fatal(err)

@@ -29,9 +29,6 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
-	//"runtime/debug"
-	//"strconv"
-	//"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -207,6 +204,10 @@ func main() {
 		vip := i.Service.Address
 		rip := i.Destination.Address
 		nat, ok := client.NATAddress(vip, rip)
+
+		if check.Host == "" {
+			check.Host = rip.String() // URL would consist of NAT address if no host field set, which could be confusing
+		}
 
 		if !ok {
 			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()

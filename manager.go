@@ -56,8 +56,12 @@ type Manager struct {
 
 type Check = mon.Check
 
-func Monitor(addr netip.Addr) (*mon.Mon, error) {
-	return mon.New(addr, nil, nil, nil)
+func Monitor(addr netip.Addr, sni bool) (*mon.Mon, error) {
+	m, err := mon.New(addr, nil, nil, nil)
+	if m != nil {
+		m.SNI = sni
+	}
+	return m, err
 }
 
 func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, diagnostic string) {
