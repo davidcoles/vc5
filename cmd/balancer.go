@@ -73,7 +73,6 @@ func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
 	return tcp
 }
 
-//func (b *Balancer) Configure(services []cue.Service) error {
 func (b *Balancer) Configure(services []vc5.CService) error {
 
 	type tuple struct {
@@ -139,21 +138,3 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 
 	return
 }
-
-/*
-// interface method called by mon when a destination needs to be probed - find the NAT address and probe that via the netns
-func (b *Balancer) Probe(_ *mon.Mon, instance mon.Instance, check mon.Check) (ok bool, diagnostic string) {
-
-	vip := instance.Service.Address
-	rip := instance.Destination.Address
-	nat, ok := b.Client.NATAddress(vip, rip)
-
-	if !ok {
-		diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
-	} else {
-		ok, diagnostic = b.NetNS.Probe(nat, check)
-	}
-
-	return ok, diagnostic
-}
-*/

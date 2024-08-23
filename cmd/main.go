@@ -225,106 +225,6 @@ func main() {
 		NAT:      nat,
 	}
 
-	/*
-					static := http.FS(vc5.STATIC)
-					var fs http.FileSystem
-
-					if *webroot != "" {
-						fs = http.FileSystem(http.Dir(*webroot))
-					}
-
-					http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-
-						if fs != nil {
-							file := r.URL.Path
-							if file == "/" {
-								file = "/index.html"
-							}
-
-							if f, err := fs.Open(file); err == nil {
-								f.Close()
-								http.FileServer(fs).ServeHTTP(w, r)
-								return
-							}
-						}
-
-						r.URL.Path = "static/" + r.URL.Path
-						http.FileServer(static).ServeHTTP(w, r)
-					})
-
-				http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
-
-					start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
-					logs := logs.Get(start)
-					js, err := json.MarshalIndent(&logs, " ", " ")
-					if err != nil {
-						w.WriteHeader(http.StatusInternalServerError)
-						return
-					}
-					w.Header().Set("Content-Type", "application/json")
-					w.Write(js)
-					w.Write([]byte("\n"))
-				})
-
-				http.HandleFunc("/build.json", func(w http.ResponseWriter, r *http.Request) {
-					info, ok := debug.ReadBuildInfo()
-					if !ok {
-						w.WriteHeader(http.StatusNotFound)
-						return
-					}
-
-					js, err := json.MarshalIndent(info, " ", " ")
-					if err != nil {
-						w.WriteHeader(http.StatusInternalServerError)
-						return
-					}
-					w.Header().Set("Content-Type", "application/json")
-					w.Write(js)
-					w.Write([]byte("\n"))
-				})
-
-
-			http.HandleFunc("/cue.json", func(w http.ResponseWriter, r *http.Request) {
-				js, err := manager.Cue()
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.Write(js)
-				w.Write([]byte("\n"))
-			})
-
-			http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
-				js, err := manager.JSONStatus()
-
-				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				js = append(js, 0x0a) // add a newline
-				w.Write(js)
-			})
-
-			http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-				metrics := manager.Prometheus("vc5")
-				w.Header().Set("Content-Type", "text/plain")
-				w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
-			})
-
-	 http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
-	        js, err := json.MarshalIndent(config, " ", " ")
-	        if err != nil {
-	            w.WriteHeader(http.StatusInternalServerError)
-	            return
-	        }
-	        w.Header().Set("Content-Type", "application/json")
-	        w.Write(js)
-	        w.Write([]byte("\n"))
-	    })
-
-	*/
 	// Remove this if migrating to a different load balancing engine
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
 		t := time.Now()
@@ -362,17 +262,6 @@ func main() {
 		w.Write([]byte("\n"))
 	})
 
-	/*
-		go func() {
-			for {
-				server := http.Server{}
-				err := server.Serve(listener)
-				logs.Alert(vc5.ALERT, F, "webserver", KV{"error.message": err.Error()}, "Webserver exited: "+err.Error())
-				time.Sleep(10 * time.Second)
-			}
-		}()
-	*/
-
 	if err := manager.Manage(listener, routerID, uint16(*asn), *mp, done); err != nil {
 		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
@@ -398,15 +287,10 @@ func main() {
 				config.Native = *native
 				config.Webserver = *webserver
 				config.Webroot = *webroot
-
 				client.UpdateVLANs(conf.Vlans())
-				//pool.Configure(config.Bgp(uint16(*asn), *mp))
-				//director.Configure(config.Parse())
-				//logs.Configure(conf.Logging_())
 				manager.Configure(conf)
 				mutex.Unlock()
 			} else {
-				//logs.ALERT(F, "Couldn't load config file:", file, err)
 				logs.Alert(vc5.ALERT, F, "config", KV{"error.message": fmt.Sprint("Couldn't load config file:", file, err)})
 			}
 
