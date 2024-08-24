@@ -77,7 +77,7 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := &vc5.Sink{}
+	logs := &vc5.Sink{HostID: config.HostID}
 	logs.Start(config.Logging_())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
@@ -119,10 +119,6 @@ func main() {
 	}
 
 	routerID := address.As4()
-
-	if *asn > 0 {
-		routerID = [4]byte{127, 0, 0, 1}
-	}
 
 	// Before making any changes to the state of the system (loading
 	// XDP, etc) we attempt to listen on the webserver port. This
@@ -198,9 +194,7 @@ func main() {
 	// requests specific to this type of load balancer client (xvs)
 	httpEndpoints(client)
 
-	done := make(chan bool) // close this channel when we want to exit (FIXME: change to a context)
-
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, shutdown := context.WithCancel(context.Background())
 
 	manager := vc5.Manager{
 		Config:   config,
@@ -249,8 +243,7 @@ func main() {
 		case syscall.SIGTERM:
 			fallthrough
 		case syscall.SIGQUIT:
-			close(done) // shut down BGP, etc
-			cancel()
+			shutdown() // cancel context to shut down BGP, etc
 			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
 			time.Sleep(4 * time.Second)
 			return

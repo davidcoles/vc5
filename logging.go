@@ -133,6 +133,8 @@ type ent struct {
 
 type Sink = sink
 type sink struct {
+	HostID string
+
 	e    chan *ent
 	l    chan Logging
 	host string
@@ -338,10 +340,16 @@ func (s *sink) Start(l Logging) {
 		// and it confuses me when the numbers are wrong!
 		id := uint64(time.Now().UnixNano() / 1000000)
 
-		host, _ := os.Hostname()
+		host := s.HostID
+
+		if host == "" {
+			host, _ = os.Hostname()
+		}
+
 		if host == "" {
 			host = fmt.Sprintf("%d", time.Now().UnixNano())
 		}
+
 		s.host = host
 
 		webhooks := map[secret]Webhook{}

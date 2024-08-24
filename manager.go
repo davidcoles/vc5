@@ -82,7 +82,14 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 		m.Director.Prober = m
 	}
 
-	m.pool = bgp.NewPool(m.RouterID, m.Config.Bgp(m.ASNumber, !m.IPv4Only), nil, m.Logs.Sub("bgp"))
+	routerID := m.RouterID
+
+	// loopback BGP mode?
+	if m.ASNumber > 0 {
+		routerID = [4]byte{127, 0, 0, 1}
+	}
+
+	m.pool = bgp.NewPool(routerID, m.Config.Bgp(m.ASNumber, !m.IPv4Only), nil, m.Logs.Sub("bgp"))
 
 	if m.pool == nil {
 		return fmt.Errorf("BGP pool fail")
@@ -112,7 +119,6 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			select {
 			case <-ticker.C:
 			case <-ctx.Done():
-				fmt.Println("OUTTA HERE!")
 				return
 			}
 		}
@@ -151,7 +157,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			}
 
 			m.mutex.Lock()
-			m.vip = VipState(services, m.vip, m.Config.Priorities(), m.Logs)
+			m.vip = vipState(services, m.vip, m.Config.Priorities(), m.Logs)
 			m.rib = adjRIBOut(m.vip, initialised)
 			m.mutex.Unlock()
 
@@ -317,12 +323,14 @@ func jsonStatus(summary Summary, services Services, vips map[netip.Addr]State, p
 		Summary:  summary,
 		Services: services,
 		BGP:      pool.Status(),
-		VIP:      VipStatus(services, vips),
+		VIP:      vipStatus(services, vips),
 		RIB:      rib,
 		Logging:  logstats,
 	}, " ", " ")
 }
 
+/**********************************************************************/
+// notifications
 /**********************************************************************/
 
 func _cs(s mon.Service) Service {

@@ -75,7 +75,7 @@ func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
 	return tcp
 }
 
-func (b *Balancer) Configure(services []vc5.CService) error {
+func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
 	type tuple struct {
 		Address  netip.Addr
@@ -83,7 +83,7 @@ func (b *Balancer) Configure(services []vc5.CService) error {
 		Protocol uint8
 	}
 
-	target := map[tuple]vc5.CService{}
+	target := map[tuple]vc5.ServiceManifest{}
 
 	for _, s := range services {
 		target[tuple{Address: s.Address, Port: s.Port, Protocol: s.Protocol}] = s

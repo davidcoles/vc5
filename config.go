@@ -99,6 +99,7 @@ type Config struct {
 	Untagged   bool          `json:"untagged,omitempty"`
 	Address    string        `json:"address,omitempty"`
 	Interfaces []string      `json:"interfaces,omitempty"`
+	HostID     string        `json:"host_id,omitempty"`
 }
 
 func (c *Config) Logging_() Logging {

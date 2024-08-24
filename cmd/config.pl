@@ -38,7 +38,7 @@ $json->{'services'} = services($scheduler, $services, \%defaults, $servers, $pol
 $json->{'bgp'} = new_rhi($conf->{'bgp'}, $conf->{'prefixes'});
 $conf->{'learn'}+=0 if defined $conf->{'learn'};
 
-foreach(qw(vlans multicast webserver webroot defcon logging address interfaces native untagged)) {
+foreach(qw(vlans multicast webserver webroot defcon logging address interfaces native untagged host_id)) {
     $json->{$_} = $conf->{$_} if exists $conf->{$_};
 }
 

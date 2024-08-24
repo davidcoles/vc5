@@ -140,7 +140,7 @@ type VIPStats struct {
 }
 
 //func VipStatus(in map[VIP][]Serv, foo map[netip.Addr]State) (out []VIPStats) {
-func VipStatus(in Services, foo map[netip.Addr]State) (out []VIPStats) {
+func vipStatus(in Services, foo map[netip.Addr]State) (out []VIPStats) {
 
 	for vip, list := range in {
 		var stats Stats
@@ -163,7 +163,7 @@ func VipStatus(in Services, foo map[netip.Addr]State) (out []VIPStats) {
 	return
 }
 
-func VipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
+func vipState(services []cue.Service, old map[netip.Addr]State, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]State {
 	F := "vip"
 
 	rib := map[netip.Addr]bool{}
@@ -323,13 +323,13 @@ type Instance struct {
 	Destination Destination
 }
 
-type CService = cue.Service // FIXME: better naming needed
+type Manifest []cue.Service
+type ServiceManifest = cue.Service // so we don't have to pull cue into the balancer
 type Balancer interface {
 	Destinations(s Service) (map[Destination]Stats, error)
 	TCPStats() map[Instance]TCPStats
 	Summary() Summary
-	//Configure([]cue.Service) error
-	Configure([]CService) error
+	Configure([]ServiceManifest) error
 }
 
 func calculateRate(s Stats, o Stats) Stats {
