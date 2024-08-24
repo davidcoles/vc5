@@ -74,18 +74,18 @@ func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 
 func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
-	foo := func(s xvs.Service) vc5.Service {
+	from_xvs := func(s xvs.Service) vc5.Service {
 		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
 	}
 
-	bar := func(s vc5.ServiceManifest) vc5.Service {
+	from_manifest := func(s vc5.ServiceManifest) vc5.Service {
 		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
 	}
 
 	target := map[vc5.Service]vc5.ServiceManifest{}
 
 	for _, s := range services {
-		target[bar(s)] = s
+		target[from_manifest(s)] = s
 
 		for _, d := range s.Destinations {
 			if s.Port != d.Port {
@@ -96,8 +96,7 @@ func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
 	svcs, _ := b.Client.Services()
 	for _, s := range svcs {
-		key := foo(s.Service)
-		if _, wanted := target[key]; !wanted {
+		if _, wanted := target[from_xvs(s.Service)]; !wanted {
 			b.Client.RemoveService(s.Service)
 		}
 	}
@@ -140,11 +139,8 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 	return
 }
 
-func (b *Balancer) nat() func(vip, rip netip.Addr) netip.Addr {
-	return func(vip, rip netip.Addr) netip.Addr {
-		nat, _ := b.Client.NATAddress(vip, rip)
-		return nat
-	}
+func (b *Balancer) nat() func(vip, rip netip.Addr) (netip.Addr, bool) {
+	return func(vip, rip netip.Addr) (netip.Addr, bool) { return b.Client.NATAddress(vip, rip) }
 }
 
 func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
@@ -154,7 +150,7 @@ func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diag
 		nat, ok := b.Client.NATAddress(vip, rip)
 
 		if check.Host == "" {
-			check.Host = rip.String() // URL would consist of NAT address if no host field set, which could be confusing
+			check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
 		}
 
 		if !ok {

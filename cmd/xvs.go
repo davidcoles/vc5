@@ -21,7 +21,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	//"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -39,7 +38,7 @@ import (
 	"vc5"
 )
 
-// XVS specific routines
+// xvs specific routines
 
 type query struct {
 	Address string    `json:"address"`
@@ -52,7 +51,6 @@ type reply struct {
 }
 
 // spawn a server (specified by args) which runs in the network namespace - if it dies then restart it
-//func spawn(logs *logger, netns string, args ...string) {
 func spawn(logs vc5.Logger, netns string, args ...string) {
 	F := "netns"
 	for {
@@ -88,18 +86,6 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 		time.Sleep(1 * time.Second)
 	}
 }
-
-/*
-func NetNS(socket string) *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-				return net.Dial("unix", socket)
-			},
-		},
-	}
-}
-*/
 
 func probe(client *http.Client, addr netip.Addr, check vc5.Check) (bool, string) {
 

@@ -44,7 +44,7 @@ type Manager struct {
 	WebRoot  string
 	ASNumber uint16
 	IPv4Only bool
-	NAT      func(netip.Addr, netip.Addr) netip.Addr
+	NAT      func(netip.Addr, netip.Addr) (netip.Addr, bool)
 	Prober   func(Instance, Check) (bool, string)
 	RouterID [4]byte
 
@@ -365,7 +365,7 @@ func (m *Manager) Check(instance mon.Instance, check string, round uint64, state
 	if m.NAT == nil {
 		m.Logs.Event(7, "healthcheck", "check", checkLog(instance, state, diagnostic, check, round))
 	} else {
-		nat := m.NAT(instance.Service.Address, instance.Destination.Address)
+		nat, _ := m.NAT(instance.Service.Address, instance.Destination.Address)
 		m.Logs.Event(7, "healthcheck", "check", natLog(instance, state, diagnostic, check, round, nat))
 	}
 
