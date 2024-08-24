@@ -39,19 +39,20 @@ type Manager struct {
 	Config   *Config
 	Director *cue.Director
 	Balancer Balancer
-	Pool     *bgp.Pool
 	Logs     *Sink
 	WebRoot  string
+	ASNumber uint16
+	IPv4Only bool
+	NAT      func(netip.Addr, netip.Addr) netip.Addr
+	Prober   func(Instance, Check) (bool, string)
+	RouterID [4]byte
 
+	pool     *bgp.Pool
 	mutex    sync.Mutex
 	services Services
 	summary  Summary
 	vip      map[netip.Addr]State
 	rib      []netip.Addr
-	asn      uint16
-	mp       bool
-	NAT      func(netip.Addr, netip.Addr) netip.Addr
-	Prober   func(Instance, Check) (bool, string)
 }
 
 type Check = mon.Check
@@ -70,30 +71,19 @@ func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, d
 	return m.Prober(Instance{Service: s, Destination: d}, check)
 }
 
-func (m *Manager) Manage(listener net.Listener, routerID [4]byte, asn uint16, mp bool, done chan bool) error {
+func (m *Manager) Manage(listener net.Listener, done chan bool) error {
 
-	m.Director = &cue.Director{}
+	m.Director = &cue.Director{
+		Notifier: m,
+	}
 
-	//if notifier != nil {
-	//	m.Director.Notifier = notifier
-	//}
-	m.Director.Notifier = m
-
-	if m.Probe != nil {
+	if m.Prober != nil {
 		m.Director.Prober = m
 	}
 
-	//if prober != nil {
-	//	m.Director.Prober = prober
-	//}
+	m.pool = bgp.NewPool(m.RouterID, m.Config.Bgp(m.ASNumber, !m.IPv4Only), nil, m.Logs.Sub("bgp"))
 
-	m.asn = asn
-	m.mp = mp
-	//m.nat = nat
-
-	m.Pool = bgp.NewPool(routerID, m.Config.Bgp(asn, mp), nil, m.Logs.Sub("bgp"))
-
-	if m.Pool == nil {
+	if m.pool == nil {
 		return fmt.Errorf("BGP pool fail")
 	}
 
@@ -134,9 +124,9 @@ func (m *Manager) Manage(listener net.Listener, routerID [4]byte, asn uint16, mp
 		defer func() {
 			ticker.Stop()
 			timer.Stop()
-			m.Pool.RIB(nil)
+			m.pool.RIB(nil)
 			time.Sleep(2 * time.Second)
-			m.Pool.Close()
+			m.pool.Close()
 		}()
 
 		var initialised bool
@@ -166,7 +156,7 @@ func (m *Manager) Manage(listener net.Listener, routerID [4]byte, asn uint16, mp
 			m.rib = AdjRIBOut(m.vip, initialised)
 			m.mutex.Unlock()
 
-			m.Pool.RIB(m.rib)
+			m.pool.RIB(m.rib)
 		}
 	}()
 
@@ -274,14 +264,16 @@ func (m *Manager) Manage(listener net.Listener, routerID [4]byte, asn uint16, mp
 		w.Write([]byte("\n"))
 	})
 
-	go func() {
-		for {
-			server := http.Server{}
-			err := server.Serve(listener)
-			m.Logs.Alert(ALERT, F, "webserver", KV{"error.message": err.Error()}, "Webserver exited: "+err.Error())
-			time.Sleep(10 * time.Second)
-		}
-	}()
+	if listener != nil {
+		go func() {
+			for {
+				server := http.Server{}
+				err := server.Serve(listener)
+				m.Logs.Alert(ALERT, F, "webserver", KV{"error.message": err.Error()}, "Webserver exited: "+err.Error())
+				time.Sleep(10 * time.Second)
+			}
+		}()
+	}
 
 	return nil
 }
@@ -290,7 +282,7 @@ func (m *Manager) Configure(config *Config) {
 	m.mutex.Lock()
 	m.mutex.Unlock()
 	m.Director.Configure(config.Parse())
-	m.Pool.Configure(config.Bgp(m.asn, m.mp))
+	m.pool.Configure(config.Bgp(m.ASNumber, !m.IPv4Only))
 	m.Logs.Configure(config.Logging_())
 	m.Config = config
 }
@@ -304,7 +296,7 @@ func (m *Manager) Cue() ([]byte, error) {
 func (m *Manager) JSONStatus() ([]byte, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	return jsonStatus(m.summary, m.services, m.vip, m.Pool, m.rib, m.Logs.Stats())
+	return jsonStatus(m.summary, m.services, m.vip, m.pool, m.rib, m.Logs.Stats())
 }
 
 //func Prometheus(p string, services Services, summary Summary, vips map[netip.Addr]State) []string {

@@ -165,7 +165,10 @@ type LogStats struct {
 	WebhookErrors       uint64 `json:"webhook_errors"`
 }
 
-func (s *sink) Stats() LogStats {
+func (s *sink) Stats() (_ LogStats) {
+	if s == nil {
+		return
+	}
 	return LogStats{
 		ElasticsearchErrors: s.elastic.Load(),
 		WebhookErrors:       s.webhook.Load(),
@@ -173,6 +176,10 @@ func (s *sink) Stats() LogStats {
 }
 
 func (s *sink) log(lev uint8, facility string, a ...any) {
+	if s == nil {
+		return
+	}
+
 	level := level(lev)
 
 	now := time.Now()
@@ -245,6 +252,10 @@ func (s *sink) alert(lev uint8, facility string, action string, event map[string
 }
 
 func (s *sink) _event(alert bool, lev uint8, facility string, action string, event map[string]any, hrt ...string) {
+	if s == nil {
+		return
+	}
+
 	level := level(lev)
 
 	now := time.Now()
@@ -294,6 +305,10 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 }
 
 func (s *sink) Get(start uint64) (h []entry) {
+	if s == nil {
+		return
+	}
+
 	l := &ent{get: make(chan bool), start: start}
 	s.e <- l
 	<-l.get
@@ -307,6 +322,9 @@ func (s *sink) Get(start uint64) (h []entry) {
 }
 
 func (s *sink) Configure(l Logging) {
+	if s == nil {
+		return
+	}
 	s.l <- l
 }
 

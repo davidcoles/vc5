@@ -218,11 +218,13 @@ func netns(socket string, addr netip.Addr) {
 	log.Fatal(server.Serve(s))
 }
 
-func ethtool(i string) {
-	exec.Command("ethtool", "-K", i, "rx", "off").Output()
-	exec.Command("ethtool", "-K", i, "tx", "off").Output()
-	exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
-	exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
+func ethtool(nics []string) {
+	for _, i := range nics {
+		exec.Command("ethtool", "-K", i, "rx", "off").Output()
+		exec.Command("ethtool", "-K", i, "tx", "off").Output()
+		exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
+		exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
+	}
 }
 
 func mac(m [6]byte) string {
@@ -362,6 +364,9 @@ func multicast_recv(c Client, address string) {
 }
 
 func readCommands(sock net.Listener, client Client, log vc5.Logger) {
+	if sock == nil {
+		return
+	}
 	// eg.: echo reattach enp130s0f0 | socat - UNIX-CLIENT:/var/run/vc5
 	F := "command"
 

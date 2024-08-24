@@ -138,3 +138,30 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 
 	return
 }
+
+func (b *Balancer) nat() func(vip, rip netip.Addr) netip.Addr {
+	return func(vip, rip netip.Addr) netip.Addr {
+		nat, _ := b.Client.NATAddress(vip, rip)
+		return nat
+	}
+}
+
+func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+	return func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+		vip := i.Service.Address
+		rip := i.Destination.Address
+		nat, ok := b.Client.NATAddress(vip, rip)
+
+		if check.Host == "" {
+			check.Host = rip.String() // URL would consist of NAT address if no host field set, which could be confusing
+		}
+
+		if !ok {
+			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
+		} else {
+			ok, diagnostic = b.NetNS.Probe(nat, check)
+		}
+
+		return ok, diagnostic
+	}
+}

@@ -42,7 +42,7 @@ func main() {
 
 	F := "vc5"
 
-	var mutex sync.Mutex
+	//var mutex sync.Mutex
 
 	//start := time.Now()
 	webroot := flag.String("r", "", "webserver root directory")
@@ -121,8 +121,17 @@ func main() {
 		logs.Fatal(F, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
 	}
 
-	var listener net.Listener
+	routerID := address.As4()
 
+	if *asn > 0 {
+		routerID = [4]byte{127, 0, 0, 1}
+	}
+
+	// Before making any changes to the state of the system (loading
+	// XDP, etc) we attempt to listen on the webserver port. This
+	// should prevent multiple instances running at the same time and
+	// interfering with each other.
+	var listener net.Listener
 	if *webserver != "" {
 		listener, err = net.Listen("tcp", *webserver)
 		if err != nil {
@@ -130,6 +139,11 @@ func main() {
 		}
 	}
 
+	// If BGP peers do not support a "passive" option (eg. ExtremeXOS)
+	// then we may need to listen on port 179 to prevent the session
+	// getting into a error state - we accept the connection but then
+	// quietly drop it after ten seconds or so. This seems to keep the
+	// device happy.
 	if config.Listen {
 		l, err := net.Listen("tcp", ":179")
 		if err != nil {
@@ -138,22 +152,23 @@ func main() {
 		go bgpListener(l, logs.Sub("bgp"))
 	}
 
+	// Open a UNIX domain socket for receiving command whilst running.
+	// Currently used to re-attach XDP code to an interface as a
+	// mitigation for some badly behaved network cards.
 	var cmd_sock net.Listener
-
 	if *cmd_path != "" {
 		os.Remove(*cmd_path)
-
-		cmd_sock, err = net.Listen("unix", *cmd_path)
-
-		if err != nil {
+		if cmd_sock, err = net.Listen("unix", *cmd_path); err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	for _, i := range nics {
-		ethtool(i)
-	}
+	// Run ethtool against the network interfaces to disable various
+	// offload parameters which seem to interfere with XDP operations
+	ethtool(nics)
 
+	// Initialise the load balancing library which will deal with the
+	// data-plane - this is what actually switches incoming packets
 	client := &xvs.Client{
 		Interfaces: nics,
 		Address:    address,
@@ -165,105 +180,44 @@ func main() {
 		MaxFlows:   uint32(*flows),
 	}
 
-	err = client.Start()
-
-	if err != nil {
+	if err = client.Start(); err != nil {
 		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
-	if cmd_sock != nil {
-		go readCommands(cmd_sock, client, logs.Sub("xvs"))
-	}
-
-	routerID := address.As4()
-
-	if *asn > 0 {
-		routerID = [4]byte{127, 0, 0, 1}
-	}
-
+	// move these to balancer ...
+	go readCommands(cmd_sock, client, logs.Sub("xvs"))
 	go spawn(logs, client.Namespace(), os.Args[0], "-s", socket.Name(), client.NamespaceAddress())
+	if config.Multicast != "" {
+		multicast(client, config.Multicast)
+	}
 
+	// Create a balancer instance  - this implements interface methods
+	// (configuration changes, stats  requests, etc). which are called
+	// by the manager object (which handles the main event loop)
 	balancer := &Balancer{
 		NetNS:  NetNS(socket.Name()),
 		Logger: logs.Sub("balancer"),
 		Client: client,
 	}
 
-	if config.Multicast != "" {
-		multicast(client, config.Multicast)
-	}
+	// Add some custom HTTP endpoints to the default mux to handle
+	// requests specific to this type of load balancer client (xvs)
+	httpEndpoints(client)
 
-	done := make(chan bool) // close this channel when we want to exit
-
-	nat := func(vip, rip netip.Addr) netip.Addr {
-		nat, _ := client.NATAddress(vip, rip)
-		return nat
-	}
-
-	prober := func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
-		vip := i.Service.Address
-		rip := i.Destination.Address
-		nat, ok := client.NATAddress(vip, rip)
-
-		if check.Host == "" {
-			check.Host = rip.String() // URL would consist of NAT address if no host field set, which could be confusing
-		}
-
-		if !ok {
-			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
-		} else {
-			ok, diagnostic = balancer.NetNS.Probe(nat, check)
-		}
-
-		return ok, diagnostic
-	}
+	done := make(chan bool) // close this channel when we want to exit (FIXME: change to a context)
 
 	manager := vc5.Manager{
 		Config:   config,
 		Balancer: balancer,
 		Logs:     logs,
-		Prober:   prober,
-		NAT:      nat,
+		NAT:      balancer.nat(),    // We use a NAT method and a custom probe function
+		Prober:   balancer.prober(), // to run checks from the network namespace
+		RouterID: routerID,          // BGP router ID to use to speak to peers
+		ASNumber: uint16(*asn),      // If non-zero then loopback BGP is activated
+		IPv4Only: !(*mp),            // By default we send multiprotocol BGP capabilites (for IPv6)
 	}
 
-	// Remove this if migrating to a different load balancing engine
-	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
-		t := time.Now()
-		p := client.Prefixes()
-		fmt.Println(time.Now().Sub(t))
-		js, _ := json.Marshal(&p)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
-
-	// Remove this if migrating to a different load balancing engine
-	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
-		var ret []interface{}
-		type status struct {
-			Service      xvs.ServiceExtended
-			Destinations []xvs.DestinationExtended
-		}
-		svcs, _ := client.Services()
-		for _, se := range svcs {
-			dsts, _ := client.Destinations(se.Service)
-			ret = append(ret, status{Service: se, Destinations: dsts})
-		}
-		js, err := json.MarshalIndent(&ret, " ", " ")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
-
-	if err := manager.Manage(listener, routerID, uint16(*asn), *mp, done); err != nil {
+	if err := manager.Manage(listener, done); err != nil {
 		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
 
@@ -280,7 +234,7 @@ func main() {
 			logs.Alert(vc5.NOTICE, F, "reload", KV{}, "Reload signal received")
 			conf, err := vc5.Load(file)
 			if err == nil {
-				mutex.Lock()
+				//mutex.Lock()
 				config = conf
 
 				config.Address = *addr
@@ -290,7 +244,7 @@ func main() {
 				config.Webroot = *webroot
 				client.UpdateVLANs(conf.Vlans())
 				manager.Configure(conf)
-				mutex.Unlock()
+				//mutex.Unlock()
 			} else {
 				logs.Alert(vc5.ALERT, F, "config", KV{"error.message": fmt.Sprint("Couldn't load config file:", file, err)})
 			}
@@ -323,3 +277,70 @@ func bgpListener(l net.Listener, logs vc5.Logger) {
 		}
 	}
 }
+
+func httpEndpoints(client Client) {
+	// Remove this if migrating to a different load balancing engine
+	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
+		t := time.Now()
+		p := client.Prefixes()
+		fmt.Println(time.Now().Sub(t))
+		js, err := json.Marshal(&p)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+	// Remove this if migrating to a different load balancing engine
+	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
+		var ret []interface{}
+		type status struct {
+			Service      xvs.ServiceExtended
+			Destinations []xvs.DestinationExtended
+		}
+		svcs, _ := client.Services()
+		for _, se := range svcs {
+			dsts, _ := client.Destinations(se.Service)
+			ret = append(ret, status{Service: se, Destinations: dsts})
+		}
+		js, err := json.MarshalIndent(&ret, " ", " ")
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(js)
+		w.Write([]byte("\n"))
+	})
+
+}
+
+/*
+	// could be encapsulated in balancer
+	nat := func(vip, rip netip.Addr) netip.Addr {
+		nat, _ := client.NATAddress(vip, rip)
+		return nat
+	}
+
+	// could be encapsulated in balancer
+	prober := func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+		vip := i.Service.Address
+		rip := i.Destination.Address
+		nat, ok := client.NATAddress(vip, rip)
+
+		if check.Host == "" {
+			check.Host = rip.String() // URL would consist of NAT address if no host field set, which could be confusing
+		}
+
+		if !ok {
+			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
+		} else {
+			ok, diagnostic = balancer.NetNS.Probe(nat, check)
+		}
+
+		return ok, diagnostic
+	}
+*/
