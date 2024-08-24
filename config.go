@@ -102,7 +102,7 @@ type Config struct {
 	HostID     string        `json:"host_id,omitempty"`
 }
 
-func (c *Config) Logging_() Logging {
+func (c *Config) LoggingConfig() Logging {
 	return c.Logging.Logging()
 }
 

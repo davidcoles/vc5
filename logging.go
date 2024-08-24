@@ -131,6 +131,12 @@ type ent struct {
 	alert   bool
 }
 
+func NewLogger(hostid string, l Logging) *Sink {
+	logs := &Sink{HostID: hostid}
+	logs.Start(l)
+	return logs
+}
+
 type Sink = sink
 type sink struct {
 	HostID string

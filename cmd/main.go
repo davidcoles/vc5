@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -77,8 +76,7 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := &vc5.Sink{HostID: config.HostID}
-	logs.Start(config.Logging_())
+	logs := vc5.NewLogger(config.HostID, config.LoggingConfig())
 
 	socket, err := ioutil.TempFile("/tmp", "vc5ns")
 
@@ -145,9 +143,9 @@ func main() {
 		go bgpListener(l, logs.Sub("bgp"))
 	}
 
-	// Open a UNIX domain socket for receiving command whilst running.
-	// Currently used to re-attach XDP code to an interface as a
-	// mitigation for some badly behaved network cards.
+	// Open a UNIX domain socket for receiving commands whilst
+	// running. Currently used to re-attach XDP code to an interface
+	// as a mitigation for some badly behaved network cards.
 	var cmd_sock net.Listener
 	if *cmd_path != "" {
 		os.Remove(*cmd_path)
@@ -192,7 +190,7 @@ func main() {
 
 	// Add some custom HTTP endpoints to the default mux to handle
 	// requests specific to this type of load balancer client (xvs)
-	httpEndpoints(client)
+	httpEndpoints(client, logs)
 
 	ctx, shutdown := context.WithCancel(context.Background())
 
@@ -237,7 +235,8 @@ func main() {
 				client.UpdateVLANs(conf.Vlans())
 				manager.Configure(conf)
 			} else {
-				logs.Alert(vc5.ALERT, F, "config", KV{"error.message": fmt.Sprint("Couldn't load config file:", file, err)})
+				text := "Couldn't load config file " + file + " :" + err.Error()
+				logs.Alert(vc5.ALERT, F, "config", KV{"file.path": file, "error.message": err.Error()}, text)
 			}
 
 		case syscall.SIGTERM:
@@ -269,12 +268,13 @@ func bgpListener(l net.Listener, logs vc5.Logger) {
 	}
 }
 
-func httpEndpoints(client Client) {
+func httpEndpoints(client Client, logs vc5.Logger) {
 
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
 		t := time.Now()
 		p := client.Prefixes()
-		fmt.Println(time.Now().Sub(t))
+		milliseconds := time.Now().Sub(t) / time.Millisecond
+		logs.Event(6, "web", "prefixes", KV{"milliseconds": milliseconds})
 		js, err := json.Marshal(&p)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)

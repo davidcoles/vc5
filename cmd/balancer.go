@@ -39,54 +39,55 @@ type Balancer struct {
 	Client *xvs.Client
 }
 
-func (b *Balancer) Destinations(s vc5.Service) (map[vc5.Destination]vc5.Stats, error) {
-	stats := map[vc5.Destination]vc5.Stats{}
-	ds, err := b.Client.Destinations(xvs.Service{Address: s.Address, Port: s.Port, Protocol: uint8(s.Protocol)})
-	for _, d := range ds {
-		key := vc5.Destination{Address: d.Destination.Address, Port: s.Port}
-		stats[key] = vc5.Stats{
-			IngressOctets:  d.Stats.Octets,
-			IngressPackets: d.Stats.Packets,
-			EgressOctets:   0, // Not available in DSR
-			EgressPackets:  0, // Not available in DSR
-			Flows:          d.Stats.Flows,
-			MAC:            d.MAC.String(),
-		}
-	}
-	return stats, err
-}
+func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
+	stats := map[vc5.Instance]vc5.Stats{}
 
-func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
-	tcp := map[vc5.Instance]vc5.TCPStats{}
-	svcs, _ := b.Client.Services()
-	for _, se := range svcs {
-		s := se.Service
-		dsts, _ := b.Client.Destinations(s)
-		for _, de := range dsts {
-			d := de.Destination
-			i := vc5.Instance{
-				Service:     vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)},
-				Destination: vc5.Destination{Address: d.Address, Port: s.Port},
+	services, _ := b.Client.Services()
+
+	for _, s := range services {
+		protocol := vc5.Protocol(s.Service.Protocol)
+		service := vc5.Service{Address: s.Service.Address, Port: s.Service.Port, Protocol: protocol}
+
+		destinations, _ := b.Client.Destinations(s.Service)
+
+		for _, d := range destinations {
+
+			destination := vc5.Destination{Address: d.Destination.Address, Port: s.Service.Port}
+
+			instance := vc5.Instance{
+				Service:     service,
+				Destination: destination,
 			}
-			tcp[i] = vc5.TCPStats{ESTABLISHED: de.Stats.Current}
+
+			stats[instance] = vc5.Stats{
+				IngressOctets:  d.Stats.Octets,
+				IngressPackets: d.Stats.Packets,
+				EgressOctets:   0, // Not available in DSR
+				EgressPackets:  0, // Not available in DSR
+				Flows:          d.Stats.Flows,
+				Current:        d.Stats.Current,
+				MAC:            d.MAC.String(),
+			}
 		}
 	}
 
-	return tcp
+	return stats
 }
 
 func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
-	type tuple struct {
-		Address  netip.Addr
-		Port     uint16
-		Protocol uint8
+	foo := func(s xvs.Service) vc5.Service {
+		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
 	}
 
-	target := map[tuple]vc5.ServiceManifest{}
+	bar := func(s vc5.ServiceManifest) vc5.Service {
+		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
+	}
+
+	target := map[vc5.Service]vc5.ServiceManifest{}
 
 	for _, s := range services {
-		target[tuple{Address: s.Address, Port: s.Port, Protocol: s.Protocol}] = s
+		target[bar(s)] = s
 
 		for _, d := range s.Destinations {
 			if s.Port != d.Port {
@@ -97,7 +98,7 @@ func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
 	svcs, _ := b.Client.Services()
 	for _, s := range svcs {
-		key := tuple{Address: s.Service.Address, Port: s.Service.Port, Protocol: s.Service.Protocol}
+		key := foo(s.Service)
 		if _, wanted := target[key]; !wanted {
 			b.Client.RemoveService(s.Service)
 		}
@@ -169,10 +170,48 @@ func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diag
 }
 
 func (b *Balancer) start(socket *os.File, cmd_sock net.Listener, mcast string) {
-	// FIXME: move these to balancer ...
 	go readCommands(cmd_sock, b.Client, b.Logger)
 	go spawn(b.Logger, b.Client.Namespace(), os.Args[0], "-s", socket.Name(), b.Client.NamespaceAddress())
 	if mcast != "" {
 		multicast(b.Client, mcast)
 	}
 }
+
+/*
+func (b *Balancer) Destinations(s vc5.Service) (map[vc5.Destination]vc5.Stats, error) {
+	stats := map[vc5.Destination]vc5.Stats{}
+	ds, err := b.Client.Destinations(xvs.Service{Address: s.Address, Port: s.Port, Protocol: uint8(s.Protocol)})
+	for _, d := range ds {
+		key := vc5.Destination{Address: d.Destination.Address, Port: s.Port}
+		stats[key] = vc5.Stats{
+			IngressOctets:  d.Stats.Octets,
+			IngressPackets: d.Stats.Packets,
+			EgressOctets:   0, // Not available in DSR
+			EgressPackets:  0, // Not available in DSR
+			Flows:          d.Stats.Flows,
+			MAC:            d.MAC.String(),
+		}
+	}
+	return stats, err
+}
+
+func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
+	tcp := map[vc5.Instance]vc5.TCPStats{}
+	svcs, _ := b.Client.Services()
+	for _, se := range svcs {
+		s := se.Service
+		dsts, _ := b.Client.Destinations(s)
+		for _, de := range dsts {
+			d := de.Destination
+			i := vc5.Instance{
+				Service:     vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)},
+				Destination: vc5.Destination{Address: d.Address, Port: s.Port},
+			}
+			tcp[i] = vc5.TCPStats{ESTABLISHED: de.Stats.Current}
+		}
+	}
+
+	return tcp
+}
+
+*/

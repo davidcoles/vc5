@@ -288,7 +288,7 @@ func (m *Manager) Configure(config *Config) {
 	m.mutex.Unlock()
 	m.Director.Configure(config.Parse())
 	m.pool.Configure(config.Bgp(m.ASNumber, !m.IPv4Only))
-	m.Logs.Configure(config.Logging_())
+	m.Logs.Configure(config.LoggingConfig())
 	m.Config = config
 }
 

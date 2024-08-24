@@ -326,10 +326,11 @@ type Instance struct {
 type Manifest []cue.Service
 type ServiceManifest = cue.Service // so we don't have to pull cue into the balancer
 type Balancer interface {
-	Destinations(s Service) (map[Destination]Stats, error)
-	TCPStats() map[Instance]TCPStats
+	//Destinations(s Service) (map[Destination]Stats, error)
+	//TCPStats() map[Instance]TCPStats
 	Summary() Summary
 	Configure([]ServiceManifest) error
+	Stats() map[Instance]Stats
 }
 
 func calculateRate(s Stats, o Stats) Stats {
@@ -358,8 +359,8 @@ type TCPStats struct {
 	TIME_WAIT   uint64
 }
 
-//func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (map[netip.Addr][]Serv, map[Instance]Stats, uint64) {
-func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (Services, map[Instance]Stats, uint64) {
+/*
+func _ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (Services, map[Instance]Stats, uint64) {
 
 	var current uint64
 
@@ -413,6 +414,91 @@ func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 				serv.Stats.Current += tcp.ESTABLISHED
 				current += tcp.ESTABLISHED
 			}
+
+			stats[key] = dest.Stats
+			serv.Destinations = append(serv.Destinations, dest)
+		}
+
+		stats[key] = serv.Stats
+
+		sort.SliceStable(serv.Destinations, func(i, j int) bool {
+			return serv.Destinations[i].Address.Compare(serv.Destinations[j].Address) < 0
+		})
+
+		status[svc.Address] = append(status[svc.Address], serv)
+	}
+
+	return status, stats, current
+}
+*/
+func ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (Services, map[Instance]Stats, uint64) {
+
+	var current uint64
+
+	stats := map[Instance]Stats{}
+	status := map[netip.Addr][]serv{}
+	//tcpstats := balancer.TCPStats()
+	allstats := balancer.Stats()
+
+	for _, svc := range director.Status() {
+
+		cnf, _ := config.Services[service(svc)]
+		key := serviceInstance(svc)
+		//lbs, _ := balancer.Destinations(service(svc)) // map[vc5.Destination]vc5.Stats
+
+		lbs := map[Destination]Stats{}
+
+		for k, v := range allstats {
+			if k.Service == key.Service {
+				lbs[k.Destination] = v
+			}
+		}
+
+		var sum Stats
+		for _, s := range lbs {
+			sum.add(s)
+		}
+
+		serv := serv{
+			Name:        cnf.Name,
+			Description: cnf.Description,
+			Address:     svc.Address,
+			Port:        svc.Port,
+			Protocol:    protocol(svc.Protocol),
+			Required:    svc.Required,
+			Available:   svc.Available(),
+			Up:          svc.Up,
+			For:         uint64(time.Now().Sub(svc.When) / time.Second),
+			Sticky:      svc.Sticky,
+			Scheduler:   svc.Scheduler,
+			Stats:       calculateRate(sum, old[key]),
+		}
+
+		for _, dst := range svc.Destinations {
+			foo := lbs[destination(dst)]
+
+			key := destinationInstance(svc, dst)
+			dest := dest{
+				Address:    dst.Address,
+				Port:       dst.Port,
+				Disabled:   dst.Disabled,
+				Up:         dst.Status.OK,
+				For:        uint64(time.Now().Sub(dst.Status.When) / time.Second),
+				Took:       uint64(dst.Status.Took / time.Millisecond),
+				Diagnostic: dst.Status.Diagnostic,
+				Weight:     dst.Weight,
+				Stats:      calculateRate(lbs[destination(dst)], old[key]),
+				MAC:        lbs[destination(dst)].MAC,
+			}
+
+			//serv.Stats.Current += foo.Current // dealt with by 'sum'
+			current += foo.Current
+
+			//if tcp, ok := tcpstats[destinationInstance(svc, dst)]; ok {
+			//	dest.Stats.Current = tcp.ESTABLISHED
+			//	serv.Stats.Current += tcp.ESTABLISHED
+			//	current += tcp.ESTABLISHED
+			//}
 
 			stats[key] = dest.Stats
 			serv.Destinations = append(serv.Destinations, dest)
