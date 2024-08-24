@@ -179,9 +179,17 @@ func main() {
 	// (configuration changes, stats  requests, etc). which are called
 	// by the manager object (which handles the main event loop)
 	balancer := &Balancer{
-		NetNS:  NetNS(socket.Name()),
-		Logger: logs.Sub("balancer"),
 		Client: client,
+		Logger: logs.Sub("balancer"),
+		NetNS: &http.Client{
+			Transport: &http.Transport{
+				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+					return net.Dial("unix", socket.Name())
+				},
+			},
+		},
+		//NetNS:  NetNS(socket.Name()),
+
 	}
 
 	// Run server to perform healthchecks in network namespace, handle

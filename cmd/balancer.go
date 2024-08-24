@@ -32,7 +32,6 @@ import (
 
 type Client = *xvs.Client
 type Balancer struct {
-	//NetNS  *nns
 	NetNS  *http.Client
 	Logger vc5.Logger
 	Client Client

@@ -21,7 +21,7 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
+	//"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -89,6 +89,7 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 	}
 }
 
+/*
 func NetNS(socket string) *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
@@ -98,6 +99,7 @@ func NetNS(socket string) *http.Client {
 		},
 	}
 }
+*/
 
 func probe(client *http.Client, addr netip.Addr, check vc5.Check) (bool, string) {
 
@@ -228,34 +230,34 @@ func mac(m [6]byte) string {
 type KV = map[string]any
 type Debug struct{ Log vc5.Logger }
 
-var foo atomic.Uint64
+var run atomic.Uint64
 
 func (d *Debug) NAT(tag map[netip.Addr]int16, arp map[netip.Addr][6]byte, vrn map[[2]netip.Addr]netip.Addr, nat map[netip.Addr]string, out []netip.Addr, in []string) {
 
-	f := foo.Add(1)
+	r := run.Add(1)
 
 	for k, v := range tag {
-		d.Log.Event(vc5.DEBUG, "vlan", "update", KV{"run": f, "destintation.ip": k, "vlan.id": v})
+		d.Log.Event(vc5.DEBUG, "vlan", "update", KV{"run": r, "destintation.ip": k, "vlan.id": v})
 	}
 
 	for k, v := range arp {
-		d.Log.Event(vc5.DEBUG, "arp", "update", KV{"run": f, "destintation.ip": k, "destintation.mac": mac(v)})
+		d.Log.Event(vc5.DEBUG, "arp", "update", KV{"run": r, "destintation.ip": k, "destintation.mac": mac(v)})
 	}
 
 	for k, v := range vrn {
-		d.Log.Event(vc5.DEBUG, "map", "update", KV{"run": f, "service.ip": k[0], "destination.ip": k[1], "destination.nat.ip": v})
+		d.Log.Event(vc5.DEBUG, "map", "update", KV{"run": r, "service.ip": k[0], "destination.ip": k[1], "destination.nat.ip": v})
 	}
 
 	for k, v := range nat {
-		d.Log.Event(vc5.DEBUG, "nat", "update", KV{"run": f, "nat": k, "info": v})
+		d.Log.Event(vc5.DEBUG, "nat", "update", KV{"run": r, "nat": k, "info": v})
 	}
 
 	//for _, v := range out {
-	//	d.Log.DEBUG("delete", KV{"run": f, "out": v})
+	//	d.Log.DEBUG("delete", KV{"run": r, "out": v})
 	//}
 
 	//for _, v := range in {
-	//	d.Log.DEBUG("delete", KV{"run": f, "in": v})
+	//	d.Log.DEBUG("delete", KV{"run": r, "in": v})
 	//}
 }
 
@@ -277,7 +279,7 @@ const maxDatagramSize = 1500
 
 func multicast(c Client, multicast string) {
 	go multicast_send(c, multicast)
-	go multicast_recv(c, multicast)
+	go multicast_recv(c, multicast, false)
 }
 
 func multicast_send(c Client, address string) {
@@ -324,7 +326,7 @@ func multicast_send(c Client, address string) {
 	}
 }
 
-func multicast_recv(c Client, address string) {
+func multicast_recv(c Client, address string, spinner bool) {
 	udp, err := net.ResolveUDPAddr("udp", address)
 
 	if err != nil {
@@ -342,7 +344,9 @@ func multicast_recv(c Client, address string) {
 
 	for {
 		nread, _, err := conn.ReadFromUDP(buff)
-		fmt.Print(s[x%4] + "\b")
+		if spinner {
+			fmt.Print(s[x%4] + "\b")
+		}
 		x++
 		if err == nil {
 			for n := 0; n+1 < nread; {
