@@ -19,6 +19,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -29,7 +30,6 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -42,9 +42,6 @@ func main() {
 
 	F := "vc5"
 
-	//var mutex sync.Mutex
-
-	//start := time.Now()
 	webroot := flag.String("r", "", "webserver root directory")
 	webserver := flag.String("w", ":80", "webserver listen address")
 	sock := flag.String("s", "", "socket") // used internally
@@ -184,13 +181,6 @@ func main() {
 		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
-	// move these to balancer ...
-	go readCommands(cmd_sock, client, logs.Sub("xvs"))
-	go spawn(logs, client.Namespace(), os.Args[0], "-s", socket.Name(), client.NamespaceAddress())
-	if config.Multicast != "" {
-		multicast(client, config.Multicast)
-	}
-
 	// Create a balancer instance  - this implements interface methods
 	// (configuration changes, stats  requests, etc). which are called
 	// by the manager object (which handles the main event loop)
@@ -200,11 +190,17 @@ func main() {
 		Client: client,
 	}
 
+	// Run server to perform healthchecks in network namespace, handle
+	// commands from UNIX socket and share flow info via multicast
+	balancer.start(socket, cmd_sock, config.Multicast)
+
 	// Add some custom HTTP endpoints to the default mux to handle
 	// requests specific to this type of load balancer client (xvs)
 	httpEndpoints(client)
 
 	done := make(chan bool) // close this channel when we want to exit (FIXME: change to a context)
+
+	ctx, cancel := context.WithCancel(context.Background())
 
 	manager := vc5.Manager{
 		Config:   config,
@@ -217,12 +213,16 @@ func main() {
 		IPv4Only: !(*mp),            // By default we send multiprotocol BGP capabilites (for IPv6)
 	}
 
-	if err := manager.Manage(listener, done); err != nil {
+	if err := manager.Manage(ctx, listener); err != nil {
 		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
 
+	// We are succesfully up and running, so send a high priority
+	// alert to let the world know - perhaps we crashed previously and
+	// were restarted by the service manager
 	logs.Alert(vc5.ALERT, F, "initialised", KV{}, "Initialised")
 
+	// We now wait for signals to tell us to reload the configuration file or exit
 	sig := make(chan os.Signal, 10)
 	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
@@ -234,9 +234,7 @@ func main() {
 			logs.Alert(vc5.NOTICE, F, "reload", KV{}, "Reload signal received")
 			conf, err := vc5.Load(file)
 			if err == nil {
-				//mutex.Lock()
 				config = conf
-
 				config.Address = *addr
 				config.Interfaces = nics
 				config.Native = *native
@@ -244,7 +242,6 @@ func main() {
 				config.Webroot = *webroot
 				client.UpdateVLANs(conf.Vlans())
 				manager.Configure(conf)
-				//mutex.Unlock()
 			} else {
 				logs.Alert(vc5.ALERT, F, "config", KV{"error.message": fmt.Sprint("Couldn't load config file:", file, err)})
 			}
@@ -253,6 +250,7 @@ func main() {
 			fallthrough
 		case syscall.SIGQUIT:
 			close(done) // shut down BGP, etc
+			cancel()
 			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
 			time.Sleep(4 * time.Second)
 			return
@@ -279,7 +277,7 @@ func bgpListener(l net.Listener, logs vc5.Logger) {
 }
 
 func httpEndpoints(client Client) {
-	// Remove this if migrating to a different load balancing engine
+
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
 		t := time.Now()
 		p := client.Prefixes()
@@ -289,12 +287,11 @@ func httpEndpoints(client Client) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		js = append(js, 0x0a) // add a newline for readability
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
-		w.Write([]byte("\n"))
 	})
 
-	// Remove this if migrating to a different load balancing engine
 	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
 		var ret []interface{}
 		type status struct {
@@ -311,36 +308,8 @@ func httpEndpoints(client Client) {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		js = append(js, 0x0a) // add a newline for readability
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
-		w.Write([]byte("\n"))
 	})
-
 }
-
-/*
-	// could be encapsulated in balancer
-	nat := func(vip, rip netip.Addr) netip.Addr {
-		nat, _ := client.NATAddress(vip, rip)
-		return nat
-	}
-
-	// could be encapsulated in balancer
-	prober := func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
-		vip := i.Service.Address
-		rip := i.Destination.Address
-		nat, ok := client.NATAddress(vip, rip)
-
-		if check.Host == "" {
-			check.Host = rip.String() // URL would consist of NAT address if no host field set, which could be confusing
-		}
-
-		if !ok {
-			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
-		} else {
-			ok, diagnostic = balancer.NetNS.Probe(nat, check)
-		}
-
-		return ok, diagnostic
-	}
-*/

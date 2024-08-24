@@ -20,7 +20,9 @@ package main
 
 import (
 	"errors"
+	"net"
 	"net/netip"
+	"os"
 
 	"github.com/davidcoles/xvs"
 
@@ -163,5 +165,14 @@ func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diag
 		}
 
 		return ok, diagnostic
+	}
+}
+
+func (b *Balancer) start(socket *os.File, cmd_sock net.Listener, mcast string) {
+	// FIXME: move these to balancer ...
+	go readCommands(cmd_sock, b.Client, b.Logger)
+	go spawn(b.Logger, b.Client.Namespace(), os.Args[0], "-s", socket.Name(), b.Client.NamespaceAddress())
+	if mcast != "" {
+		multicast(b.Client, mcast)
 	}
 }

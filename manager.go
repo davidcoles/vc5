@@ -19,6 +19,7 @@
 package vc5
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -71,7 +72,7 @@ func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, d
 	return m.Prober(Instance{Service: s, Destination: d}, check)
 }
 
-func (m *Manager) Manage(listener net.Listener, done chan bool) error {
+func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 	m.Director = &cue.Director{
 		Notifier: m,
@@ -110,7 +111,8 @@ func (m *Manager) Manage(listener net.Listener, done chan bool) error {
 			m.mutex.Unlock()
 			select {
 			case <-ticker.C:
-			case <-done:
+			case <-ctx.Done():
+				fmt.Println("OUTTA HERE!")
 				return
 			}
 		}
@@ -132,28 +134,25 @@ func (m *Manager) Manage(listener net.Listener, done chan bool) error {
 		var initialised bool
 		for {
 			select {
+			case <-ctx.Done(): // shuting down
+				return
 			case <-ticker.C: // check for matured VIPs
 				//m.mutex.Lock()
 				//vipmap = VipLog(director.Status(), vipmap, config.Priorities(), logs)
 				//m.mutex.Unlock()
-
 			case <-m.Director.C: // a backend has changed state
 				m.mutex.Lock()
 				services = m.Director.Status()
 				m.Balancer.Configure(services) // may want to do this outside of log with a deep copy of services
 				m.mutex.Unlock()
-			case <-done: // shuting down
-				return
 			case <-timer.C:
-				//logs.NOTICE(F, KV{"event": "Learn timer expired"})
-				//logs.NOTICE(F, KV{"event.action": "learn-timer-expired"})
 				m.Logs.Alert(NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
 				initialised = true
 			}
 
 			m.mutex.Lock()
 			m.vip = VipState(services, m.vip, m.Config.Priorities(), m.Logs)
-			m.rib = AdjRIBOut(m.vip, initialised)
+			m.rib = adjRIBOut(m.vip, initialised)
 			m.mutex.Unlock()
 
 			m.pool.RIB(m.rib)
@@ -408,4 +407,13 @@ func natLog(instance mon.Instance, status bool, diagnostic string, check string,
 	r["round"] = round
 	r["destination.nat.ip"] = nat
 	return r
+}
+
+func adjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
+	for v, s := range vip {
+		if initialised && s.up && time.Now().Sub(s.time) > time.Second*5 {
+			r = append(r, v)
+		}
+	}
+	return
 }

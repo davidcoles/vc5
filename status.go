@@ -274,15 +274,6 @@ func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[neti
 	return m
 }
 */
-func AdjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
-	for v, s := range vip {
-		if initialised && s.up && time.Now().Sub(s.time) > time.Second*5 {
-			r = append(r, v)
-		}
-	}
-	return
-}
-
 func (s *Summary) Update(n Summary, start time.Time) {
 
 	o := *s
@@ -332,7 +323,7 @@ type Instance struct {
 	Destination Destination
 }
 
-type CService = cue.Service
+type CService = cue.Service // FIXME: better naming needed
 type Balancer interface {
 	Destinations(s Service) (map[Destination]Stats, error)
 	TCPStats() map[Instance]TCPStats
