@@ -47,7 +47,6 @@ func main() {
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
 	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
-	mp := flag.Bool("M", false, "Use multiprotocol extensions on loopback BGP") // experimental - may change
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
 	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
 	cmd_path := flag.String("C", "", "Command channel path")                    // experimental - may change
@@ -210,7 +209,7 @@ func main() {
 		Prober:   balancer.prober(), // to run checks from the network namespace
 		RouterID: routerID,          // BGP router ID to use to speak to peers
 		ASNumber: uint16(*asn),      // If non-zero then loopback BGP is activated
-		IPv4Only: !(*mp),            // By default we send multiprotocol BGP capabilites (for IPv6)
+		IPv4Only: true,              // This layer 2 balancer doesn't support IPv6
 	}
 
 	if err := manager.Manage(ctx, listener); err != nil {

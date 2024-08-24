@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	//"fmt"
-	"log"
+	//"log"
 	"sync"
 	"sync/atomic"
 
@@ -64,9 +64,9 @@ func (e *Elasticsearch) log(host string, id uint64, body []byte) bool {
 
 	defer res.Body.Close()
 
-	if res.StatusCode != 201 {
-		log.Println(err, res.StatusCode, string(body))
-	}
+	//if res.StatusCode != 201 {
+	//	log.Println(err, res.StatusCode, string(body))
+	//}
 
 	return res.StatusCode == 201
 }
