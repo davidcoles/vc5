@@ -21,6 +21,7 @@ package main
 import (
 	"errors"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 
@@ -29,14 +30,12 @@ import (
 	"vc5"
 )
 
-const TCP = vc5.TCP
-const UDP = vc5.UDP
-
 type Client = *xvs.Client
 type Balancer struct {
-	NetNS  *nns
-	Logger *vc5.Sub
-	Client *xvs.Client
+	//NetNS  *nns
+	NetNS  *http.Client
+	Logger vc5.Logger
+	Client Client
 }
 
 func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
@@ -162,7 +161,7 @@ func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diag
 		if !ok {
 			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
 		} else {
-			ok, diagnostic = b.NetNS.Probe(nat, check)
+			ok, diagnostic = probe(b.NetNS, nat, check)
 		}
 
 		return ok, diagnostic
@@ -176,42 +175,3 @@ func (b *Balancer) start(socket *os.File, cmd_sock net.Listener, mcast string) {
 		multicast(b.Client, mcast)
 	}
 }
-
-/*
-func (b *Balancer) Destinations(s vc5.Service) (map[vc5.Destination]vc5.Stats, error) {
-	stats := map[vc5.Destination]vc5.Stats{}
-	ds, err := b.Client.Destinations(xvs.Service{Address: s.Address, Port: s.Port, Protocol: uint8(s.Protocol)})
-	for _, d := range ds {
-		key := vc5.Destination{Address: d.Destination.Address, Port: s.Port}
-		stats[key] = vc5.Stats{
-			IngressOctets:  d.Stats.Octets,
-			IngressPackets: d.Stats.Packets,
-			EgressOctets:   0, // Not available in DSR
-			EgressPackets:  0, // Not available in DSR
-			Flows:          d.Stats.Flows,
-			MAC:            d.MAC.String(),
-		}
-	}
-	return stats, err
-}
-
-func (b *Balancer) TCPStats() map[vc5.Instance]vc5.TCPStats {
-	tcp := map[vc5.Instance]vc5.TCPStats{}
-	svcs, _ := b.Client.Services()
-	for _, se := range svcs {
-		s := se.Service
-		dsts, _ := b.Client.Destinations(s)
-		for _, de := range dsts {
-			d := de.Destination
-			i := vc5.Instance{
-				Service:     vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)},
-				Destination: vc5.Destination{Address: d.Address, Port: s.Port},
-			}
-			tcp[i] = vc5.TCPStats{ESTABLISHED: de.Stats.Current}
-		}
-	}
-
-	return tcp
-}
-
-*/

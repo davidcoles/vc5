@@ -89,23 +89,17 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 	}
 }
 
-type nns struct {
-	client *http.Client
-}
-
-func NetNS(socket string) *nns {
-	return &nns{
-		client: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", socket)
-				},
+func NetNS(socket string) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", socket)
 			},
 		},
 	}
 }
 
-func (n *nns) Probe(addr netip.Addr, check vc5.Check) (bool, string) {
+func probe(client *http.Client, addr netip.Addr, check vc5.Check) (bool, string) {
 
 	buff := new(bytes.Buffer)
 	err := json.NewEncoder(buff).Encode(&query{Address: addr.String(), Check: check})
@@ -114,7 +108,7 @@ func (n *nns) Probe(addr netip.Addr, check vc5.Check) (bool, string) {
 		return false, "Internal error marshalling probe: " + err.Error()
 	}
 
-	resp, err := n.client.Post("http://unix/probe", "application/octet-stream", buff)
+	resp, err := client.Post("http://unix/probe", "application/octet-stream", buff)
 
 	if err != nil {
 		return false, "Internal error contacting netns daemon: " + err.Error()

@@ -352,12 +352,12 @@ func calculateRate(s Stats, o Stats) Stats {
 	return s
 }
 
-type TCPStats struct {
-	SYN_RECV    uint64
-	ESTABLISHED uint64
-	CLOSE       uint64
-	TIME_WAIT   uint64
-}
+//type TCPStats struct {
+//	SYN_RECV    uint64
+//	ESTABLISHED uint64
+//	CLOSE       uint64
+//	TIME_WAIT   uint64
+//}
 
 /*
 func _ServiceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (Services, map[Instance]Stats, uint64) {
