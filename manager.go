@@ -333,26 +333,17 @@ func jsonStatus(summary Summary, services Services, vips map[netip.Addr]State, p
 // notifications
 /**********************************************************************/
 
-func _cs(s mon.Service) Service {
+func ms(s mon.Service) Service {
 	return Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
 }
 
-func _cd(d mon.Destination) Destination {
+func md(d mon.Destination) Destination {
 	return Destination{Address: d.Address, Port: d.Port}
-}
-
-type _s bool
-
-func (s _s) String() string {
-	if s {
-		return "up"
-	}
-	return "down"
 }
 
 // interface method called by mon when a destination's health status transitions up or down
 func (m *Manager) Notify(instance mon.Instance, state bool) {
-	text := fmt.Sprintf("Backend %s for service %s went %s", _cd(instance.Destination), _cs(instance.Service), _s(state))
+	text := fmt.Sprintf("Backend %s for service %s went %s", md(instance.Destination), ms(instance.Service), updown(state))
 	m.Logs.Alert(5, "healthcheck", "state", notifyLog(instance, state), text)
 }
 

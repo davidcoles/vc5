@@ -32,7 +32,7 @@ import (
 
 type Client = *xvs.Client
 type Balancer struct {
-	NetNS  *http.Client
+	Socket *http.Client
 	Logger vc5.Logger
 	Client Client
 }
@@ -156,7 +156,7 @@ func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diag
 		if !ok {
 			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
 		} else {
-			ok, diagnostic = probe(b.NetNS, nat, check)
+			ok, diagnostic = probe(b.Socket, nat, check)
 		}
 
 		return ok, diagnostic

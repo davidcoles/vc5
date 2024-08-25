@@ -174,21 +174,19 @@ func main() {
 		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
-	// Create a balancer instance  - this implements interface methods
-	// (configuration changes, stats  requests, etc). which are called
+	// Create a balancer instance - this implements interface methods
+	// (configuration changes, stats requests, etc). which are called
 	// by the manager object (which handles the main event loop)
 	balancer := &Balancer{
 		Client: client,
 		Logger: logs.Sub("balancer"),
-		NetNS: &http.Client{
+		Socket: &http.Client{
 			Transport: &http.Transport{
 				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
 					return net.Dial("unix", socket.Name())
 				},
 			},
 		},
-		//NetNS:  NetNS(socket.Name()),
-
 	}
 
 	// Run server to perform healthchecks in network namespace, handle
