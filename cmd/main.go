@@ -45,13 +45,13 @@ func main() {
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
 	socket := flag.String("s", "/var/run/vc5", "socket")
-	proxy := flag.String("P", "", "socket for proxy server use")                // used internally
+	proxy := flag.String("P", "", "run as healthcheck proxy server")            // used internally
 	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
 	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
 	cmd_path := flag.String("C", "", "Command channel path")                    // experimental - may change
 
-	// Changing number of flows will only work on some kernels
+	// Changing number of flows will only work on newer kernels
 	// Not supported: 5.4.0-171-generic
 	// Supported: 5.15.0-112-generic, 6.6.28+rpt-rpi-v7
 
@@ -179,7 +179,7 @@ func main() {
 	balancer.start(*socket, cmd_sock, config.Multicast)
 
 	// Add some custom HTTP endpoints to the default mux to handle
-	// requests specific to this type of load balancer client (xvs)
+	// requests specific to this type of load balancer client
 	httpEndpoints(client, logs)
 
 	// context to use for shutting down services when we're about to exit
@@ -194,8 +194,7 @@ func main() {
 		NAT:      nat(client),             // We use a NAT method and a custom probe function
 		Prober:   prober(client, *socket), // to run checks from the inside network namespace
 		RouterID: routerID,                // BGP router ID to use to speak to peers
-		ASNumber: uint16(*asn),            // If non-zero then loopback BGP is activated
-		IPv4Only: true,                    // This layer 2 balancer doesn't support IPv6
+		LocalBGP: uint16(*asn),            // If non-zero then loopback BGP is activated
 	}
 
 	if err := manager.Manage(ctx, listener); err != nil {

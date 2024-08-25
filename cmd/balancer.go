@@ -86,6 +86,8 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 
 	return
 }
+
+// Synchronise the manifest of services from the director/manager to the xvs client
 func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
 	from_xvs := func(s xvs.Service) vc5.Service {

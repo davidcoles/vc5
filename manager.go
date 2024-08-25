@@ -42,8 +42,7 @@ type Manager struct {
 	Balancer Balancer
 	Logs     *Sink
 	WebRoot  string
-	ASNumber uint16
-	IPv4Only bool
+	LocalBGP uint16
 	NAT      func(netip.Addr, netip.Addr) (netip.Addr, bool)
 	Prober   func(Instance, Check) (bool, string)
 	RouterID [4]byte
@@ -73,6 +72,10 @@ func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, d
 }
 
 func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
+	// mostly lifted from main.go - probably need a bit of rationalising
+
+	start := time.Now()
+	F := "vc5"
 
 	m.Director = &cue.Director{
 		Notifier: m,
@@ -85,11 +88,11 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 	routerID := m.RouterID
 
 	// loopback BGP mode?
-	if m.ASNumber > 0 {
-		routerID = [4]byte{127, 0, 0, 1}
+	if m.LocalBGP > 0 {
+		routerID = [4]byte{127, 0, 0, 1} // no sensible BGP daemon would ever use this, surely!
 	}
 
-	m.pool = bgp.NewPool(routerID, m.Config.Bgp(m.ASNumber, !m.IPv4Only), nil, m.Logs.Sub("bgp"))
+	m.pool = bgp.NewPool(routerID, m.Config.Bgp(m.LocalBGP, false), nil, m.Logs.Sub("bgp"))
 
 	if m.pool == nil {
 		return fmt.Errorf("BGP pool fail")
@@ -98,9 +101,6 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 	if err := m.Director.Start(m.Config.Parse()); err != nil {
 		return err
 	}
-
-	start := time.Now()
-	F := "vc5"
 
 	var old map[Instance]Stats
 
@@ -149,7 +149,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			case <-m.Director.C: // a backend has changed state
 				m.mutex.Lock()
 				services = m.Director.Status()
-				m.Balancer.Configure(services) // may want to do this outside of log with a deep copy of services
+				m.Balancer.Configure(services)
 				m.mutex.Unlock()
 			case <-timer.C:
 				m.Logs.Alert(NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
@@ -164,8 +164,6 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			m.pool.RIB(m.rib)
 		}
 	}()
-
-	manager := m
 
 	static := http.FS(STATIC)
 	var fs http.FileSystem
@@ -227,7 +225,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 	})
 
 	http.HandleFunc("/cue.json", func(w http.ResponseWriter, r *http.Request) {
-		js, err := manager.Cue()
+		js, err := m.Cue()
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -238,7 +236,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 	})
 
 	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
-		js, err := manager.JSONStatus()
+		js, err := m.JSONStatus()
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -250,7 +248,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		metrics := manager.Prometheus("vc5")
+		metrics := m.Prometheus("vc5")
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
 	})
@@ -287,7 +285,7 @@ func (m *Manager) Configure(config *Config) {
 	m.mutex.Lock()
 	m.mutex.Unlock()
 	m.Director.Configure(config.Parse())
-	m.pool.Configure(config.Bgp(m.ASNumber, !m.IPv4Only))
+	m.pool.Configure(config.Bgp(m.LocalBGP, false))
 	m.Logs.Configure(config.LoggingConfig())
 	m.Config = config
 }

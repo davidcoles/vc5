@@ -261,12 +261,7 @@ func (s *sink) Start(l Logging) {
 	s.e = make(chan *ent, 1000)
 	s.l = make(chan Logging, 1000)
 
-	go func() {
-		// Not using full UnixNano here because large integers cause an
-		// overflow in jq(1) which I often use for highlighting JSON
-		// and it confuses me when the numbers are wrong!
-		id := uint64(time.Now().UnixNano() / 1000000)
-
+	{
 		host := s.HostID
 
 		if host == "" {
@@ -278,6 +273,14 @@ func (s *sink) Start(l Logging) {
 		}
 
 		s.host = host
+	}
+
+	go func() {
+
+		// Not using full UnixNano here because large integers cause an
+		// overflow in jq(1) which I often use for highlighting JSON
+		// and it confuses me when the numbers are wrong!
+		id := uint64(time.Now().UnixNano() / 1000000)
 
 		webhooks := map[secret]Webhook{}
 		var elastic chan ent
@@ -345,7 +348,7 @@ func (s *sink) Start(l Logging) {
 				config(l)
 
 			case e := <-s.e:
-				e.host = host
+				e.host = s.host
 				e.id = id
 				id++
 
