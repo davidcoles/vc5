@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -43,9 +42,10 @@ func main() {
 
 	webroot := flag.String("r", "", "webserver root directory")
 	webserver := flag.String("w", ":80", "webserver listen address")
-	sock := flag.String("s", "", "socket") // used internally
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
+	socket := flag.String("s", "/var/run/vc5", "socket")
+	proxy := flag.String("P", "", "socket for proxy server use")                // used internally
 	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
 	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
@@ -59,10 +59,10 @@ func main() {
 
 	args := flag.Args()
 
-	if *sock != "" {
+	if *proxy != "" {
 		// we're going to be the server running in the network namespace ...
 		signal.Ignore(syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		netns(*sock, netip.MustParseAddr(args[0]))
+		netns(*proxy, netip.MustParseAddr(args[0]))
 		return
 	}
 
@@ -76,14 +76,6 @@ func main() {
 	}
 
 	logs := vc5.NewLogger(config.HostID, config.LoggingConfig())
-
-	socket, err := ioutil.TempFile("/tmp", "vc5ns")
-
-	if err != nil {
-		logs.Fatal(F, "socket", KV{"error.message": err.Error()})
-	}
-
-	defer os.Remove(socket.Name())
 
 	if config.Address != "" {
 		*addr = config.Address
@@ -131,7 +123,7 @@ func main() {
 
 	// If BGP peers do not support a "passive" option (eg. ExtremeXOS)
 	// then we may need to listen on port 179 to prevent the session
-	// getting into a error state - we accept the connection but then
+	// getting into an error state - we accept the connection but then
 	// quietly drop it after ten seconds or so. This seems to keep the
 	// device happy.
 	if config.Listen {
@@ -180,34 +172,30 @@ func main() {
 	balancer := &Balancer{
 		Client: client,
 		Logger: logs.Sub("balancer"),
-		Socket: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", socket.Name())
-				},
-			},
-		},
 	}
 
 	// Run server to perform healthchecks in network namespace, handle
 	// commands from UNIX socket and share flow info via multicast
-	balancer.start(socket, cmd_sock, config.Multicast)
+	balancer.start(*socket, cmd_sock, config.Multicast)
 
 	// Add some custom HTTP endpoints to the default mux to handle
 	// requests specific to this type of load balancer client (xvs)
 	httpEndpoints(client, logs)
 
+	// context to use for shutting down services when we're about to exit
 	ctx, shutdown := context.WithCancel(context.Background())
 
+	// The manager handles the main event loop, healthchecks, requests
+	// for the console/metrics, sets up BGP sessions, etc.
 	manager := vc5.Manager{
 		Config:   config,
 		Balancer: balancer,
 		Logs:     logs,
-		NAT:      balancer.nat(),    // We use a NAT method and a custom probe function
-		Prober:   balancer.prober(), // to run checks from the network namespace
-		RouterID: routerID,          // BGP router ID to use to speak to peers
-		ASNumber: uint16(*asn),      // If non-zero then loopback BGP is activated
-		IPv4Only: true,              // This layer 2 balancer doesn't support IPv6
+		NAT:      nat(client),             // We use a NAT method and a custom probe function
+		Prober:   prober(client, *socket), // to run checks from the inside network namespace
+		RouterID: routerID,                // BGP router ID to use to speak to peers
+		ASNumber: uint16(*asn),            // If non-zero then loopback BGP is activated
+		IPv4Only: true,                    // This layer 2 balancer doesn't support IPv6
 	}
 
 	if err := manager.Manage(ctx, listener); err != nil {

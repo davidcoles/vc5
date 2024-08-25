@@ -21,6 +21,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,7 +77,6 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 			reader("stdout", stdout)
 
 			if err := cmd.Wait(); err != nil {
-				// logs.ERR(F, "Daemon", err)
 				logs.Event(vc5.ERR, F, "daemon", KV{"error.message": err.Error()})
 			}
 		}
@@ -402,5 +402,38 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 				}
 			}()
 		}
+	}
+}
+
+func nat(client Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
+	return func(vip, rip netip.Addr) (netip.Addr, bool) { return client.NATAddress(vip, rip) }
+}
+
+func prober(client Client, path string) func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+
+	socket := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", path)
+			},
+		},
+	}
+
+	return func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+		vip := i.Service.Address
+		rip := i.Destination.Address
+		nat, ok := client.NATAddress(vip, rip)
+
+		if check.Host == "" {
+			check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
+		}
+
+		if !ok {
+			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
+		} else {
+			ok, diagnostic = probe(socket, nat, check)
+		}
+
+		return ok, diagnostic
 	}
 }

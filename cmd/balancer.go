@@ -21,8 +21,6 @@ package main
 import (
 	"errors"
 	"net"
-	"net/http"
-	"net/netip"
 	"os"
 
 	"github.com/davidcoles/xvs"
@@ -32,9 +30,8 @@ import (
 
 type Client = *xvs.Client
 type Balancer struct {
-	Socket *http.Client
-	Logger vc5.Logger
 	Client Client
+	Logger vc5.Logger
 }
 
 func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
@@ -72,6 +69,23 @@ func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 	return stats
 }
 
+func (b *Balancer) Summary() (s vc5.Summary) {
+	u := b.Client.Info()
+	s.Latency = u.Latency
+	s.Dropped = u.Dropped
+	s.Blocked = u.Blocked
+	s.NotQueued = u.NotQueued
+	s.IngressOctets = u.Octets
+	s.IngressPackets = u.Packets
+	s.EgressOctets = 0  // Not available in DSR
+	s.EgressPackets = 0 // Not available in DSR
+	s.Flows = u.Flows
+
+	s.DSR = true
+	s.VC5 = true
+
+	return
+}
 func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 
 	from_xvs := func(s xvs.Service) vc5.Service {
@@ -121,51 +135,9 @@ func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
 	return nil
 }
 
-func (b *Balancer) Summary() (s vc5.Summary) {
-	u := b.Client.Info()
-	s.Latency = u.Latency
-	s.Dropped = u.Dropped
-	s.Blocked = u.Blocked
-	s.NotQueued = u.NotQueued
-	s.IngressOctets = u.Octets
-	s.IngressPackets = u.Packets
-	s.EgressOctets = 0  // Not available in DSR
-	s.EgressPackets = 0 // Not available in DSR
-	s.Flows = u.Flows
-
-	s.DSR = true
-	s.VC5 = true
-
-	return
-}
-
-func (b *Balancer) nat() func(vip, rip netip.Addr) (netip.Addr, bool) {
-	return func(vip, rip netip.Addr) (netip.Addr, bool) { return b.Client.NATAddress(vip, rip) }
-}
-
-func (b *Balancer) prober() func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
-	return func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
-		vip := i.Service.Address
-		rip := i.Destination.Address
-		nat, ok := b.Client.NATAddress(vip, rip)
-
-		if check.Host == "" {
-			check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
-		}
-
-		if !ok {
-			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
-		} else {
-			ok, diagnostic = probe(b.Socket, nat, check)
-		}
-
-		return ok, diagnostic
-	}
-}
-
-func (b *Balancer) start(socket *os.File, cmd_sock net.Listener, mcast string) {
+func (b *Balancer) start(socket string, cmd_sock net.Listener, mcast string) {
 	go readCommands(cmd_sock, b.Client, b.Logger)
-	go spawn(b.Logger, b.Client.Namespace(), os.Args[0], "-s", socket.Name(), b.Client.NamespaceAddress())
+	go spawn(b.Logger, b.Client.Namespace(), os.Args[0], "-P", socket, b.Client.NamespaceAddress())
 	if mcast != "" {
 		multicast(b.Client, mcast)
 	}
