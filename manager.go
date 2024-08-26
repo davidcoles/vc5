@@ -150,11 +150,11 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			case <-m.Director.C: // a backend has changed state
 				m.mutex.Lock()
 				services = m.Director.Status()
-				var x []Manifest
-				for _, v := range services {
-					x = append(x, Manifest(v))
+				var manifests []Manifest
+				for _, s := range services {
+					manifests = append(manifests, Manifest(s))
 				}
-				m.Balancer.Configure(x)
+				m.Balancer.Configure(manifests)
 				m.mutex.Unlock()
 			case <-timer.C:
 				m.Logs.Alert(NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")

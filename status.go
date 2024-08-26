@@ -260,13 +260,9 @@ type Instance struct {
 	Destination Destination
 }
 
-type Manifest cue.Service // so we don't have to explicitly pull cue into the balancer - not keen on the name though
-func (s Manifest) Servicex() Service {
-	return Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
-}
-func (s Manifest) Service() Service { return s.Instance().Service }
-
-func (s Manifest) Instance() Instance { return serviceInstance(cue.Service(s)) }
+type Manifest cue.Service             // so we don't have to explicitly pull cue into the balancer - not keen on the name though
+func (s Manifest) Service() Service   { return s.Instance().Service }
+func (s Manifest) Instance() Instance { return instance(cue.Service(s), cue.Destination{}) }
 
 type Balancer interface {
 	Stats() map[Instance]Stats
@@ -303,7 +299,8 @@ func serviceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 
 	for _, svc := range director.Status() {
 		cnf, _ := config.Services[Manifest(svc).Service()]
-		key := serviceInstance(svc)
+		//key := serviceInstance(svc)
+		key := Manifest(svc).Instance()
 		lbs := map[Destination]Stats{}
 
 		for k, v := range allstats {
@@ -335,7 +332,7 @@ func serviceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 		for _, dst := range svc.Destinations {
 			foo := lbs[destination(dst)]
 
-			key := destinationInstance(svc, dst)
+			key := instance(svc, dst)
 			dest := dest{
 				Address:    dst.Address,
 				Port:       dst.Port,
@@ -367,9 +364,15 @@ func serviceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 }
 
 func destination(d cue.Destination) Destination { return Destination{Address: d.Address, Port: d.Port} }
-func serviceInstance(s cue.Service) Instance    { return destinationInstance(s, cue.Destination{}) }
-func destinationInstance(s cue.Service, d cue.Destination) (i Instance) {
+func instance(s cue.Service, d cue.Destination) (i Instance) {
 	i.Service = Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
 	i.Destination = Destination{Address: d.Address, Port: d.Port}
 	return
 }
+
+//func manifests(c []cue.Service) (m []Manifest) {
+//	for _, s := range x {
+//		m = append(m, s)
+//	}
+//	return
+//}
