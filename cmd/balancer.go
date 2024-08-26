@@ -88,20 +88,16 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 }
 
 // Synchronise the manifest of services from the director/manager to the xvs client
-func (b *Balancer) Configure(services []vc5.ServiceManifest) error {
+func (b *Balancer) Configure(services []vc5.Manifest) error {
 
 	from_xvs := func(s xvs.Service) vc5.Service {
 		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
 	}
 
-	from_manifest := func(s vc5.ServiceManifest) vc5.Service {
-		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
-	}
-
-	target := map[vc5.Service]vc5.ServiceManifest{}
+	target := map[vc5.Service]vc5.Manifest{}
 
 	for _, s := range services {
-		target[from_manifest(s)] = s
+		target[s.Service()] = s
 
 		for _, d := range s.Destinations {
 			if s.Port != d.Port {

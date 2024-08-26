@@ -166,6 +166,9 @@ func main() {
 		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
+	// Short delay to let interfaces quiesce after loading XDP
+	time.Sleep(5 * time.Second)
+
 	// Create a balancer instance - this implements interface methods
 	// (configuration changes, stats requests, etc). which are called
 	// by the manager object (which handles the main event loop)

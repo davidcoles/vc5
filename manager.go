@@ -49,9 +49,9 @@ type Manager struct {
 
 	pool     *bgp.Pool
 	mutex    sync.Mutex
-	services Services
+	services servicemap
 	summary  Summary
-	vip      map[netip.Addr]State
+	vip      map[netip.Addr]state
 	rib      []netip.Addr
 }
 
@@ -87,7 +87,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 	routerID := m.RouterID
 
-	// loopback BGP mode?
+	// If loopback BGP mode is enabled (m.LocalBGP is the ASN that we should use) then override router ID
 	if m.LocalBGP > 0 {
 		routerID = [4]byte{127, 0, 0, 1} // no sensible BGP daemon would ever use this, surely!
 	}
@@ -104,8 +104,8 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 	var old map[Instance]Stats
 
-	m.vip = map[netip.Addr]State{}
-	m.services, old, _ = ServiceStatus(m.Config, m.Balancer, m.Director, nil)
+	m.vip = map[netip.Addr]state{}
+	m.services, old, _ = serviceStatus(m.Config, m.Balancer, m.Director, nil)
 
 	// Collect stats
 	go func() {
@@ -114,7 +114,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 		for {
 			m.mutex.Lock()
 			m.summary.Update(m.Balancer.Summary(), start)
-			m.services, old, m.summary.Current = ServiceStatus(m.Config, m.Balancer, m.Director, old)
+			m.services, old, m.summary.Current = serviceStatus(m.Config, m.Balancer, m.Director, old)
 			m.mutex.Unlock()
 			select {
 			case <-ticker.C:
@@ -124,7 +124,8 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 		}
 	}()
 
-	go func() { // advertise VIPs via BGP
+	// advertise VIPs via BGP
+	go func() {
 		timer := time.NewTimer(m.Config.Learn * time.Second)
 		ticker := time.NewTicker(5 * time.Second)
 		services := m.Director.Status()
@@ -149,7 +150,11 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			case <-m.Director.C: // a backend has changed state
 				m.mutex.Lock()
 				services = m.Director.Status()
-				m.Balancer.Configure(services)
+				var x []Manifest
+				for _, v := range services {
+					x = append(x, Manifest(v))
+				}
+				m.Balancer.Configure(x)
 				m.mutex.Unlock()
 			case <-timer.C:
 				m.Logs.Alert(NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
@@ -157,7 +162,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 			}
 
 			m.mutex.Lock()
-			m.vip = vipState(services, m.vip, m.Config.Priorities(), m.Logs)
+			m.vip = vipState(services, m.vip, m.Config.Priorities(), m.Logs, initialised)
 			m.rib = adjRIBOut(m.vip, initialised)
 			m.mutex.Unlock()
 
@@ -283,7 +288,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 func (m *Manager) Configure(config *Config) {
 	m.mutex.Lock()
-	m.mutex.Unlock()
+	defer m.mutex.Unlock()
 	m.Director.Configure(config.Parse())
 	m.pool.Configure(config.Bgp(m.LocalBGP, false))
 	m.Logs.Configure(config.LoggingConfig())
@@ -292,7 +297,7 @@ func (m *Manager) Configure(config *Config) {
 
 func (m *Manager) Cue() ([]byte, error) {
 	m.mutex.Lock()
-	m.mutex.Unlock()
+	defer m.mutex.Unlock()
 	return json.MarshalIndent(m.Director.Status(), " ", " ")
 }
 
@@ -302,19 +307,18 @@ func (m *Manager) JSONStatus() ([]byte, error) {
 	return jsonStatus(m.summary, m.services, m.vip, m.pool, m.rib, m.Logs.Stats())
 }
 
-//func Prometheus(p string, services Services, summary Summary, vips map[netip.Addr]State) []string {
 func (m *Manager) Prometheus(s string) []string {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return Prometheus(s, m.services, m.summary, m.vip)
 }
 
-func jsonStatus(summary Summary, services Services, vips map[netip.Addr]State, pool *bgp.Pool, rib []netip.Addr, logstats LogStats) ([]byte, error) {
+func jsonStatus(summary Summary, services servicemap, vips map[netip.Addr]state, pool *bgp.Pool, rib []netip.Addr, logstats LogStats) ([]byte, error) {
 	return json.MarshalIndent(struct {
 		Summary  Summary               `json:"summary"`
-		Services Services              `json:"services"`
+		Services servicemap            `json:"services"`
 		BGP      map[string]bgp.Status `json:"bgp"`
-		VIP      []VIPStats            `json:"vip"`
+		VIP      []vipstats            `json:"vip"`
 		RIB      []netip.Addr          `json:"rib"`
 		Logging  LogStats              `json:"logging"`
 	}{
@@ -341,7 +345,7 @@ func md(d mon.Destination) Destination {
 
 // interface method called by mon when a destination's health status transitions up or down
 func (m *Manager) Notify(instance mon.Instance, state bool) {
-	text := fmt.Sprintf("Backend %s for service %s went %s", md(instance.Destination), ms(instance.Service), updown(state))
+	text := fmt.Sprintf("Backend %s for service %s went %s", md(instance.Destination), ms(instance.Service), upDown(state))
 	m.Logs.Alert(5, "healthcheck", "state", notifyLog(instance, state), text)
 }
 
@@ -351,32 +355,21 @@ func (m *Manager) Result(instance mon.Instance, state bool, diagnostic string) {
 }
 
 func (m *Manager) Check(instance mon.Instance, check string, round uint64, state bool, diagnostic string) {
-	if m.NAT == nil {
-		m.Logs.Event(7, "healthcheck", "check", checkLog(instance, state, diagnostic, check, round))
-	} else {
+	entry := checkLog(instance, state, diagnostic, check, round)
+	if m.NAT != nil {
 		nat, _ := m.NAT(instance.Service.Address, instance.Destination.Address)
-		m.Logs.Event(7, "healthcheck", "check", natLog(instance, state, diagnostic, check, round, nat))
+		entry["destination.nat.ip"] = nat
 	}
-
+	m.Logs.Event(7, "healthcheck", "check", entry)
 }
 
 func notifyLog(instance mon.Instance, state bool) map[string]any {
-
-	proto := func(p uint8) string {
-		switch instance.Service.Protocol {
-		case TCP:
-			return "tcp"
-		case UDP:
-			return "udp"
-		}
-		return fmt.Sprintf("%d", p)
-	}
-
 	// https://www.elastic.co/guide/en/ecs/current/ecs-base.html
 	// https://github.com/elastic/ecs/blob/main/generated/csv/fields.csv
+
 	return map[string]any{
-		"service.state":    updown(state),
-		"service.protocol": proto(instance.Service.Protocol),
+		"service.state":    upDown(state),
+		"service.protocol": Protocol(instance.Service.Protocol).String(),
 		"service.ip":       instance.Service.Address.String(),
 		"service.port":     instance.Service.Port,
 		"destination.ip":   instance.Destination.Address.String(),
@@ -394,19 +387,10 @@ func checkLog(instance mon.Instance, status bool, diagnostic string, check strin
 	r := resultLog(instance, status, diagnostic)
 	r["check"] = check
 	r["round"] = round
-	//r["destination.nat.ip"] = nat
 	return r
 }
 
-func natLog(instance mon.Instance, status bool, diagnostic string, check string, round uint64, nat netip.Addr) map[string]any {
-	r := resultLog(instance, status, diagnostic)
-	r["check"] = check
-	r["round"] = round
-	r["destination.nat.ip"] = nat
-	return r
-}
-
-func adjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
+func adjRIBOut(vip map[netip.Addr]state, initialised bool) (r []netip.Addr) {
 	for v, s := range vip {
 		if initialised && s.up && time.Now().Sub(s.time) > time.Second*5 {
 			r = append(r, v)
@@ -414,3 +398,52 @@ func adjRIBOut(vip map[netip.Addr]State, initialised bool) (r []netip.Addr) {
 	}
 	return
 }
+
+/*
+func VipMap(services []cue.Service) map[netip.Addr]bool {
+
+	m := map[netip.Addr]bool{}
+
+	for _, v := range cue.AllVIPs(services) {
+		m[v] = false
+	}
+
+	for _, v := range cue.HealthyVIPs(services) {
+		m[v] = true
+	}
+
+	fmt.Println(m)
+
+	return m
+}
+
+func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[netip.Addr]priority, logs Logger) map[netip.Addr]bool {
+
+	f := "vip"
+
+	m := VipMap(services)
+
+	for vip, state := range m {
+
+		severity := p2s(priorities[vip])
+
+		if was, exists := old[vip]; exists {
+			if state != was {
+				logs.Alert(severity, f, "state", KV{"service.ip": vip, "service.state": upDown(state)})
+			}
+		} else {
+			logs.Alert(INFO, f, "added", KV{"service.ip": vip, "service.state": upDown(state)})
+		}
+
+		logs.Event(DEBUG, f, "state", KV{"service.ip": vip, "service.state": upDown(state)})
+	}
+
+	for vip, _ := range old {
+		if _, exists := m[vip]; !exists {
+			logs.Alert(6, f, "removed", KV{"service.ip": vip})
+		}
+	}
+
+	return m
+}
+*/
