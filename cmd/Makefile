@@ -37,10 +37,6 @@ libbpf/bpf/libbpf.a:
 	$(MAKE) libbpf/bpf
 	cd libbpf/bpf && $(MAKE)
 
-# need to pass as a hook to git
-pre-commit:
-	if grep '^replace' go.mod; then false; fi
-
 # just for quick setup on testing machines
 focal: apt-install /usr/local/bin/go
 jammy: apt-install /usr/local/bin/go
@@ -51,4 +47,9 @@ apt-install:; apt install -y libelf-dev libyaml-perl libjson-perl
 /usr/local/bin/go:
 	apt install -y golang-$(GOLANG)
 	ln -s /usr/lib/go-$(GOLANG)/bin/go /usr/local/bin/go
+
+# alternately: cloc --match-f='\.go$' --not-match-f='_test.go' ..
+cloc:
+	cloc *.go ../*.go
+
 

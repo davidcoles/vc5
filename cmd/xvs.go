@@ -36,16 +36,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davidcoles/cue/mon"
-
 	"vc5"
 )
 
-// XVS specific routines
+// xvs specific routines
 
 type query struct {
 	Address string    `json:"address"`
-	Check   mon.Check `json:"check"`
+	Check   vc5.Check `json:"check"`
 }
 
 type reply struct {
@@ -54,11 +52,9 @@ type reply struct {
 }
 
 // spawn a server (specified by args) which runs in the network namespace - if it dies then restart it
-//func spawn(logs *logger, netns string, args ...string) {
 func spawn(logs vc5.Logger, netns string, args ...string) {
 	F := "netns"
 	for {
-		//logs.DEBUG(F, "Spawning daemon", args)
 		logs.Event(vc5.INFO, F, "spawn", KV{"args": fmt.Sprint(args)})
 
 		cmd := exec.Command("ip", append([]string{"netns", "exec", netns}, args...)...)
@@ -69,7 +65,6 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 		reader := func(s string, fh io.ReadCloser) {
 			scanner := bufio.NewScanner(fh)
 			for scanner.Scan() {
-				//logs.WARNING(F, s, scanner.Text())
 				logs.Event(vc5.WARNING, F, "child", KV{s: scanner.Text()})
 			}
 		}
@@ -77,41 +72,22 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 		go reader("stderr", stderr)
 
 		if err := cmd.Start(); err != nil {
-			// logs.ERR(F, "Daemon", err)
 			logs.Event(vc5.ERR, F, "daemon", KV{"error.message": err.Error()})
 		} else {
 			reader("stdout", stdout)
 
 			if err := cmd.Wait(); err != nil {
-				// logs.ERR(F, "Daemon", err)
 				logs.Event(vc5.ERR, F, "daemon", KV{"error.message": err.Error()})
 			}
 		}
 
-		// logs.ERR(F, "Daemon exited")
 		logs.Event(vc5.ERR, F, "exit", KV{})
 
 		time.Sleep(1 * time.Second)
 	}
 }
 
-type nns struct {
-	client *http.Client
-}
-
-func NetNS(socket string) *nns {
-	return &nns{
-		client: &http.Client{
-			Transport: &http.Transport{
-				DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
-					return net.Dial("unix", socket)
-				},
-			},
-		},
-	}
-}
-
-func (n *nns) Probe(addr netip.Addr, check mon.Check) (bool, string) {
+func probe(client *http.Client, addr netip.Addr, check vc5.Check) (bool, string) {
 
 	buff := new(bytes.Buffer)
 	err := json.NewEncoder(buff).Encode(&query{Address: addr.String(), Check: check})
@@ -120,7 +96,7 @@ func (n *nns) Probe(addr netip.Addr, check mon.Check) (bool, string) {
 		return false, "Internal error marshalling probe: " + err.Error()
 	}
 
-	resp, err := n.client.Post("http://unix/probe", "application/octet-stream", buff)
+	resp, err := client.Post("http://unix/probe", "application/octet-stream", buff)
 
 	if err != nil {
 		return false, "Internal error contacting netns daemon: " + err.Error()
@@ -159,7 +135,8 @@ func netns(socket string, addr netip.Addr) {
 		}
 	}()
 
-	monitor, err := mon.New(addr, nil, nil, nil)
+	//monitor, err := mon.New(addr, nil, nil, nil)
+	monitor, err := vc5.Monitor(addr, true) // addr is the IP address of the namespace, true indicates to use "SNI" mode
 
 	if err != nil {
 		log.Fatal(err)
@@ -223,11 +200,13 @@ func netns(socket string, addr netip.Addr) {
 	log.Fatal(server.Serve(s))
 }
 
-func ethtool(i string) {
-	exec.Command("ethtool", "-K", i, "rx", "off").Output()
-	exec.Command("ethtool", "-K", i, "tx", "off").Output()
-	exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
-	exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
+func ethtool(nics []string) {
+	for _, i := range nics {
+		exec.Command("ethtool", "-K", i, "rx", "off").Output()
+		exec.Command("ethtool", "-K", i, "tx", "off").Output()
+		exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
+		exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
+	}
 }
 
 func mac(m [6]byte) string {
@@ -237,40 +216,34 @@ func mac(m [6]byte) string {
 type KV = map[string]any
 type Debug struct{ Log vc5.Logger }
 
-var foo atomic.Uint64
+var run atomic.Uint64
 
 func (d *Debug) NAT(tag map[netip.Addr]int16, arp map[netip.Addr][6]byte, vrn map[[2]netip.Addr]netip.Addr, nat map[netip.Addr]string, out []netip.Addr, in []string) {
 
-	f := foo.Add(1)
+	r := run.Add(1)
 
-	//fmt.Println("NAT")
-	//d.Log.DEBUG("nat", KV{"run": f})
 	for k, v := range tag {
-		//d.Log.DEBUG("tag", KV{"run": f, "rip": k, "tag": v})
-		d.Log.Event(vc5.DEBUG, "vlan", "update", KV{"run": f, "destintation.ip": k, "vlan.id": v})
+		d.Log.Event(vc5.DEBUG, "vlan", "update", KV{"run": r, "destintation.ip": k, "vlan.id": v})
 	}
 
 	for k, v := range arp {
-		//d.Log.DEBUG("arp", KV{"run": f, "rip": k, "mac": mac(v)})
-		d.Log.Event(vc5.DEBUG, "arp", "update", KV{"run": f, "destintation.ip": k, "destintation.mac": mac(v)})
+		d.Log.Event(vc5.DEBUG, "arp", "update", KV{"run": r, "destintation.ip": k, "destintation.mac": mac(v)})
 	}
 
 	for k, v := range vrn {
-		//d.Log.DEBUG("map", KV{"run": f, "vip": k[0], "rip": k[1], "nat": v})
-		d.Log.Event(vc5.DEBUG, "map", "update", KV{"run": f, "service.ip": k[0], "destination.ip": k[1], "destination.nat.ip": v})
+		d.Log.Event(vc5.DEBUG, "map", "update", KV{"run": r, "service.ip": k[0], "destination.ip": k[1], "destination.nat.ip": v})
 	}
 
 	for k, v := range nat {
-		//d.Log.DEBUG("nat", KV{"run": f, "nat": k, "info": v})
-		d.Log.Event(vc5.DEBUG, "nat", "update", KV{"run": f, "nat": k, "info": v})
+		d.Log.Event(vc5.DEBUG, "nat", "update", KV{"run": r, "nat": k, "info": v})
 	}
 
 	//for _, v := range out {
-	//	d.Log.DEBUG("delete", KV{"run": f, "out": v})
+	//	d.Log.DEBUG("delete", KV{"run": r, "out": v})
 	//}
 
 	//for _, v := range in {
-	//	d.Log.DEBUG("delete", KV{"run": f, "in": v})
+	//	d.Log.DEBUG("delete", KV{"run": r, "in": v})
 	//}
 }
 
@@ -292,7 +265,7 @@ const maxDatagramSize = 1500
 
 func multicast(c Client, multicast string) {
 	go multicast_send(c, multicast)
-	go multicast_recv(c, multicast)
+	go multicast_recv(c, multicast, false)
 }
 
 func multicast_send(c Client, address string) {
@@ -339,7 +312,7 @@ func multicast_send(c Client, address string) {
 	}
 }
 
-func multicast_recv(c Client, address string) {
+func multicast_recv(c Client, address string, spinner bool) {
 	udp, err := net.ResolveUDPAddr("udp", address)
 
 	if err != nil {
@@ -357,7 +330,9 @@ func multicast_recv(c Client, address string) {
 
 	for {
 		nread, _, err := conn.ReadFromUDP(buff)
-		fmt.Print(s[x%4] + "\b")
+		if spinner {
+			fmt.Print(s[x%4] + "\b")
+		}
 		x++
 		if err == nil {
 			for n := 0; n+1 < nread; {
@@ -373,6 +348,9 @@ func multicast_recv(c Client, address string) {
 }
 
 func readCommands(sock net.Listener, client Client, log vc5.Logger) {
+	if sock == nil {
+		return
+	}
 	// eg.: echo reattach enp130s0f0 | socat - UNIX-CLIENT:/var/run/vc5
 	F := "command"
 
@@ -381,7 +359,6 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 	for {
 		conn, err := sock.Accept()
 		if err != nil {
-			//log.ERR("accept", err.Error())
 			log.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
 		} else {
 			go func() {
@@ -414,19 +391,49 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 
 						nic := cmd[1]
 						if err := client.ReattachBPF(nic); err != nil {
-							//log.ERR(cmd[0], fmt.Sprintf("%s: %s\n", nic, err.Error()))
 							log.Event(vc5.NOTICE, F, cmd[0], KV{"interface.name": nic, "error.message": err.Error()})
 						} else {
-							//log.NOTICE(cmd[0], fmt.Sprintf("%s: OK\n", nic))
 							log.Event(vc5.NOTICE, F, cmd[0], KV{"interface.name": nic})
 						}
 
 					default:
-						// log.ERR("unknown", fmt.Sprintf("Unknown command: %s", cmd[0]))
 						log.Event(vc5.NOTICE, F, cmd[0], KV{"error.message": "Unknown command"})
 					}
 				}
 			}()
 		}
+	}
+}
+
+func nat(client Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
+	return func(vip, rip netip.Addr) (netip.Addr, bool) { return client.NATAddress(vip, rip) }
+}
+
+func prober(client Client, path string) func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+
+	socket := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", path)
+			},
+		},
+	}
+
+	return func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+		vip := i.Service.Address
+		rip := i.Destination.Address
+		nat, ok := client.NATAddress(vip, rip)
+
+		if check.Host == "" {
+			check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
+		}
+
+		if !ok {
+			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
+		} else {
+			ok, diagnostic = probe(socket, nat, check)
+		}
+
+		return ok, diagnostic
 	}
 }

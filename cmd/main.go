@@ -19,25 +19,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
-	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
 	"net/netip"
 	"os"
 	"os/signal"
-	"runtime/debug"
-	"strconv"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/davidcoles/cue"
-	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/xvs"
 
 	"vc5"
@@ -47,21 +40,18 @@ func main() {
 
 	F := "vc5"
 
-	var mutex sync.Mutex
-
-	start := time.Now()
 	webroot := flag.String("r", "", "webserver root directory")
 	webserver := flag.String("w", ":80", "webserver listen address")
-	sock := flag.String("s", "", "socket") // used internally
 	addr := flag.String("a", "", "address")
 	native := flag.Bool("n", false, "Native mode XDP")
+	socket := flag.String("s", "/var/run/vc5", "socket")
+	proxy := flag.String("P", "", "run as healthcheck proxy server")            // used internally
 	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
-	mp := flag.Bool("M", false, "Use multiprotocol extensions on loopback BGP") // experimental - may change
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
 	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
 	cmd_path := flag.String("C", "", "Command channel path")                    // experimental - may change
 
-	// Changing number of flows will only work on some kernels
+	// Changing number of flows will only work on newer kernels
 	// Not supported: 5.4.0-171-generic
 	// Supported: 5.15.0-112-generic, 6.6.28+rpt-rpi-v7
 
@@ -69,10 +59,10 @@ func main() {
 
 	args := flag.Args()
 
-	if *sock != "" {
+	if *proxy != "" {
 		// we're going to be the server running in the network namespace ...
 		signal.Ignore(syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		netns(*sock, netip.MustParseAddr(args[0]))
+		netns(*proxy, netip.MustParseAddr(args[0]))
 		return
 	}
 
@@ -85,18 +75,7 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := &vc5.Sink{}
-	logs.Start(config.Logging_())
-
-	socket, err := ioutil.TempFile("/tmp", "vc5ns")
-
-	if err != nil {
-		//logs.EMERG(F, "socket", err)
-		//log.Fatal(err)
-		logs.Fatal(F, "socket", KV{"error.message": err.Error()})
-	}
-
-	defer os.Remove(socket.Name())
+	logs := vc5.NewLogger(config.HostID, config.LoggingConfig())
 
 	if config.Address != "" {
 		*addr = config.Address
@@ -119,21 +98,22 @@ func main() {
 	}
 
 	if len(nics) < 1 {
-		//logs.EMERG(F, "No interfaces defined")
-		//log.Fatal("No interfaces defined")
 		logs.Fatal(F, "args", KV{"error.message": "No interfaces defined"})
 	}
 
 	address := netip.MustParseAddr(*addr)
 
 	if !address.Is4() {
-		//logs.EMERG(F, "Address is not IPv4:", address)
-		//log.Fatal("Address is not IPv4: ", address)
 		logs.Fatal(F, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
 	}
 
-	var listener net.Listener
+	routerID := address.As4()
 
+	// Before making any changes to the state of the system (loading
+	// XDP, etc) we attempt to listen on the webserver port. This
+	// should prevent multiple instances running at the same time and
+	// interfering with each other.
+	var listener net.Listener
 	if *webserver != "" {
 		listener, err = net.Listen("tcp", *webserver)
 		if err != nil {
@@ -141,6 +121,11 @@ func main() {
 		}
 	}
 
+	// If BGP peers do not support a "passive" option (eg. ExtremeXOS)
+	// then we may need to listen on port 179 to prevent the session
+	// getting into an error state - we accept the connection but then
+	// quietly drop it after ten seconds or so. This seems to keep the
+	// device happy.
 	if config.Listen {
 		l, err := net.Listen("tcp", ":179")
 		if err != nil {
@@ -149,22 +134,23 @@ func main() {
 		go bgpListener(l, logs.Sub("bgp"))
 	}
 
+	// Open a UNIX domain socket for receiving commands whilst
+	// running. Currently used to re-attach XDP code to an interface
+	// as a mitigation for some badly behaved network cards.
 	var cmd_sock net.Listener
-
 	if *cmd_path != "" {
 		os.Remove(*cmd_path)
-
-		cmd_sock, err = net.Listen("unix", *cmd_path)
-
-		if err != nil {
+		if cmd_sock, err = net.Listen("unix", *cmd_path); err != nil {
 			log.Fatal(err)
 		}
 	}
 
-	for _, i := range nics {
-		ethtool(i)
-	}
+	// Run ethtool against the network interfaces to disable various
+	// offload parameters which seem to interfere with XDP operations
+	ethtool(nics)
 
+	// Initialise the load balancing library which will deal with the
+	// data-plane - this is what actually switches incoming packets
 	client := &xvs.Client{
 		Interfaces: nics,
 		Address:    address,
@@ -176,199 +162,124 @@ func main() {
 		MaxFlows:   uint32(*flows),
 	}
 
-	err = client.Start()
-
-	if err != nil {
-		//logs.EMERG(F, "Couldn't start client:", err)
-		//log.Fatal("Couldn't start client: ", err)
+	if err = client.Start(); err != nil {
 		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
-	if cmd_sock != nil {
-		go readCommands(cmd_sock, client, logs.Sub("xvs"))
-	}
+	// Short delay to let interfaces quiesce after loading XDP
+	time.Sleep(5 * time.Second)
 
-	routerID := address.As4()
-
-	if *asn > 0 {
-		routerID = [4]byte{127, 0, 0, 1}
-	}
-
-	pool := bgp.NewPool(routerID, config.Bgp(uint16(*asn), *mp), nil, logs.Sub("bgp"))
-
-	if pool == nil {
-		log.Fatal("BGP pool fail")
-	}
-
-	go spawn(logs, client.Namespace(), os.Args[0], "-s", socket.Name(), client.NamespaceAddress())
-
+	// Create a balancer instance - this implements interface methods
+	// (configuration changes, stats requests, etc). which are called
+	// by the manager object (which handles the main event loop)
 	balancer := &Balancer{
-		NetNS:  NetNS(socket.Name()),
-		Logger: logs.Sub("balancer"),
 		Client: client,
+		Logger: logs.Sub("balancer"),
 	}
 
-	director := &cue.Director{
-		Notifier: balancer,
-		Prober:   balancer,
+	// Run server to perform healthchecks in network namespace, handle
+	// commands from UNIX socket and share flow info via multicast
+	balancer.start(*socket, cmd_sock, config.Multicast)
+
+	// Add some custom HTTP endpoints to the default mux to handle
+	// requests specific to this type of load balancer client
+	httpEndpoints(client, logs)
+
+	// context to use for shutting down services when we're about to exit
+	ctx, shutdown := context.WithCancel(context.Background())
+
+	// The manager handles the main event loop, healthchecks, requests
+	// for the console/metrics, sets up BGP sessions, etc.
+	manager := vc5.Manager{
+		Config:   config,
+		Balancer: balancer,
+		Logs:     logs,
+		NAT:      nat(client),             // We use a NAT method and a custom probe function
+		Prober:   prober(client, *socket), // to run checks from the inside network namespace
+		RouterID: routerID,                // BGP router ID to use to speak to peers
+		LocalBGP: uint16(*asn),            // If non-zero then loopback BGP is activated
 	}
 
-	if config.Multicast != "" {
-		multicast(client, config.Multicast)
+	if err := manager.Manage(ctx, listener); err != nil {
+		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
 
-	err = director.Start(config.Parse())
+	// We are succesfully up and running, so send a high priority
+	// alert to let the world know - perhaps we crashed previously and
+	// were restarted by the service manager
+	logs.Alert(vc5.ALERT, F, "initialised", KV{}, "Initialised")
 
-	if err != nil {
-		//logs.EMERG(F, "Couldn't start director:", err)
-		//log.Fatal(err)
-		logs.Fatal(F, "director", KV{"error.message": "Couldn't start director: " + err.Error()})
-	}
+	// We now wait for signals to tell us to reload the configuration file or exit
+	sig := make(chan os.Signal, 10)
+	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	done := make(chan bool) // close this channel when we want to exit
-
-	vip := map[netip.Addr]vc5.State{}
-
-	var rib []netip.Addr
-	var summary vc5.Summary
-
-	services, old, _ := vc5.ServiceStatus(config, balancer, director, nil)
-
-	//vipmap := vc5.VipMap(nil) // test, but need to move vip management into man lb library
-
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		for {
-			mutex.Lock()
-			summary.Update(balancer.summary(), start)
-			services, old, summary.Current = vc5.ServiceStatus(config, balancer, director, old)
-			mutex.Unlock()
-			select {
-			case <-ticker.C:
-			case <-done:
-				return
+	for {
+		switch <-sig {
+		case syscall.SIGINT:
+			fallthrough
+		case syscall.SIGUSR2:
+			logs.Alert(vc5.NOTICE, F, "reload", KV{}, "Reload signal received")
+			conf, err := vc5.Load(file)
+			if err == nil {
+				config = conf
+				config.Address = *addr
+				config.Interfaces = nics
+				config.Native = *native
+				config.Webserver = *webserver
+				config.Webroot = *webroot
+				client.UpdateVLANs(conf.Vlans())
+				manager.Configure(conf)
+			} else {
+				text := "Couldn't load config file " + file + " :" + err.Error()
+				logs.Alert(vc5.ALERT, F, "config", KV{"file.path": file, "error.message": err.Error()}, text)
 			}
+
+		case syscall.SIGTERM:
+			fallthrough
+		case syscall.SIGQUIT:
+			shutdown() // cancel context to shut down BGP, etc
+			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
+			time.Sleep(4 * time.Second)
+			return
 		}
-	}()
-
-	go func() { // advertise VIPs via BGP
-		timer := time.NewTimer(config.Learn * time.Second)
-		ticker := time.NewTicker(5 * time.Second)
-		services := director.Status()
-
-		defer func() {
-			ticker.Stop()
-			timer.Stop()
-			pool.RIB(nil)
-			time.Sleep(2 * time.Second)
-			pool.Close()
-		}()
-
-		var initialised bool
-		for {
-			select {
-			case <-ticker.C: // check for matured VIPs
-				//mutex.Lock()
-				//vipmap = vc5.VipLog(director.Status(), vipmap, config.Priorities(), logs)
-				//mutex.Unlock()
-
-			case <-director.C: // a backend has changed state
-				mutex.Lock()
-				services = director.Status()
-				balancer.configure(services)
-				mutex.Unlock()
-			case <-done: // shuting down
-				return
-			case <-timer.C:
-				//logs.NOTICE(F, KV{"event": "Learn timer expired"})
-				//logs.NOTICE(F, KV{"event.action": "learn-timer-expired"})
-				logs.Alert(vc5.NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
-				initialised = true
-			}
-
-			mutex.Lock()
-			vip = vc5.VipState(services, vip, config.Priorities(), logs)
-			rib = vc5.AdjRIBOut(vip, initialised)
-			mutex.Unlock()
-
-			pool.RIB(rib)
-		}
-	}()
-
-	static := http.FS(vc5.STATIC)
-	var fs http.FileSystem
-
-	if *webroot != "" {
-		fs = http.FileSystem(http.Dir(*webroot))
 	}
+}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+func bgpListener(l net.Listener, logs vc5.Logger) {
+	F := "listener"
 
-		if fs != nil {
-			file := r.URL.Path
-			if file == "/" {
-				file = "/index.html"
-			}
+	for {
+		conn, err := l.Accept()
 
-			if f, err := fs.Open(file); err == nil {
-				f.Close()
-				http.FileServer(fs).ServeHTTP(w, r)
-				return
-			}
-		}
-
-		r.URL.Path = "static/" + r.URL.Path
-		http.FileServer(static).ServeHTTP(w, r)
-	})
-
-	http.HandleFunc("/log/", func(w http.ResponseWriter, r *http.Request) {
-
-		start, _ := strconv.ParseUint(r.URL.Path[5:], 10, 64)
-		logs := logs.Get(start)
-		js, err := json.MarshalIndent(&logs, " ", " ")
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
+			logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
+		} else {
+			go func(c net.Conn) {
+				logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
+				defer c.Close()
+				time.Sleep(time.Second * 10)
+			}(conn)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
+	}
+}
 
-	http.HandleFunc("/build.json", func(w http.ResponseWriter, r *http.Request) {
-		info, ok := debug.ReadBuildInfo()
-		if !ok {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
+func httpEndpoints(client Client, logs vc5.Logger) {
 
-		js, err := json.MarshalIndent(info, " ", " ")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
-
-	// Remove this if migrating to a different load balancing engine
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
 		t := time.Now()
 		p := client.Prefixes()
-		fmt.Println(time.Now().Sub(t))
-		js, _ := json.Marshal(&p)
+		milliseconds := time.Now().Sub(t) / time.Millisecond
+		logs.Event(6, "web", "prefixes", KV{"milliseconds": milliseconds})
+		js, err := json.Marshal(&p)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		js = append(js, 0x0a) // add a newline for readability
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
-		w.Write([]byte("\n"))
 	})
 
-	// Remove this if migrating to a different load balancing engine
 	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
 		var ret []interface{}
 		type status struct {
@@ -385,131 +296,8 @@ func main() {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		js = append(js, 0x0a) // add a newline for readability
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
-		w.Write([]byte("\n"))
 	})
-
-	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
-
-		config.Address = *addr
-		config.Interfaces = nics
-		config.Native = *native
-		//config.Untagged = *untagged
-		config.Webserver = *webserver
-		config.Webroot = *webroot
-
-		js, err := json.MarshalIndent(config, " ", " ")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
-
-	http.HandleFunc("/cue.json", func(w http.ResponseWriter, r *http.Request) {
-		js, err := json.MarshalIndent(director.Status(), " ", " ")
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(js)
-		w.Write([]byte("\n"))
-	})
-
-	http.HandleFunc("/status.json", func(w http.ResponseWriter, r *http.Request) {
-		mutex.Lock()
-		js, err := vc5.JSONStatus(summary, services, vip, pool, rib, logs.Stats())
-		mutex.Unlock()
-
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		js = append(js, 0x0a) // add a newline
-		w.Write(js)
-	})
-
-	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-
-		mutex.Lock()
-		metrics := vc5.Prometheus("vc5", services, summary, vip)
-		mutex.Unlock()
-
-		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
-	})
-
-	go func() {
-		for {
-			server := http.Server{}
-			err := server.Serve(listener)
-			//logs.ALERT(F, "Webserver exited: "+err.Error())
-			logs.Alert(vc5.ALERT, F, "webserver", KV{"error.message": err.Error()}, "Webserver exited: "+err.Error())
-			time.Sleep(10 * time.Second)
-		}
-	}()
-
-	//logs.ALERT(F, "Initialised")
-	logs.Alert(vc5.ALERT, F, "initialised", KV{}, "Initialised")
-
-	sig := make(chan os.Signal, 10)
-	signal.Notify(sig, syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-
-	for {
-		switch <-sig {
-		case syscall.SIGINT:
-			fallthrough
-		case syscall.SIGUSR2:
-			//logs.NOTICE(F, "Reload signal received")
-			logs.Alert(vc5.NOTICE, F, "reload", KV{}, "Reload signal received")
-			conf, err := vc5.Load(file)
-			if err == nil {
-				mutex.Lock()
-				config = conf
-				client.UpdateVLANs(config.Vlans())
-				director.Configure(config.Parse())
-				pool.Configure(config.Bgp(uint16(*asn), *mp))
-				logs.Configure(conf.Logging_())
-				mutex.Unlock()
-			} else {
-				//logs.ALERT(F, "Couldn't load config file:", file, err)
-				logs.Alert(vc5.ALERT, F, "config", KV{"error.message": fmt.Sprint("Couldn't load config file:", file, err)})
-			}
-
-		case syscall.SIGTERM:
-			fallthrough
-		case syscall.SIGQUIT:
-			fmt.Println("CLOSING")
-			close(done) // shut down BGP, etc
-			//logs.ALERT(F, "Shutting down")
-			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
-			time.Sleep(4 * time.Second)
-			return
-		}
-	}
-}
-
-func bgpListener(l net.Listener, logs vc5.Logger) {
-	F := "listener"
-
-	for {
-		conn, err := l.Accept()
-
-		if err != nil {
-			//logs.ERR(F, "Failed to accept connection", err)
-			logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
-		} else {
-			go func(c net.Conn) {
-				//logs.INFO(F, "Accepted connection from", conn.RemoteAddr())
-				logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
-				defer c.Close()
-				time.Sleep(time.Second * 10)
-			}(conn)
-		}
-	}
 }

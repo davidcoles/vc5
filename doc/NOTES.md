@@ -73,9 +73,110 @@ systemctl start kibana
 
 
 
+# to have index lifecycle management ...
+
+# create index template (eg. "lbtemplate", index pattern "lb-*, tick "create data stream", ")
+
+"Index settings" like:
+{
+  "index": {
+    "lifecycle": {
+      "name": "7-days-default"
+    },
+    "number_of_replicas": "0"
+  }
+}
+
+Set mappings, (need to fully spec this out) eg.:
+  "mappings": {
+    "properties": {
+      "@timestamp": {
+        "type": "date"
+      },
+      "destintation": {
+        "properties": {
+          "ip": {
+            "type": "ip"
+          },
+          "mac": {
+            "type": "keyword"
+          },
+          "nat": {
+            "properties": {
+              "ip": {
+                "type": "ip"
+              }
+            }
+          },
+          "port": {
+            "type": "byte"
+          }
+        }
+      },
+      "event": {
+        "properties": {
+          "action": {
+            "type": "keyword"
+          },
+          "module": {
+            "type": "keyword"
+          },
+          "type": {
+            "type": "keyword"
+          }
+        }
+      }
+    }
+  },
+
+
+Set aliases, eg.:
+{
+  "myindexname": {},
+}
+
+add permissions to lb user's role for "lb-myindexname" and "myindexname" to "write"
+
 user=elastic
 pass=...
-index=my-index-name
+index=myindexname
+
+# remove previous copies if necessary
+curl -u "$user:$pass" -X DELETE http://localhost:9200/lb-${index}/_alias/${index}
+curl -u "$user:$pass" -X DELETE http://localhost:9200/_data_stream/lb-${index}
+
+# create index
+curl -u "$user:$pass" -X POST --header 'Content-Type: application/json' \
+     --data @- http://localhost:9200/lb-${index}/_doc <<EOF
+{
+  "@timestamp": 0
+}
+EOF
+
+# create the alias
+curl -u "$user:$pass" -X POST --header 'Content-Type: application/json' \
+     --data @- http://localhost:9200/_aliases <<EOF
+{
+ "actions": [
+  {
+   "add": {
+    "index": "lb-${index}",
+    "alias": "${index}",
+    "is_write_index": true
+   }
+  }
+ ]
+}
+EOF
+
+
+create index pattern to match
+
+
+
+
+
+regular non-templated index ...
 
 curl -u "$user:$pass" -X DELETE http://localhost:9200/$index
 

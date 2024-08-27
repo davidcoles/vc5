@@ -131,8 +131,16 @@ type ent struct {
 	alert   bool
 }
 
+func NewLogger(hostid string, l Logging) *Sink {
+	logs := &Sink{HostID: hostid}
+	logs.Start(l)
+	return logs
+}
+
 type Sink = sink
 type sink struct {
+	HostID string
+
 	e    chan *ent
 	l    chan Logging
 	host string
@@ -145,15 +153,7 @@ func (s *sink) Sub(f string) *sub                                         { retu
 func (s *sink) sub(f string) *sub                                         { return &sub{parent: s, facility: f} }
 func (s *sink) Event(n uint8, f, a string, e map[string]any)              { s.event(n, f, a, e) }
 func (s *sink) Alert(n uint8, f, a string, e map[string]any, t ...string) { s.alert(n, f, a, e, t...) }
-
-//func (s *sink) EMERG(f string, a ...any) { s.log(EMERG, f, a...) }
-//func (s *sink) ALERT(f string, a ...any)                     { s.log(ALERT, f, a...) }
-//func (s *sink) CRIT(f string, a ...any)                      { s.log(CRIT, f, a...) }
-//func (s *sink) ERR(f string, a ...any)                       { s.log(ERR, f, a...) }
-//func (s *sink) WARNING(f string, a ...any)                   { s.log(WARNING, f, a...) }
-//func (s *sink) NOTICE(f string, a ...any)                    { s.log(NOTICE, f, a...) }
-//func (s *sink) INFO(f string, a ...any)                      { s.log(INFO, f, a...) }
-//func (s *sink) DEBUG(f string, a ...any)                     { s.log(DEBUG, f, a...) }
+func (s *sink) State(f, a string, e map[string]any)                       { s.state(f, a, e) }
 
 func (s *sink) Fatal(f string, a string, e map[string]any) {
 	s.Alert(EMERG, f, a, e)
@@ -165,86 +165,39 @@ type LogStats struct {
 	WebhookErrors       uint64 `json:"webhook_errors"`
 }
 
-func (s *sink) Stats() LogStats {
+func (s *sink) Stats() (_ LogStats) {
+	if s == nil {
+		return
+	}
 	return LogStats{
 		ElasticsearchErrors: s.elastic.Load(),
 		WebhookErrors:       s.webhook.Load(),
 	}
 }
 
-func (s *sink) log(lev uint8, facility string, a ...any) {
-	level := level(lev)
+const _EVENT = 0
+const _STATE = 1
+const _ALERT = 2
 
-	now := time.Now()
-	text := fmt.Sprintln(a...)
-
-	if len(text) > 0 {
-		// chop off the trailing newline
-		l := len(text) - 1
-		text = text[0:l]
-	}
-
-	kv := KV{}
-
-	if len(a) == 1 {
-		e := a[0]
-
-		if k, ok := e.(KV); ok {
-
-			kv = k
-			var t []string
-			for k, v := range kv {
-				t = append(t, fmt.Sprintf("%s:%v", k, v))
-			}
-			sort.Strings(t)
-			text = strings.Join(t, " ")
-		} else {
-			kv["text"] = text
-		}
-	} else {
-		kv["text"] = text
-	}
-
-	//kv["date"] = now.UnixNano() / int64(time.Millisecond)
-	kv["@timestamp"] = now.UnixNano() / int64(time.Millisecond)
-	//kv["@timestamp"] = now.Format(time.RFC3339)
-	kv["level"] = level.String()
-	kv["facility"] = facility
-
-	js, _ := json.Marshal(kv)
-
-	s.e <- &ent{text: text, json: js, level: level, facility: facility, time: now}
+func (s *sink) state(facility string, action string, event map[string]any) {
+	s._event(_STATE, DEBUG, facility, action, event)
 }
 
-// vlan.id vlan.name
-
-// event.type: alert
-// - vip goes up/down
-// - bgp connect/disconnect
-// - start, quit, reload
-
-// event.type: state
-// - component check state
-// - composite check state
-// - service state
-// - vip state
-
-// event.module:
-// - health-check: state-change state check
-// - vip-status
-// - service-status
-//
-
-// event.type: alert, asset, enrichment, event, metric, state, pipeline_error, signal
 func (s *sink) event(lev uint8, facility string, action string, event map[string]any) {
-	s._event(false, lev, facility, action, event)
+	s._event(_EVENT, lev, facility, action, event)
 }
 
 func (s *sink) alert(lev uint8, facility string, action string, event map[string]any, t ...string) {
-	s._event(true, lev, facility, action, event, t...)
+	s._event(_ALERT, lev, facility, action, event, t...)
 }
 
-func (s *sink) _event(alert bool, lev uint8, facility string, action string, event map[string]any, hrt ...string) {
+func (s *sink) _event(kind uint8, lev uint8, facility string, action string, event map[string]any, hrt ...string) {
+	if s == nil {
+		return
+	}
+
+	var alert bool
+
 	level := level(lev)
 
 	now := time.Now()
@@ -257,8 +210,6 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 	}
 
 	event["host.id"] = s.host
-	//event["host.hostname"] = s.host
-
 	event["date"] = now.UnixNano() / int64(time.Millisecond)
 	event["@timestamp"] = now.UnixNano() / int64(time.Millisecond)
 	event["level"] = level.String()
@@ -266,10 +217,14 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 	event["event.action"] = action
 	event["event.severity"] = uint8(level)
 
-	if alert {
-		event["event.type"] = "alert"
-	} else {
-		event["event.type"] = "event"
+	switch kind {
+	case _ALERT:
+		event["event.kind"] = "alert"
+		alert = true
+	case _STATE:
+		event["event.kind"] = "state"
+	default:
+		event["event.kind"] = "event"
 	}
 
 	var t []string
@@ -294,6 +249,10 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 }
 
 func (s *sink) Get(start uint64) (h []entry) {
+	if s == nil {
+		return
+	}
+
 	l := &ent{get: make(chan bool), start: start}
 	s.e <- l
 	<-l.get
@@ -307,6 +266,9 @@ func (s *sink) Get(start uint64) (h []entry) {
 }
 
 func (s *sink) Configure(l Logging) {
+	if s == nil {
+		return
+	}
 	s.l <- l
 }
 
@@ -314,17 +276,26 @@ func (s *sink) Start(l Logging) {
 	s.e = make(chan *ent, 1000)
 	s.l = make(chan Logging, 1000)
 
+	{
+		host := s.HostID
+
+		if host == "" {
+			host, _ = os.Hostname()
+		}
+
+		if host == "" {
+			host = fmt.Sprintf("%d", time.Now().UnixNano())
+		}
+
+		s.host = host
+	}
+
 	go func() {
+
 		// Not using full UnixNano here because large integers cause an
 		// overflow in jq(1) which I often use for highlighting JSON
 		// and it confuses me when the numbers are wrong!
 		id := uint64(time.Now().UnixNano() / 1000000)
-
-		host, _ := os.Hostname()
-		if host == "" {
-			host = fmt.Sprintf("%d", time.Now().UnixNano())
-		}
-		s.host = host
 
 		webhooks := map[secret]Webhook{}
 		var elastic chan ent
@@ -392,7 +363,7 @@ func (s *sink) Start(l Logging) {
 				config(l)
 
 			case e := <-s.e:
-				e.host = host
+				e.host = s.host
 				e.id = id
 				id++
 
@@ -632,21 +603,13 @@ func history() chan *ent {
 }
 
 type Logger interface {
-	//lev uint8, facility string, action string
+	State(f, a string, e map[string]any)
 	Event(l uint8, f, a string, e map[string]any)
 	Alert(l uint8, f, a string, e map[string]any, text ...string) // a single text arg is used for human readable log lines if present
-	//EMERG(f string, a ...any)
-	//ALERT(f string, a ...any)
-	//CRIT(f string, a ...any)
-	//ERR(f string, a ...any)
-	//WARNING(f string, a ...any)
-	//NOTICE(f string, a ...any)
-	//INFO(f string, a ...any)
-	//DEBUG(f string, a ...any)
 }
 
 type parent interface {
-	log(uint8, string, ...any)
+	state(f, a string, e map[string]any)
 	event(l uint8, f, a string, e map[string]any)
 	alert(l uint8, f, a string, e map[string]any, t ...string)
 }
@@ -657,20 +620,11 @@ type sub struct {
 	facility string
 }
 
+func (l *sub) State(f, a string, e map[string]any)          { l.parent.state(l.facility+"."+f, a, e) }
 func (l *sub) Event(n uint8, f, a string, e map[string]any) { l.parent.event(n, l.facility+"."+f, a, e) }
 func (l *sub) Alert(n uint8, f, a string, e map[string]any, t ...string) {
 	l.parent.alert(n, l.facility+"."+f, a, e, t...)
 }
-func (l *sub) log(n uint8, s string, a ...any) { l.parent.log(n, l.facility+"."+s, a...) }
-
-//func (l *sub) EMERG(s string, a ...any)                     { l.log(EMERG, s, a...) }
-//func (l *sub) ALERT(s string, a ...any)                     { l.log(ALERT, s, a...) }
-//func (l *sub) CRIT(s string, a ...any)                      { l.log(CRIT, s, a...) }
-//func (l *sub) ERR(s string, a ...any) { l.log(ERR, s, a...) }
-//func (l *sub) WARNING(s string, a ...any)                   { l.log(WARNING, s, a...) }
-//func (l *sub) NOTICE(s string, a ...any) { l.log(NOTICE, s, a...) }
-//func (l *sub) INFO(s string, a ...any)                      { l.log(INFO, s, a...) }
-//func (l *sub) DEBUG(s string, a ...any)                     { l.log(DEBUG, s, a...) }
 
 func (l *sub) BGPPeer(peer string, params bgp.Parameters, add bool) {
 	F := "peer"
