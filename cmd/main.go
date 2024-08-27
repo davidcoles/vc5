@@ -198,6 +198,7 @@ func main() {
 		Prober:   prober(client, *socket), // to run checks from the inside network namespace
 		RouterID: routerID,                // BGP router ID to use to speak to peers
 		LocalBGP: uint16(*asn),            // If non-zero then loopback BGP is activated
+		WebRoot:  *webroot,
 	}
 
 	if err := manager.Manage(ctx, listener); err != nil {
