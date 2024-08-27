@@ -3,10 +3,6 @@ package vc5
 import (
 	"bytes"
 	"context"
-	//"fmt"
-	//"log"
-	"sync"
-	"sync/atomic"
 
 	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v7/esapi"
@@ -21,11 +17,7 @@ type Elasticsearch struct {
 	Username  secret   `json:"username,omitempty"`
 	Password  secret   `json:"password,omitempty"`
 
-	c       chan string
-	mutex   sync.Mutex
-	started bool
-	client  *elasticsearch.Client
-	fail    atomic.Uint64
+	client *elasticsearch.Client
 }
 
 func (e *Elasticsearch) start() (err error) {

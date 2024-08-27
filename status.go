@@ -194,7 +194,7 @@ func vipState(services []cue.Service, old map[netip.Addr]state, priorities map[n
 		}
 
 		if mature {
-			logs.Event(DEBUG, F, "state", KV{"service.ip": v, "service.state": upDown(up)})
+			logs.State(F, "state", KV{"service.ip": v, "service.state": upDown(up)})
 		}
 	}
 

@@ -4,7 +4,7 @@
   <img src="doc/vc5.drawio.png" width="25%">
 </picture>
 
-A horizontally scalable layer 2 Direct Server Return
+A horizontally scalable Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
@@ -12,11 +12,9 @@ If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
-After a recent refactoring of the underlying XDP code this now works
-with the eBPF verifier on newer kernels, and seems to run fine on
-other architectures; tested on a Raspberry Pi, which according to
-`/sys/firmware/devicetree/base/model` is a "Raspberry Pi 3 Model B Rev
-1.2".
+There has been a bt of an overhaul on the elasticsearch logging
+schema> I can't imagine that this is being used much yet, but
+something to be aware of if you are using it.
 
 ## Quickstart
 

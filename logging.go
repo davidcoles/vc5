@@ -153,6 +153,7 @@ func (s *sink) Sub(f string) *sub                                         { retu
 func (s *sink) sub(f string) *sub                                         { return &sub{parent: s, facility: f} }
 func (s *sink) Event(n uint8, f, a string, e map[string]any)              { s.event(n, f, a, e) }
 func (s *sink) Alert(n uint8, f, a string, e map[string]any, t ...string) { s.alert(n, f, a, e, t...) }
+func (s *sink) State(f, a string, e map[string]any)                       { s.state(f, a, e) }
 
 func (s *sink) Fatal(f string, a string, e map[string]any) {
 	s.Alert(EMERG, f, a, e)
@@ -174,18 +175,28 @@ func (s *sink) Stats() (_ LogStats) {
 	}
 }
 
+const _EVENT = 0
+const _STATE = 1
+const _ALERT = 2
+
+func (s *sink) state(facility string, action string, event map[string]any) {
+	s._event(_STATE, DEBUG, facility, action, event)
+}
+
 func (s *sink) event(lev uint8, facility string, action string, event map[string]any) {
-	s._event(false, lev, facility, action, event)
+	s._event(_EVENT, lev, facility, action, event)
 }
 
 func (s *sink) alert(lev uint8, facility string, action string, event map[string]any, t ...string) {
-	s._event(true, lev, facility, action, event, t...)
+	s._event(_ALERT, lev, facility, action, event, t...)
 }
 
-func (s *sink) _event(alert bool, lev uint8, facility string, action string, event map[string]any, hrt ...string) {
+func (s *sink) _event(kind uint8, lev uint8, facility string, action string, event map[string]any, hrt ...string) {
 	if s == nil {
 		return
 	}
+
+	var alert bool
 
 	level := level(lev)
 
@@ -206,10 +217,14 @@ func (s *sink) _event(alert bool, lev uint8, facility string, action string, eve
 	event["event.action"] = action
 	event["event.severity"] = uint8(level)
 
-	if alert {
-		event["event.type"] = "alert"
-	} else {
-		event["event.type"] = "event"
+	switch kind {
+	case _ALERT:
+		event["event.kind"] = "alert"
+		alert = true
+	case _STATE:
+		event["event.kind"] = "state"
+	default:
+		event["event.kind"] = "event"
 	}
 
 	var t []string
@@ -588,11 +603,13 @@ func history() chan *ent {
 }
 
 type Logger interface {
+	State(f, a string, e map[string]any)
 	Event(l uint8, f, a string, e map[string]any)
 	Alert(l uint8, f, a string, e map[string]any, text ...string) // a single text arg is used for human readable log lines if present
 }
 
 type parent interface {
+	state(f, a string, e map[string]any)
 	event(l uint8, f, a string, e map[string]any)
 	alert(l uint8, f, a string, e map[string]any, t ...string)
 }
@@ -603,6 +620,7 @@ type sub struct {
 	facility string
 }
 
+func (l *sub) State(f, a string, e map[string]any)          { l.parent.state(l.facility+"."+f, a, e) }
 func (l *sub) Event(n uint8, f, a string, e map[string]any) { l.parent.event(n, l.facility+"."+f, a, e) }
 func (l *sub) Alert(n uint8, f, a string, e map[string]any, t ...string) {
 	l.parent.alert(n, l.facility+"."+f, a, e, t...)

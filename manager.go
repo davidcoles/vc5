@@ -351,7 +351,8 @@ func (m *Manager) Notify(instance mon.Instance, state bool) {
 
 // interface method called by mon every time a round of checks for a service on a destination is completed
 func (m *Manager) Result(instance mon.Instance, state bool, diagnostic string) {
-	m.Logs.Event(7, "healthcheck", "state", resultLog(instance, state, diagnostic))
+	//m.Logs.Event(7, "healthcheck", "state", resultLog(instance, state, diagnostic))
+	m.Logs.State("healthcheck", "state", resultLog(instance, state, diagnostic))
 }
 
 func (m *Manager) Check(instance mon.Instance, check string, round uint64, state bool, diagnostic string) {
@@ -367,13 +368,18 @@ func notifyLog(instance mon.Instance, state bool) map[string]any {
 	// https://www.elastic.co/guide/en/ecs/current/ecs-base.html
 	// https://github.com/elastic/ecs/blob/main/generated/csv/fields.csv
 
+	s := Service{Address: instance.Service.Address, Port: instance.Service.Port, Protocol: Protocol(instance.Service.Protocol)}
+	d := Destination{Address: instance.Destination.Address, Port: instance.Destination.Port}
+
 	return map[string]any{
-		"service.state":    upDown(state),
-		"service.protocol": Protocol(instance.Service.Protocol).String(),
-		"service.ip":       instance.Service.Address.String(),
-		"service.port":     instance.Service.Port,
-		"destination.ip":   instance.Destination.Address.String(),
-		"destination.port": instance.Destination.Port,
+		"service.state":       upDown(state),
+		"service.ip":          s.Address.String(),
+		"service.port":        instance.Service.Port,
+		"service.protocol":    s.Protocol.String(),
+		"service.address":     s.String(),
+		"destination.ip":      d.Address.String(),
+		"destination.port":    d.Port,
+		"destination.address": d.String(),
 	}
 }
 
