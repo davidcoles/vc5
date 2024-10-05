@@ -77,28 +77,7 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	//logs := vc5.NewLogger(config.HostID, config.LoggingConfig())
 	logs := vc5.NewLogger(*addr, config.LoggingConfig())
-
-	//if config.Address != "" {
-	//	*addr = config.Address
-	//}
-
-	//if len(config.Interfaces) > 0 {
-	//	nics = config.Interfaces
-	//}
-
-	//if config.Native {
-	//	*native = true
-	//}
-
-	//if config.Webserver != "" {
-	//	*webserver = config.Webserver
-	//}
-
-	//if config.Webroot != "" {
-	//	*webroot = config.Webroot
-	//}
 
 	if len(nics) < 1 {
 		logs.Fatal(F, "args", KV{"error.message": "No interfaces defined"})
@@ -204,9 +183,8 @@ func main() {
 		WebRoot:     *webroot,                // Serve static files from this directory
 		WebListener: webListener,             // Listen for incoming web connections if not nil
 		BGPLoopback: uint16(*asn),            // If non-zero then loopback BGP is activated
-		//BGPListener: bgpListener,             // Listen for incoming BGP connections if not nil
-		Interval: 2,         // Delay in seconds between updating statistics
-		HardFail: *hardfail, // Exit if apply (not load) of config fails, when set
+		Interval:    2,                       // Delay in seconds between updating statistics
+		HardFail:    *hardfail,               // Exit if apply (not load) of config fails, when set
 	}
 
 	//if err := manager.Manage(ctx, listener); err != nil {
@@ -232,11 +210,6 @@ func main() {
 			conf, err := vc5.Load(file)
 			if err == nil {
 				config = conf
-				//config.Address = *addr
-				//config.Interfaces = nics
-				//config.Native = *native
-				//config.Webserver = *webserver
-				//config.Webroot = *webroot
 				client.UpdateVLANs(conf.Vlans())
 				manager.Configure(conf)
 			} else {
