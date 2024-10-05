@@ -82,16 +82,11 @@ type services map[Service]ServiceDefinition
 
 // Load balancer configuration
 type Config struct {
-	Services services `json:"services,omitempty"`
-
-	// VLAN ID to subnet mappings
-	VLANs map[uint16]Prefix `json:"vlans,omitempty"`
-
-	BGP map[string]bgp.Parameters `json:"bgp,omitempty"`
-
-	Learn     time.Duration `json:"learn,omitempty"`
-	Multicast string        `json:"multicast,omitempty"`
-	Logging   Logging_      `json:"logging,omitempty"`
+	Services services                  `json:"services,omitempty"`
+	VLANs    map[uint16]Prefix         `json:"vlans,omitempty"` // VLAN ID to subnet mappings
+	BGP      map[string]bgp.Parameters `json:"bgp,omitempty"`   // BGP peers
+	Learn    time.Duration             `json:"learn,omitempty"`
+	Logging  Logging_                  `json:"logging,omitempty"`
 }
 
 func (c *Config) LoggingConfig() Logging {

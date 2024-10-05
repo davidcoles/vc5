@@ -150,10 +150,6 @@ func netns(socket string, addr netip.Addr) {
 		log.Fatal(err)
 	}
 
-	// temporary for testing purposes
-	os.Remove("/tmp/vc5ns")
-	os.Symlink(socket, "/tmp/vc5ns")
-
 	http.HandleFunc("/probe", func(w http.ResponseWriter, r *http.Request) {
 
 		body, err := ioutil.ReadAll(r.Body)

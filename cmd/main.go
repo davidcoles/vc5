@@ -38,20 +38,29 @@ import (
 
 func main() {
 
-	F := "vc5"
+	const FACILITY = "vc5"
 
-	webroot := flag.String("r", "", "webserver root directory")
-	webserver := flag.String("w", ":80", "webserver listen address")
-	addr := flag.String("a", "", "address")
-	native := flag.Bool("n", false, "Native mode XDP")
-	socket := flag.String("s", "/var/run/vc5", "socket")
-	proxy := flag.String("P", "", "run as healthcheck proxy server")            // used internally
-	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
-	bgp := flag.Bool("b", false, "Disable BGP listener on port 179")            // experimental - may change
-	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
-	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
-	cmd_path := flag.String("C", "", "Command channel path")                    // experimental - may change
-	hardfail := flag.Bool("H", false, "Hard fail on configuration apply")       // experimental - may change
+	// mandatory - will likely make this the 1st argument again
+	addr := flag.String("a", "", "Primary IPv4 address (used for BGP router ID probe source address if VLANs not used)")
+
+	// commonly used flags
+	bgp := flag.Bool("b", false, "Enable BGP listener on port 179")
+	native := flag.Bool("n", false, "Use native mode XDP; better performance on network cards that support it")
+	hostid := flag.String("i", "", "Host ID for logging")
+	webroot := flag.String("r", "", "Webserver root directory to override built-in documents")
+	multicast := flag.String("m", "", "Multicast address used to share flow state between instances")
+	webserver := flag.String("w", ":80", "Webserver listen address")
+
+	// somewhat more esoteric options
+	asn := flag.Uint("A", 0, "Autonomous System Number to enable loopback BGP")
+	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
+	flows := flag.Uint("F", 0, "Set maximum number of flows")                      // experimental - may change
+	cmd_path := flag.String("C", "", "Command channel path")                       // experimental - may change
+	hardfail := flag.Bool("H", false, "Hard fail on balancer configuration error") // experimental - may change
+
+	// Best not to mess with these
+	socket := flag.String("S", "/var/run/vc5ns", "Socket for communication with proxy in network namespace")
+	proxy := flag.String("P", "", "Run as healthcheck proxy server (internal use only)")
 
 	// Changing number of flows will only work on newer kernels
 	// Not supported: 5.4.0-171-generic
@@ -77,16 +86,24 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := vc5.NewLogger(*addr, config.LoggingConfig())
+	if *hostid == "" {
+		*hostid = *addr
+	}
+
+	if *hostid == "" {
+		*hostid = "vc5"
+	}
+
+	logs := vc5.NewLogger(*hostid, config.LoggingConfig())
 
 	if len(nics) < 1 {
-		logs.Fatal(F, "args", KV{"error.message": "No interfaces defined"})
+		logs.Fatal(FACILITY, "args", KV{"error.message": "No interfaces defined"})
 	}
 
 	address := netip.MustParseAddr(*addr)
 
 	if !address.Is4() {
-		logs.Fatal(F, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
+		logs.Fatal(FACILITY, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
 	}
 
 	routerID := address.As4()
@@ -110,7 +127,7 @@ func main() {
 	// connection but then quietly drop it after ten seconds or
 	// so. This seems to keep the peer happy.
 	//err = bgpListener(logs.Sub("bgp"))
-	if !*bgp {
+	if *bgp {
 		err = bgpListener(logs)
 		if err != nil {
 			log.Fatal(err)
@@ -146,7 +163,7 @@ func main() {
 	}
 
 	if err = client.Start(); err != nil {
-		logs.Fatal(F, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
+		logs.Fatal(FACILITY, "client", KV{"error.message": "Couldn't start client: " + err.Error()})
 	}
 
 	// Short delay to let interfaces quiesce after loading XDP
@@ -162,7 +179,7 @@ func main() {
 
 	// Run server to perform healthchecks in network namespace, handle
 	// commands from UNIX socket and share flow info via multicast
-	balancer.start(*socket, cmd_sock, config.Multicast)
+	balancer.start(*socket, cmd_sock, *multicast)
 
 	// Add some custom HTTP endpoints to the default mux to handle
 	// requests specific to this type of load balancer client
@@ -187,15 +204,14 @@ func main() {
 		HardFail:    *hardfail,               // Exit if apply (not load) of config fails, when set
 	}
 
-	//if err := manager.Manage(ctx, listener); err != nil {
 	if err := manager.Manage(ctx, config); err != nil {
-		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
+		logs.Fatal(FACILITY, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
 
 	// We are succesfully up and running, so send a high priority
 	// alert to let the world know - perhaps we crashed previously and
 	// were restarted by the service manager
-	logs.Alert(vc5.ALERT, F, "initialised", KV{}, "Initialised")
+	logs.Alert(vc5.ALERT, FACILITY, "initialised", KV{}, "Initialised")
 
 	// We now wait for signals to tell us to reload the configuration file or exit
 	sig := make(chan os.Signal, 10)
@@ -206,7 +222,7 @@ func main() {
 		case syscall.SIGINT:
 			fallthrough
 		case syscall.SIGUSR2:
-			logs.Alert(vc5.NOTICE, F, "reload", KV{}, "Reload signal received")
+			logs.Alert(vc5.NOTICE, FACILITY, "reload", KV{}, "Reload signal received")
 			conf, err := vc5.Load(file)
 			if err == nil {
 				config = conf
@@ -214,13 +230,13 @@ func main() {
 				manager.Configure(conf)
 			} else {
 				text := "Couldn't load config file " + file + " :" + err.Error()
-				logs.Alert(vc5.ALERT, F, "config", KV{"file.path": file, "error.message": err.Error()}, text)
+				logs.Alert(vc5.ALERT, FACILITY, "config", KV{"file.path": file, "error.message": err.Error()}, text)
 			}
 
 		case syscall.SIGTERM:
 			fallthrough
 		case syscall.SIGQUIT:
-			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
+			logs.Alert(vc5.ALERT, FACILITY, "exiting", KV{}, "Exiting")
 			return
 		}
 	}
@@ -279,8 +295,8 @@ func bgpListener(logs vc5.Logger) error {
 					logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
 				} else {
 					go func(c net.Conn) {
-						logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
 						defer c.Close()
+						logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
 						time.Sleep(time.Second * 10)
 					}(conn)
 				}
