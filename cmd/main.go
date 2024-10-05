@@ -47,9 +47,11 @@ func main() {
 	socket := flag.String("s", "/var/run/vc5", "socket")
 	proxy := flag.String("P", "", "run as healthcheck proxy server")            // used internally
 	asn := flag.Uint("A", 0, "Autonomous system number to enable loopback BGP") // experimental - may change
+	bgp := flag.Bool("b", false, "Disable BGP listener on port 179")            // experimental - may change
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces")     // experimental - may change
 	flows := flag.Uint("F", 0, "Set maximum number of flows")                   // experimental - may change
 	cmd_path := flag.String("C", "", "Command channel path")                    // experimental - may change
+	hardfail := flag.Bool("H", false, "Hard fail on configuration apply")       // experimental - may change
 
 	// Changing number of flows will only work on newer kernels
 	// Not supported: 5.4.0-171-generic
@@ -75,27 +77,28 @@ func main() {
 		log.Fatal("Couldn't load config file:", config, err)
 	}
 
-	logs := vc5.NewLogger(config.HostID, config.LoggingConfig())
+	//logs := vc5.NewLogger(config.HostID, config.LoggingConfig())
+	logs := vc5.NewLogger(*addr, config.LoggingConfig())
 
-	if config.Address != "" {
-		*addr = config.Address
-	}
+	//if config.Address != "" {
+	//	*addr = config.Address
+	//}
 
-	if len(config.Interfaces) > 0 {
-		nics = config.Interfaces
-	}
+	//if len(config.Interfaces) > 0 {
+	//	nics = config.Interfaces
+	//}
 
-	if config.Native {
-		*native = true
-	}
+	//if config.Native {
+	//	*native = true
+	//}
 
-	if config.Webserver != "" {
-		*webserver = config.Webserver
-	}
+	//if config.Webserver != "" {
+	//	*webserver = config.Webserver
+	//}
 
-	if config.Webroot != "" {
-		*webroot = config.Webroot
-	}
+	//if config.Webroot != "" {
+	//	*webroot = config.Webroot
+	//}
 
 	if len(nics) < 1 {
 		logs.Fatal(F, "args", KV{"error.message": "No interfaces defined"})
@@ -109,13 +112,14 @@ func main() {
 
 	routerID := address.As4()
 
+	var webListener net.Listener
+
 	// Before making any changes to the state of the system (loading
 	// XDP, etc) we attempt to listen on the webserver port. This
 	// should prevent multiple instances running at the same time and
 	// interfering with each other.
-	var listener net.Listener
 	if *webserver != "" {
-		listener, err = net.Listen("tcp", *webserver)
+		webListener, err = net.Listen("tcp", *webserver)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -123,15 +127,15 @@ func main() {
 
 	// If BGP peers do not support a "passive" option (eg. ExtremeXOS)
 	// then we may need to listen on port 179 to prevent the session
-	// getting into an error state - we accept the connection but then
-	// quietly drop it after ten seconds or so. This seems to keep the
-	// device happy.
-	if config.Listen {
-		l, err := net.Listen("tcp", ":179")
+	// getting into an error state - the manager will accept the
+	// connection but then quietly drop it after ten seconds or
+	// so. This seems to keep the peer happy.
+	//err = bgpListener(logs.Sub("bgp"))
+	if !*bgp {
+		err = bgpListener(logs)
 		if err != nil {
-			log.Fatal("Couldn't listen on BGP port", err)
+			log.Fatal(err)
 		}
-		go bgpListener(l, logs.Sub("bgp"))
 	}
 
 	// Open a UNIX domain socket for receiving commands whilst
@@ -187,21 +191,26 @@ func main() {
 
 	// context to use for shutting down services when we're about to exit
 	ctx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
 
 	// The manager handles the main event loop, healthchecks, requests
 	// for the console/metrics, sets up BGP sessions, etc.
 	manager := vc5.Manager{
-		Config:   config,
-		Balancer: balancer,
-		Logs:     logs,
-		NAT:      nat(client),             // We use a NAT method and a custom probe function
-		Prober:   prober(client, *socket), // to run checks from the inside network namespace
-		RouterID: routerID,                // BGP router ID to use to speak to peers
-		LocalBGP: uint16(*asn),            // If non-zero then loopback BGP is activated
-		WebRoot:  *webroot,
+		Balancer:    balancer,
+		Logs:        logs,
+		NAT:         nat(client),             // We use a NAT method and a custom probe function
+		Prober:      prober(client, *socket), // to run checks from the inside network namespace
+		RouterID:    routerID,                // BGP router ID to use to speak to peers
+		WebRoot:     *webroot,                // Serve static files from this directory
+		WebListener: webListener,             // Listen for incoming web connections if not nil
+		BGPLoopback: uint16(*asn),            // If non-zero then loopback BGP is activated
+		//BGPListener: bgpListener,             // Listen for incoming BGP connections if not nil
+		Interval: 2,         // Delay in seconds between updating statistics
+		HardFail: *hardfail, // Exit if apply (not load) of config fails, when set
 	}
 
-	if err := manager.Manage(ctx, listener); err != nil {
+	//if err := manager.Manage(ctx, listener); err != nil {
+	if err := manager.Manage(ctx, config); err != nil {
 		logs.Fatal(F, "manager", KV{"error.message": "Couldn't start manager: " + err.Error()})
 	}
 
@@ -223,11 +232,11 @@ func main() {
 			conf, err := vc5.Load(file)
 			if err == nil {
 				config = conf
-				config.Address = *addr
-				config.Interfaces = nics
-				config.Native = *native
-				config.Webserver = *webserver
-				config.Webroot = *webroot
+				//config.Address = *addr
+				//config.Interfaces = nics
+				//config.Native = *native
+				//config.Webserver = *webserver
+				//config.Webroot = *webroot
 				client.UpdateVLANs(conf.Vlans())
 				manager.Configure(conf)
 			} else {
@@ -238,28 +247,8 @@ func main() {
 		case syscall.SIGTERM:
 			fallthrough
 		case syscall.SIGQUIT:
-			shutdown() // cancel context to shut down BGP, etc
 			logs.Alert(vc5.ALERT, F, "exiting", KV{}, "Exiting")
-			time.Sleep(4 * time.Second)
 			return
-		}
-	}
-}
-
-func bgpListener(l net.Listener, logs vc5.Logger) {
-	F := "listener"
-
-	for {
-		conn, err := l.Accept()
-
-		if err != nil {
-			logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
-		} else {
-			go func(c net.Conn) {
-				logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
-				defer c.Close()
-				time.Sleep(time.Second * 10)
-			}(conn)
 		}
 	}
 }
@@ -301,4 +290,30 @@ func httpEndpoints(client Client, logs vc5.Logger) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(js)
 	})
+}
+
+func bgpListener(logs vc5.Logger) error {
+	F := "bgp.listener"
+
+	l, err := net.Listen("tcp", ":179")
+
+	if err == nil {
+		go func() {
+			for {
+				conn, err := l.Accept()
+
+				if err != nil {
+					logs.Event(vc5.ERR, F, "accept", KV{"error.message": err.Error()})
+				} else {
+					go func(c net.Conn) {
+						logs.Event(vc5.INFO, F, "accept", KV{"client.address": conn.RemoteAddr().String()})
+						defer c.Close()
+						time.Sleep(time.Second * 10)
+					}(conn)
+				}
+			}
+		}()
+	}
+
+	return err
 }

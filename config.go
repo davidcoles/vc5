@@ -89,17 +89,17 @@ type Config struct {
 
 	BGP map[string]bgp.Parameters `json:"bgp,omitempty"`
 
-	Learn      time.Duration `json:"learn,omitempty"`
-	Listen     bool          `json:"listen,omitempty"`
-	Multicast  string        `json:"multicast,omitempty"`
-	Webserver  string        `json:"webserver,omitempty"`
-	Webroot    string        `json:"webroot,omitempty"`
-	Logging    Logging_      `json:"logging,omitempty"`
-	Native     bool          `json:"native,omitempty"`
-	Untagged   bool          `json:"untagged,omitempty"`
-	Address    string        `json:"address,omitempty"`
-	Interfaces []string      `json:"interfaces,omitempty"`
-	HostID     string        `json:"host_id,omitempty"`
+	Learn     time.Duration `json:"learn,omitempty"`
+	Multicast string        `json:"multicast,omitempty"`
+	Logging   Logging_      `json:"logging,omitempty"`
+	//Address    string        `json:"address,omitempty"`
+	//Interfaces []string      `json:"interfaces,omitempty"`
+	//HostID string `json:"host_id,omitempty"`
+	//Listen     bool          `json:"listen,omitempty"`
+	//Webserver string        `json:"webserver,omitempty"`
+	//Webroot string   `json:"webroot,omitempty"`
+	//Native     bool          `json:"native,omitempty"`
+	//Untagged   bool     `json:"untagged,omitempty"`
 }
 
 func (c *Config) LoggingConfig() Logging {

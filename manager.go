@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	//"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -37,15 +38,22 @@ import (
 )
 
 type Manager struct {
-	Config   *Config
-	Director *cue.Director
-	Balancer Balancer
-	Logs     *Sink
-	WebRoot  string
-	LocalBGP uint16
-	NAT      func(netip.Addr, netip.Addr) (netip.Addr, bool)
-	Prober   func(Instance, Check) (bool, string)
-	RouterID [4]byte
+	config      *Config
+	Director    *cue.Director
+	Balancer    Balancer
+	Logs        *Sink
+	WebRoot     string
+	BGPLoopback uint16
+	NAT         func(netip.Addr, netip.Addr) (netip.Addr, bool)
+	Prober      func(Instance, Check) (bool, string)
+	RouterID    [4]byte
+	WebListener net.Listener
+	Interval    uint8
+
+	Address netip.Addr
+	SNI     bool
+
+	HardFail bool
 
 	pool     *bgp.Pool
 	mutex    sync.Mutex
@@ -71,14 +79,18 @@ func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, d
 	return m.Prober(Instance{Service: s, Destination: d}, check)
 }
 
-func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
+func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 	// mostly lifted from main.go - probably need a bit of rationalising
+
+	m.config = cfg
 
 	start := time.Now()
 	F := "vc5"
 
 	m.Director = &cue.Director{
 		Notifier: m,
+		SNI:      m.SNI,
+		Address:  m.Address,
 	}
 
 	if m.Prober != nil {
@@ -87,34 +99,42 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 	routerID := m.RouterID
 
-	// If loopback BGP mode is enabled (m.LocalBGP is the ASN that we should use) then override router ID
-	if m.LocalBGP > 0 {
+	// If loopback BGP mode is enabled (m.BGPLoopback is the ASN that we should use) then override router ID
+	if m.BGPLoopback > 0 {
 		routerID = [4]byte{127, 0, 0, 1} // no sensible BGP daemon would ever use this, surely!
 	}
 
-	m.pool = bgp.NewPool(routerID, m.Config.Bgp(m.LocalBGP, false), nil, m.Logs.Sub("bgp"))
+	m.pool = bgp.NewPool(routerID, m.config.Bgp(m.BGPLoopback, false), nil, m.Logs.Sub("bgp"))
 
 	if m.pool == nil {
 		return fmt.Errorf("BGP pool fail")
 	}
 
-	if err := m.Director.Start(m.Config.Parse()); err != nil {
+	if err := m.Director.Start(m.config.Parse()); err != nil {
 		return err
 	}
 
 	var old map[Instance]Stats
 
 	m.vip = map[netip.Addr]state{}
-	m.services, old, _ = serviceStatus(m.Config, m.Balancer, m.Director, nil)
+	m.services, old, _ = serviceStatus(m.config, m.Balancer, m.Director, nil)
 
 	// Collect stats
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
+
+		interval := m.Interval
+
+		if interval == 0 {
+			interval = 10
+		}
+
+		ticker := time.NewTicker(time.Duration(interval) * time.Second)
+		//ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 		for {
 			m.mutex.Lock()
 			m.summary.Update(m.Balancer.Summary(), start)
-			m.services, old, m.summary.Current = serviceStatus(m.Config, m.Balancer, m.Director, old)
+			m.services, old, m.summary.Current = serviceStatus(m.config, m.Balancer, m.Director, old)
 			m.mutex.Unlock()
 			select {
 			case <-ticker.C:
@@ -126,7 +146,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 	// advertise VIPs via BGP
 	go func() {
-		timer := time.NewTimer(m.Config.Learn * time.Second)
+		timer := time.NewTimer(m.config.Learn * time.Second)
 		ticker := time.NewTicker(5 * time.Second)
 		services := m.Director.Status()
 
@@ -154,15 +174,26 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 				for _, s := range services {
 					manifests = append(manifests, Manifest(s))
 				}
-				m.Balancer.Configure(manifests)
+				err := m.Balancer.Configure(manifests)
 				m.mutex.Unlock()
+				if err != nil {
+					// if the configuration failed then the system is in an corrupt state
+					// so the best thing to do is exit? (set HardFail) - not default yet
+					text := "Couldn't apply config: " + err.Error()
+					if m.HardFail {
+						m.Logs.Fatal(F, "manager", KV{"error.message": text})
+					} else {
+						m.Logs.Alert(ERR, F, "manager", KV{"error.message": text}, text)
+					}
+				}
+
 			case <-timer.C:
 				m.Logs.Alert(NOTICE, F, "learn-timer-expired", KV{}, "Learn timer expired")
 				initialised = true
 			}
 
 			m.mutex.Lock()
-			m.vip = vipState(services, m.vip, m.Config.Priorities(), m.Logs, initialised)
+			m.vip = vipState(services, m.vip, m.config.Priorities(), m.Logs, initialised)
 			m.rib = adjRIBOut(m.vip, initialised)
 			m.mutex.Unlock()
 
@@ -260,7 +291,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
 		m.mutex.Lock()
-		js, err := json.MarshalIndent(m.Config, " ", " ")
+		js, err := json.MarshalIndent(m.config, " ", " ")
 		m.mutex.Unlock()
 
 		if err != nil {
@@ -272,6 +303,7 @@ func (m *Manager) Manage(ctx context.Context, listener net.Listener) error {
 		w.Write([]byte("\n"))
 	})
 
+	listener := m.WebListener
 	if listener != nil {
 		go func() {
 			for {
@@ -290,9 +322,9 @@ func (m *Manager) Configure(config *Config) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.Director.Configure(config.Parse())
-	m.pool.Configure(config.Bgp(m.LocalBGP, false))
+	m.pool.Configure(config.Bgp(m.BGPLoopback, false))
 	m.Logs.Configure(config.LoggingConfig())
-	m.Config = config
+	m.config = config
 }
 
 func (m *Manager) Cue() ([]byte, error) {
@@ -452,4 +484,5 @@ func VipLog(services []cue.Service, old map[netip.Addr]bool, priorities map[neti
 
 	return m
 }
+
 */

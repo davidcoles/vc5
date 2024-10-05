@@ -405,10 +405,12 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 	}
 }
 
+// return a function which will translate a vip/rip pair to a nat address - used by the manager to log destination.nat.ip
 func nat(client Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
 	return func(vip, rip netip.Addr) (netip.Addr, bool) { return client.NATAddress(vip, rip) }
 }
 
+// return a function which will relay probe requests to the network namespace healtchcheck proxy (which run against the nat address)
 func prober(client Client, path string) func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
 
 	socket := &http.Client{
