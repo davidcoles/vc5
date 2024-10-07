@@ -40,11 +40,9 @@ func main() {
 
 	const FACILITY = "vc5"
 
-	// mandatory - will likely make this the 1st argument again
-	addr := flag.String("a", "", "Primary IPv4 address (used for BGP router ID probe source address if VLANs not used)")
-
 	// commonly used flags
-	bgp := flag.Bool("b", false, "Enable BGP listener on port 179")
+	learn := flag.Uint("l", 0, "Learn; wait for this many seconds before advertising VIPs (for multicast flow state adverts)")
+	listen := flag.Bool("b", false, "Enable BGP listener on port 179")
 	native := flag.Bool("n", false, "Use native mode XDP; better performance on network cards that support it")
 	hostid := flag.String("i", "", "Host ID for logging")
 	webroot := flag.String("r", "", "Webserver root directory to override built-in documents")
@@ -54,9 +52,9 @@ func main() {
 	// somewhat more esoteric options
 	asn := flag.Uint("A", 0, "Autonomous System Number to enable loopback BGP")
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
-	flows := flag.Uint("F", 0, "Set maximum number of flows")                      // experimental - may change
-	cmd_path := flag.String("C", "", "Command channel path")                       // experimental - may change
-	hardfail := flag.Bool("H", false, "Hard fail on balancer configuration error") // experimental - may change
+	flows := flag.Uint("F", 0, "Set maximum number of flows")
+	cmd_path := flag.String("C", "", "Command channel path")
+	hardfail := flag.Bool("H", false, "Hard fail on balancer configuration error")
 
 	// Best not to mess with these
 	socket := flag.String("S", "/var/run/vc5ns", "Socket for communication with proxy in network namespace")
@@ -77,8 +75,9 @@ func main() {
 		return
 	}
 
-	file := args[0]
-	nics := args[1:]
+	addr := args[0]
+	file := args[1]
+	nics := args[2:]
 
 	config, err := vc5.Load(file)
 
@@ -87,11 +86,7 @@ func main() {
 	}
 
 	if *hostid == "" {
-		*hostid = *addr
-	}
-
-	if *hostid == "" {
-		*hostid = "vc5"
+		*hostid = addr
 	}
 
 	logs := vc5.NewLogger(*hostid, config.LoggingConfig())
@@ -100,7 +95,7 @@ func main() {
 		logs.Fatal(FACILITY, "args", KV{"error.message": "No interfaces defined"})
 	}
 
-	address := netip.MustParseAddr(*addr)
+	address := netip.MustParseAddr(addr)
 
 	if !address.Is4() {
 		logs.Fatal(FACILITY, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
@@ -126,8 +121,7 @@ func main() {
 	// getting into an error state - the manager will accept the
 	// connection but then quietly drop it after ten seconds or
 	// so. This seems to keep the peer happy.
-	//err = bgpListener(logs.Sub("bgp"))
-	if *bgp {
+	if *listen {
 		err = bgpListener(logs)
 		if err != nil {
 			log.Fatal(err)
@@ -169,6 +163,9 @@ func main() {
 	// Short delay to let interfaces quiesce after loading XDP
 	time.Sleep(5 * time.Second)
 
+	// Add a short delay on return to allow BGP, etc to cleanly exit
+	defer time.Sleep(5 * time.Second)
+
 	// Create a balancer instance - this implements interface methods
 	// (configuration changes, stats requests, etc). which are called
 	// by the manager object (which handles the main event loop)
@@ -194,6 +191,7 @@ func main() {
 	manager := vc5.Manager{
 		Balancer:    balancer,
 		Logs:        logs,
+		Learn:       *learn,
 		NAT:         nat(client),             // We use a NAT method and a custom probe function
 		Prober:      prober(client, *socket), // to run checks from the inside network namespace
 		RouterID:    routerID,                // BGP router ID to use to speak to peers

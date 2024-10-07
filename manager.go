@@ -49,6 +49,7 @@ type Manager struct {
 	RouterID    [4]byte
 	WebListener net.Listener
 	Interval    uint8
+	Learn       uint
 
 	Address netip.Addr
 	SNI     bool
@@ -83,6 +84,11 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 	// mostly lifted from main.go - probably need a bit of rationalising
 
 	m.config = cfg
+
+	learn := time.Duration(m.Learn)
+	if learn == 0 {
+		learn = 1
+	}
 
 	start := time.Now()
 	F := "vc5"
@@ -146,7 +152,7 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 
 	// advertise VIPs via BGP
 	go func() {
-		timer := time.NewTimer(m.config.Learn * time.Second)
+		timer := time.NewTimer(learn * time.Second)
 		ticker := time.NewTicker(5 * time.Second)
 		services := m.Director.Status()
 

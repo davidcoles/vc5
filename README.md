@@ -12,9 +12,12 @@ If you think that this may be useful and have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
-There has been a bt of an overhaul on the elasticsearch logging
-schema> I can't imagine that this is being used much yet, but
-something to be aware of if you are using it.
+## NB:
+
+In a hopefully final bout of capriciousness I have put the primary
+IPv4 address back as the mandatory first command line argument. Other
+parameters which cannot be changed after initialisation have been
+removed from the config file and are now flags.
 
 ## Quickstart
 
