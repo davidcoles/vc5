@@ -66,12 +66,27 @@ type Manager struct {
 
 type Check = mon.Check
 
-func Monitor(addr netip.Addr, sni bool) (*mon.Mon, error) {
-	m, err := mon.New(addr, nil, nil, nil)
-	if m != nil {
-		m.SNI = sni
+func _monitor(addr netip.Addr, cic bool) (*mon.Mon, error) {
+	m := &mon.Mon{
+		IPv4:                 addr, // for SYN probes
+		CloseIdleConnections: cic,
 	}
-	return m, err
+
+	err := m.Init(nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return m, nil
+}
+
+func Monitor(addr netip.Addr) (*mon.Mon, error) {
+	return _monitor(addr, false)
+}
+
+func MonitorCloseIdleConnections(addr netip.Addr, sni bool) (*mon.Mon, error) {
+	return _monitor(addr, true)
 }
 
 func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, diagnostic string) {

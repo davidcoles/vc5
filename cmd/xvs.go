@@ -42,8 +42,9 @@ import (
 // xvs specific routines
 
 type query struct {
-	Address string    `json:"address"`
-	Check   vc5.Check `json:"check"`
+	Address netip.Addr `json:"address"` // address to probe - this will be the NAT address corresponding to the VIP/RIP tuple
+	VIP     netip.Addr `json:"vip"`     // VIP that this probe relates to - can be used to fill a blank hostname in URLs
+	Check   vc5.Check  `json:"check"`
 }
 
 type reply struct {
@@ -87,10 +88,10 @@ func spawn(logs vc5.Logger, netns string, args ...string) {
 	}
 }
 
-func probe(client *http.Client, addr netip.Addr, check vc5.Check) (bool, string) {
+func probe(client *http.Client, addr netip.Addr, check vc5.Check, vip netip.Addr) (bool, string) {
 
 	buff := new(bytes.Buffer)
-	err := json.NewEncoder(buff).Encode(&query{Address: addr.String(), Check: check})
+	err := json.NewEncoder(buff).Encode(&query{Address: addr, Check: check, VIP: vip})
 
 	if err != nil {
 		return false, "Internal error marshalling probe: " + err.Error()
@@ -135,8 +136,7 @@ func netns(socket string, addr netip.Addr) {
 		}
 	}()
 
-	//monitor, err := mon.New(addr, nil, nil, nil)
-	monitor, err := vc5.Monitor(addr, true) // addr is the IP address of the namespace, true indicates to use "SNI" mode
+	monitor, err := vc5.Monitor(addr) // addr is the IP address of the interface in the network namespace
 
 	if err != nil {
 		log.Fatal(err)
@@ -165,19 +165,13 @@ func netns(socket string, addr netip.Addr) {
 
 		err = json.Unmarshal(body, &q)
 
-		if err != nil {
+		if err != nil || !q.Address.IsValid() || !q.VIP.IsValid() {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(`{"ok":false,"diagnostic":"unable to unmarshal probe"}`))
 			return
 		}
 
-		addr, err := netip.ParseAddr(q.Address)
-
-		if err == nil {
-			rep.OK, rep.Diagnostic = monitor.Probe(addr, q.Check)
-		} else {
-			rep.Diagnostic = "probe request: " + err.Error()
-		}
+		rep.OK, rep.Diagnostic = monitor.ProbeVIP(q.VIP, q.Address, q.Check)
 
 		js, err := json.Marshal(&rep)
 
@@ -423,13 +417,13 @@ func prober(client Client, path string) func(i vc5.Instance, check vc5.Check) (o
 		nat, ok := client.NATAddress(vip, rip)
 
 		if check.Host == "" {
-			check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
+			//check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
 		}
 
 		if !ok {
 			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
 		} else {
-			ok, diagnostic = probe(socket, nat, check)
+			ok, diagnostic = probe(socket, nat, check, vip)
 		}
 
 		return ok, diagnostic
