@@ -45,7 +45,6 @@ type Manager struct {
 	WebRoot     string
 	BGPLoopback uint16
 	NAT         func(netip.Addr, netip.Addr) (netip.Addr, bool)
-	//Prober      func(Instance, Check) (bool, string)
 	Prober      func(netip.Addr, netip.Addr, Check) (bool, string)
 	RouterID    [4]byte
 	WebListener net.Listener
@@ -88,7 +87,8 @@ func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, d
 	rip := i.Destination.Address
 
 	if m.NAT != nil {
-		rip, ok = m.NAT(i.Service.Address, i.Destination.Address)
+		// if we're using NAT to reach the backend then map the "real IP" to the NAT address
+		rip, ok = m.NAT(vip, rip)
 		if !ok {
 			return false, "NAT lookup failed"
 		}
