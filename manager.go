@@ -45,7 +45,8 @@ type Manager struct {
 	WebRoot     string
 	BGPLoopback uint16
 	NAT         func(netip.Addr, netip.Addr) (netip.Addr, bool)
-	Prober      func(Instance, Check) (bool, string)
+	//Prober      func(Instance, Check) (bool, string)
+	Prober      func(netip.Addr, netip.Addr, Check) (bool, string)
 	RouterID    [4]byte
 	WebListener net.Listener
 	Interval    uint8
@@ -66,7 +67,7 @@ type Manager struct {
 
 type Check = mon.Check
 
-func _monitor(addr netip.Addr, cic bool) (*mon.Mon, error) {
+func Monitor(addr netip.Addr, cic bool) (*mon.Mon, error) {
 	m := &mon.Mon{
 		IPv4:                 addr, // for SYN probes
 		CloseIdleConnections: cic,
@@ -81,18 +82,19 @@ func _monitor(addr netip.Addr, cic bool) (*mon.Mon, error) {
 	return m, nil
 }
 
-func Monitor(addr netip.Addr) (*mon.Mon, error) {
-	return _monitor(addr, false)
-}
-
-func MonitorCloseIdleConnections(addr netip.Addr, sni bool) (*mon.Mon, error) {
-	return _monitor(addr, true)
-}
-
 func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, diagnostic string) {
-	s := Service{Address: i.Service.Address, Port: i.Service.Port, Protocol: Protocol(i.Service.Protocol)}
-	d := Destination{Address: i.Destination.Address, Port: i.Destination.Port}
-	return m.Prober(Instance{Service: s, Destination: d}, check)
+
+	vip := i.Service.Address
+	rip := i.Destination.Address
+
+	if m.NAT != nil {
+		rip, ok = m.NAT(i.Service.Address, i.Destination.Address)
+		if !ok {
+			return false, "NAT lookup failed"
+		}
+	}
+
+	return m.Prober(vip, rip, check)
 }
 
 func (m *Manager) Manage(ctx context.Context, cfg *Config) error {

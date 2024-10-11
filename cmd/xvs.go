@@ -36,10 +36,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/davidcoles/xvs"
 	"vc5"
 )
 
 // xvs specific routines
+
+type Client = xvs.Client
+type ServiceExtended = xvs.ServiceExtended
+type DestinationExtended = xvs.DestinationExtended
+type Service = xvs.Service
+type Destination = xvs.Destination
+type Protocol = xvs.Protocol
 
 type query struct {
 	Address netip.Addr `json:"address"` // address to probe - this will be the NAT address corresponding to the VIP/RIP tuple
@@ -123,7 +131,7 @@ func probe(client *http.Client, addr netip.Addr, check vc5.Check, vip netip.Addr
 }
 
 // server to run in the network namespace - receive probes from unix socket, pass to the 'mon' object to execute
-func netns(socket string, addr netip.Addr) {
+func netns(socket string, addr netip.Addr, closeidle bool) {
 
 	go func() {
 		// if stdin is closed (parent dies) then exit
@@ -136,7 +144,7 @@ func netns(socket string, addr netip.Addr) {
 		}
 	}()
 
-	monitor, err := vc5.Monitor(addr) // addr is the IP address of the interface in the network namespace
+	monitor, err := vc5.Monitor(addr, closeidle) // addr is the IP address of the interface in the network namespace
 
 	if err != nil {
 		log.Fatal(err)
@@ -253,12 +261,7 @@ func (d *Debug) Backend(vip netip.Addr, port uint16, protocol uint8, backends []
 
 const maxDatagramSize = 1500
 
-func multicast(c Client, multicast string) {
-	go multicast_send(c, multicast)
-	go multicast_recv(c, multicast, false)
-}
-
-func multicast_send(c Client, address string) {
+func multicast_send(c *Client, address string) {
 
 	addr, err := net.ResolveUDPAddr("udp", address)
 
@@ -302,15 +305,12 @@ func multicast_send(c Client, address string) {
 	}
 }
 
-func multicast_recv(c Client, address string, spinner bool) {
+func multicast_recv(c *Client, address string) {
 	udp, err := net.ResolveUDPAddr("udp", address)
 
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	s := []string{`|`, `/`, `-`, `\`}
-	var x int
 
 	conn, err := net.ListenMulticastUDP("udp", nil, udp)
 
@@ -320,10 +320,6 @@ func multicast_recv(c Client, address string, spinner bool) {
 
 	for {
 		nread, _, err := conn.ReadFromUDP(buff)
-		if spinner {
-			fmt.Print(s[x%4] + "\b")
-		}
-		x++
 		if err == nil {
 			for n := 0; n+1 < nread; {
 				l := int(buff[n])
@@ -337,7 +333,7 @@ func multicast_recv(c Client, address string, spinner bool) {
 	}
 }
 
-func readCommands(sock net.Listener, client Client, log vc5.Logger) {
+func readCommands(sock net.Listener, client *Client, log vc5.Logger) {
 	if sock == nil {
 		return
 	}
@@ -396,12 +392,12 @@ func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 }
 
 // return a function which will translate a vip/rip pair to a nat address - used by the manager to log destination.nat.ip
-func nat(client Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
+func nat(client *Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
 	return func(vip, rip netip.Addr) (netip.Addr, bool) { return client.NATAddress(vip, rip) }
 }
 
 // return a function which will relay probe requests to the network namespace healtchcheck proxy (which run against the nat address)
-func prober(client Client, path string) func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
+func prober(client *Client, path string) func(netip.Addr, netip.Addr, vc5.Check) (ok bool, diagnostic string) {
 
 	socket := &http.Client{
 		Transport: &http.Transport{
@@ -411,21 +407,7 @@ func prober(client Client, path string) func(i vc5.Instance, check vc5.Check) (o
 		},
 	}
 
-	return func(i vc5.Instance, check vc5.Check) (ok bool, diagnostic string) {
-		vip := i.Service.Address
-		rip := i.Destination.Address
-		nat, ok := client.NATAddress(vip, rip)
-
-		if check.Host == "" {
-			//check.Host = vip.String() // URL would consist of NAT address if no host field set, which could be confusing
-		}
-
-		if !ok {
-			diagnostic = "No NAT destination defined for " + vip.String() + "/" + rip.String()
-		} else {
-			ok, diagnostic = probe(socket, nat, check, vip)
-		}
-
-		return ok, diagnostic
+	return func(vip, addr netip.Addr, check vc5.Check) (ok bool, diagnostic string) {
+		return probe(socket, addr, check, vip)
 	}
 }

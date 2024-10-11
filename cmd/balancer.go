@@ -20,19 +20,23 @@ package main
 
 import (
 	"errors"
-	"net"
-	"os"
-
-	"github.com/davidcoles/xvs"
 
 	"vc5"
 )
 
-type Client = *xvs.Client
+// Implement the vc5.Balancer interface; used to retrieve stats and configure the data-plane
+
 type Balancer struct {
-	Client Client
+	Client *Client
 	Logger vc5.Logger
 }
+
+/*
+// Interface can be simplfied with:
+func (b *Balancer) Stats() (vc5.Summary, map[vc5.Instance]vc5.Stats) {
+	return b.Summary(), b.Stats()
+}
+*/
 
 func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 	stats := map[vc5.Instance]vc5.Stats{}
@@ -88,16 +92,17 @@ func (b *Balancer) Summary() (s vc5.Summary) {
 }
 
 // Synchronise the manifest of services from the director/manager to the xvs client
-func (b *Balancer) Configure(services []vc5.Manifest) error {
+func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 
-	from_xvs := func(s xvs.Service) vc5.Service {
+	from_xvs := func(s Service) vc5.Service {
 		return vc5.Service{Address: s.Address, Port: s.Port, Protocol: vc5.Protocol(s.Protocol)}
 	}
 
-	target := map[vc5.Service]vc5.Manifest{}
+	services := map[vc5.Service]vc5.Manifest{}
 
-	for _, s := range services {
-		target[s.Service()] = s
+	// create a map of desired services and check that DSR restrictions are followed:
+	for _, s := range manifests {
+		services[s.Service()] = s
 
 		for _, d := range s.Destinations {
 			if s.Port != d.Port {
@@ -106,21 +111,23 @@ func (b *Balancer) Configure(services []vc5.Manifest) error {
 		}
 	}
 
+	// iterate through a list of active services and remove if no longer needed (desn't exist in the 'services' map):
 	svcs, _ := b.Client.Services()
 	for _, s := range svcs {
-		if _, wanted := target[from_xvs(s.Service)]; !wanted {
+		if _, wanted := services[from_xvs(s.Service)]; !wanted {
 			b.Client.RemoveService(s.Service)
 		}
 	}
 
-	for _, s := range target {
-		service := xvs.Service{Address: s.Address, Port: s.Port, Protocol: xvs.Protocol(s.Protocol), Sticky: s.Sticky}
+	// for each desired service create the necessary xvs configuration (service description and list of backends) and apply:
+	for _, s := range services {
+		service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol), Sticky: s.Sticky}
 
-		var dsts []xvs.Destination
+		var dsts []Destination
 
 		for _, d := range s.Destinations {
 			if d.Port == s.Port {
-				dsts = append(dsts, xvs.Destination{
+				dsts = append(dsts, Destination{
 					Address: d.Address,
 					Weight:  d.HealthyWeight(),
 				})
@@ -131,12 +138,4 @@ func (b *Balancer) Configure(services []vc5.Manifest) error {
 	}
 
 	return nil
-}
-
-func (b *Balancer) start(socket string, cmd_sock net.Listener, mcast string) {
-	go readCommands(cmd_sock, b.Client, b.Logger)
-	go spawn(b.Logger, b.Client.Namespace(), os.Args[0], "-P", socket, b.Client.NamespaceAddress())
-	if mcast != "" {
-		multicast(b.Client, mcast)
-	}
 }

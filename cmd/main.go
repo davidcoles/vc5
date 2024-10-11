@@ -31,8 +31,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/davidcoles/xvs"
-
 	"vc5"
 )
 
@@ -52,9 +50,10 @@ func main() {
 	// somewhat more esoteric options
 	asn := flag.Uint("A", 0, "Autonomous System Number to enable loopback BGP")
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
-	flows := flag.Uint("F", 0, "Set maximum number of flows")
+	flows := flag.Uint("F", 0, "Set maximum number of flows (per-core)")
 	cmd_path := flag.String("C", "", "Command channel path")
 	hardfail := flag.Bool("H", false, "Hard fail on balancer configuration error")
+	closeidle := flag.Bool("I", false, "Close idle HTTP connections")
 
 	// Best not to mess with these
 	socket := flag.String("S", "/var/run/vc5ns", "Socket for communication with proxy in network namespace")
@@ -71,7 +70,7 @@ func main() {
 	if *proxy != "" {
 		// we're going to be the server running in the network namespace ...
 		signal.Ignore(syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-		netns(*proxy, netip.MustParseAddr(args[0]))
+		netns(*proxy, netip.MustParseAddr(args[0]), *closeidle)
 		return
 	}
 
@@ -145,7 +144,7 @@ func main() {
 
 	// Initialise the load balancing library which will deal with the
 	// data-plane - this is what actually switches incoming packets
-	client := &xvs.Client{
+	client := &Client{
 		Interfaces: nics,
 		Address:    address,
 		Native:     *native,
@@ -174,9 +173,9 @@ func main() {
 		Logger: logs.Sub("balancer"),
 	}
 
-	// Run server to perform healthchecks in network namespace, handle
+	// Run services to perform healthchecks in network namespace, handle
 	// commands from UNIX socket and share flow info via multicast
-	balancer.start(*socket, cmd_sock, *multicast)
+	services(os.Args[0], *closeidle, client, *socket, cmd_sock, *multicast, balancer.Logger)
 
 	// Add some custom HTTP endpoints to the default mux to handle
 	// requests specific to this type of load balancer client
@@ -240,7 +239,7 @@ func main() {
 	}
 }
 
-func httpEndpoints(client Client, logs vc5.Logger) {
+func httpEndpoints(client *Client, logs vc5.Logger) {
 
 	http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
 		t := time.Now()
@@ -260,8 +259,8 @@ func httpEndpoints(client Client, logs vc5.Logger) {
 	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
 		var ret []interface{}
 		type status struct {
-			Service      xvs.ServiceExtended
-			Destinations []xvs.DestinationExtended
+			Service      ServiceExtended
+			Destinations []DestinationExtended
 		}
 		svcs, _ := client.Services()
 		for _, se := range svcs {
@@ -303,4 +302,19 @@ func bgpListener(logs vc5.Logger) error {
 	}
 
 	return err
+}
+
+func services(binary string, closeidle bool, client *Client, socket string, cmd_sock net.Listener, multicast string, logger vc5.Logger) {
+	if closeidle {
+		go spawn(logger, client.Namespace(), binary, "-I", "-P", socket, client.NamespaceAddress())
+	} else {
+		go spawn(logger, client.Namespace(), binary, "-P", socket, client.NamespaceAddress())
+	}
+
+	go readCommands(cmd_sock, client, logger)
+
+	if multicast != "" {
+		go multicast_send(client, multicast)
+		go multicast_recv(client, multicast)
+	}
 }
