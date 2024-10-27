@@ -31,14 +31,8 @@ type Balancer struct {
 	Logger vc5.Logger
 }
 
-/*
-// Interface can be simplfied with:
+//func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 func (b *Balancer) Stats() (vc5.Summary, map[vc5.Instance]vc5.Stats) {
-	return b.Summary(), b.Stats()
-}
-*/
-
-func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 	stats := map[vc5.Instance]vc5.Stats{}
 
 	services, _ := b.Client.Services()
@@ -70,23 +64,23 @@ func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 		}
 	}
 
-	return stats
+	return b.summary(), stats
 }
 
-func (b *Balancer) Summary() (s vc5.Summary) {
-	u := b.Client.Info()
-	s.Latency = u.Latency
-	s.Dropped = u.Dropped
-	s.Blocked = u.Blocked
-	s.NotQueued = u.NotQueued
-	s.IngressOctets = u.Octets
-	s.IngressPackets = u.Packets
-	s.EgressOctets = 0  // Not available in DSR
-	s.EgressPackets = 0 // Not available in DSR
-	s.Flows = u.Flows
+func (b *Balancer) summary() (summary vc5.Summary) {
+	info := b.Client.Info()
+	summary.Latency = info.Latency
+	summary.Dropped = info.Dropped
+	summary.Blocked = info.Blocked
+	summary.NotQueued = info.NotQueued
+	summary.IngressOctets = info.Octets
+	summary.IngressPackets = info.Packets
+	summary.EgressOctets = 0  // Not available in DSR
+	summary.EgressPackets = 0 // Not available in DSR
+	summary.Flows = info.Flows
 
-	s.DSR = true
-	s.VC5 = true
+	summary.DSR = true
+	summary.VC5 = true
 
 	return
 }

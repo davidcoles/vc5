@@ -87,7 +87,7 @@ func (m *Manager) Probe(_ *mon.Mon, i mon.Instance, check mon.Check) (ok bool, d
 	rip := i.Destination.Address
 
 	if m.NAT != nil {
-		// if we're using NAT to reach the backend then map the "real IP" to the NAT address
+		// if we're using NAT to reach the backend then map the VIP/RIP tuple to the NAT address
 		rip, ok = m.NAT(vip, rip)
 		if !ok {
 			return false, "NAT lookup failed"
@@ -137,10 +137,9 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 		return err
 	}
 
-	var old map[Instance]Stats
-
+	old := map[Instance]Stats{}
 	m.vip = map[netip.Addr]state{}
-	m.services, old, _ = serviceStatus(m.config, m.Balancer, m.Director, nil)
+	m.summary, m.services, old = serviceStatus(m.config, m.Balancer, m.Director, nil)
 
 	// Collect stats
 	go func() {
@@ -152,12 +151,13 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 		}
 
 		ticker := time.NewTicker(time.Duration(interval) * time.Second)
-		//ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
+
 		for {
+			var summary Summary
 			m.mutex.Lock()
-			m.summary.Update(m.Balancer.Summary(), start)
-			m.services, old, m.summary.Current = serviceStatus(m.config, m.Balancer, m.Director, old)
+			summary, m.services, old = serviceStatus(m.config, m.Balancer, m.Director, old)
+			m.summary.Update(summary, start)
 			m.mutex.Unlock()
 			select {
 			case <-ticker.C:

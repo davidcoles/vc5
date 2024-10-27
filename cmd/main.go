@@ -94,7 +94,11 @@ func main() {
 		logs.Fatal(FACILITY, "args", KV{"error.message": "No interfaces defined"})
 	}
 
-	address := netip.MustParseAddr(addr)
+	address, err := netip.ParseAddr(addr)
+
+	if err != nil {
+		logs.Fatal(FACILITY, "args", KV{"error.message": "Invalid address"})
+	}
 
 	if !address.Is4() {
 		logs.Fatal(FACILITY, "args", KV{"error.message": "Address is not IPv4: " + address.String()})
@@ -190,13 +194,13 @@ func main() {
 	manager := vc5.Manager{
 		Balancer:    balancer,
 		Logs:        logs,
-		Learn:       *learn,
+		Learn:       *learn,                  // Number of seconds to wait before advertising any VIPs
 		NAT:         nat(client),             // We use a NAT method and a custom probe function
 		Prober:      prober(client, *socket), // to run checks from the inside network namespace
 		RouterID:    routerID,                // BGP router ID to use to speak to peers
 		WebRoot:     *webroot,                // Serve static files from this directory
 		WebListener: webListener,             // Listen for incoming web connections if not nil
-		BGPLoopback: uint16(*asn),            // If non-zero then loopback BGP is activated
+		BGPLoopback: uint16(*asn),            // If non-zero then loopback BGP is enabled
 		Interval:    2,                       // Delay in seconds between updating statistics
 		HardFail:    *hardfail,               // Exit if apply (not load) of config fails, when set
 	}
@@ -305,11 +309,15 @@ func bgpListener(logs vc5.Logger) error {
 }
 
 func services(binary string, closeidle bool, client *Client, socket string, cmd_sock net.Listener, multicast string, logger vc5.Logger) {
+	cmd := []string{binary}
+
 	if closeidle {
-		go spawn(logger, client.Namespace(), binary, "-I", "-P", socket, client.NamespaceAddress())
-	} else {
-		go spawn(logger, client.Namespace(), binary, "-P", socket, client.NamespaceAddress())
+		cmd = append(cmd, "-I")
 	}
+
+	cmd = append(cmd, "-P", socket, client.NamespaceAddress())
+
+	go spawn(logger, client.Namespace(), cmd...)
 
 	go readCommands(cmd_sock, client, logger)
 

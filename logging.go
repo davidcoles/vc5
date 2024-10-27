@@ -157,6 +157,7 @@ func (s *sink) State(f, a string, e map[string]any)                       { s.st
 
 func (s *sink) Fatal(f string, a string, e map[string]any) {
 	s.Alert(EMERG, f, a, e)
+	time.Sleep(time.Second) // give log entry the chance to flush
 	log.Fatal(fmt.Sprint(f, a, e))
 }
 
