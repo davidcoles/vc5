@@ -32,9 +32,22 @@ type Balancer struct {
 }
 
 //func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
-func (b *Balancer) Stats() (vc5.Summary, map[vc5.Instance]vc5.Stats) {
-	stats := map[vc5.Instance]vc5.Stats{}
+func (b *Balancer) Stats() (summary vc5.Summary, stats map[vc5.Instance]vc5.Stats) {
 
+	info := b.Client.Info()
+	summary.Latency = info.Latency
+	summary.Dropped = info.Dropped
+	summary.Blocked = info.Blocked
+	summary.NotQueued = info.NotQueued
+	summary.IngressOctets = info.Octets
+	summary.IngressPackets = info.Packets
+	summary.EgressOctets = 0  // Not available in DSR
+	summary.EgressPackets = 0 // Not available in DSR
+	summary.Flows = info.Flows
+	summary.DSR = true
+	summary.VC5 = true
+
+	stats = map[vc5.Instance]vc5.Stats{}
 	services, _ := b.Client.Services()
 
 	for _, s := range services {
@@ -63,24 +76,6 @@ func (b *Balancer) Stats() (vc5.Summary, map[vc5.Instance]vc5.Stats) {
 			}
 		}
 	}
-
-	return b.summary(), stats
-}
-
-func (b *Balancer) summary() (summary vc5.Summary) {
-	info := b.Client.Info()
-	summary.Latency = info.Latency
-	summary.Dropped = info.Dropped
-	summary.Blocked = info.Blocked
-	summary.NotQueued = info.NotQueued
-	summary.IngressOctets = info.Octets
-	summary.IngressPackets = info.Packets
-	summary.EgressOctets = 0  // Not available in DSR
-	summary.EgressPackets = 0 // Not available in DSR
-	summary.Flows = info.Flows
-
-	summary.DSR = true
-	summary.VC5 = true
 
 	return
 }
