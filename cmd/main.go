@@ -38,22 +38,22 @@ func main() {
 
 	const FACILITY = "vc5"
 
-	// commonly used flags
+	// XVS specific
 	learn := flag.Uint("l", 0, "Learn; wait for this many seconds before advertising VIPs (for multicast flow state adverts)")
-	listen := flag.Bool("b", false, "Enable BGP listener on port 179")
 	native := flag.Bool("n", false, "Use native mode XDP; better performance on network cards that support it")
-	hostid := flag.String("i", "", "Host ID for logging")
-	webroot := flag.String("r", "", "Webserver root directory to override built-in documents")
 	multicast := flag.String("m", "", "Multicast address used to share flow state between instances")
-	webserver := flag.String("w", ":80", "Webserver listen address")
-
-	// somewhat more esoteric options
-	asn := flag.Uint("A", 0, "Autonomous System Number to enable loopback BGP")
-	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
 	flows := flag.Uint("F", 0, "Set maximum number of flows (per-core)")
+	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
 	cmd_path := flag.String("C", "", "Command channel path")
+
+	// common with stayinalived
+	listen := flag.Bool("b", false, "Enable BGP listener on port 179")
+	webroot := flag.String("r", "", "Webserver root directory to override built-in documents")
+	webserver := flag.String("w", ":80", "Webserver listen address")
+	asn := flag.Uint("A", 0, "Autonomous System Number to enable loopback BGP")
 	hardfail := flag.Bool("H", false, "Hard fail on balancer configuration error")
-	closeidle := flag.Bool("I", false, "Close idle HTTP connections")
+	closeidle := flag.Bool("c", false, "Close idle HTTP connections")
+	hostid := flag.String("I", "", "Host ID for logging")
 
 	// Best not to mess with these
 	socket := flag.String("S", "/var/run/vc5ns", "Socket for communication with proxy in network namespace")
