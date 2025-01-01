@@ -1,0 +1,39 @@
+
+services:
+
+  - name: services02-1
+    description: Four webservers
+    virtual: 192.168.123.45
+    servers:
+      - 10.1.2.100
+      - 10.1.2.101
+      - 10.1.2.102
+      - 10.1.2.103      
+    policy:
+      http:
+      https:
+
+  - name: services02-2
+    description: Four other webservers with a different VIP
+    virtual: 192.168.123.67
+    servers:
+      - 10.1.3.100
+      - 10.1.3.101
+      - 10.1.3.102
+      - 10.1.3.103      
+    policy:
+      http:
+      https:
+
+  - name: services02-3
+    description: Two servers disabled
+    virtual: 192.168.123.89
+    servers:
+      - 10.1.4.100*
+      - 10.1.4.101*
+      - 10.1.4.102
+      - 10.1.4.103      
+    policy:
+      http:
+      https:
+        

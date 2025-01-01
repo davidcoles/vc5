@@ -1,0 +1,508 @@
+{
+   "bgp" : {},
+   "services" : {
+      "192.168.123.45:109:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:109" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:109" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:109" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:109" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:110:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:110" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:110" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:110" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:110" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:143:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:143" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:143" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:143" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:143" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:22:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:22" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:22" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:22" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:22" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:23:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:23" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:23" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:23" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:23" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:25:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:25" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:25" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:25" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:25" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:443:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:53:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:53" : {
+               "checks" : [
+                  {
+                     "method" : "tcp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:53" : {
+               "checks" : [
+                  {
+                     "method" : "tcp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:53" : {
+               "checks" : [
+                  {
+                     "method" : "tcp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:53" : {
+               "checks" : [
+                  {
+                     "method" : "tcp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:53:udp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:53" : {
+               "checks" : [
+                  {
+                     "method" : "udp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:53" : {
+               "checks" : [
+                  {
+                     "method" : "udp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:53" : {
+               "checks" : [
+                  {
+                     "method" : "udp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:53" : {
+               "checks" : [
+                  {
+                     "method" : "udp",
+                     "type" : "dns"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:80:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.45:993:tcp" : {
+         "description" : "Basic named services example",
+         "name" : "services01",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:993" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:993" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:993" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:993" : {
+               "checks" : [
+                  {
+                     "type" : "syn"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      }
+   }
+}

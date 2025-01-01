@@ -1,0 +1,22 @@
+
+services:
+
+  - name: services01
+    description: Basic named services example
+    virtual: 192.168.123.45
+    servers:
+      - 10.1.2.100
+      - 10.1.2.101
+      - 10.1.2.102
+      - 10.1.2.103      
+    policy:
+      http:
+      https:
+      domain:
+      smtp:
+      ssh:
+      telnet:
+      pop2:
+      pop3:
+      imap:
+      imaps:
