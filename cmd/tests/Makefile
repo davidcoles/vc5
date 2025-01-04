@@ -9,8 +9,8 @@ services: $(SERVICES)
 bgp:	  $(BGP)
 
 
-%.test:; ../config.pl $*.yaml | ./compare.pl $*.json
+%.test:; ../config.pl -n $*.yaml | ./compare.pl $*.json
 ref:; for json in $$(ls *.yaml | sed 's/yaml$$/json/'); do $(MAKE) $$json; done
-%.json: %.yaml; ../config.pl $< > $@- && mv $@- $@
+%.json: %.yaml; ../config.pl -n $< > $@- && mv $@- $@
 reset:; rm -f -- *.json
 

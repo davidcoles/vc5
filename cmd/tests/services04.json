@@ -1,0 +1,127 @@
+{
+   "bgp" : {},
+   "services" : {
+      "192.168.123.1:80:tcp" : {
+         "description" : "Map service port to different port on real servers (NAT)",
+         "name" : "services04-1",
+         "need" : 1,
+         "reals" : {
+            "10.1.1.100:8080" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.101:8080" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.102:8080" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.103:8080" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "scheduler" : "roundrobin",
+         "sticky" : false
+      },
+      "192.168.123.2:80:tcp" : {
+         "description" : "Disable all health checks for service",
+         "name" : "services04-2",
+         "need" : 1,
+         "reals" : {
+            "10.1.2.100:80" : {
+               "checks" : [],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.101:80" : {
+               "checks" : [],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.102:80" : {
+               "checks" : [],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.2.103:80" : {
+               "checks" : [],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "scheduler" : "roundrobin",
+         "sticky" : false
+      },
+      "192.168.123.3:80:tcp" : {
+         "description" : "Specify a different scheduler with sticky and reset - to prevent IPVS sending sticky sessions dead servers",
+         "name" : "services04-4",
+         "need" : 1,
+         "reals" : {
+            "10.1.4.100:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.4.101:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.4.102:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.4.103:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : true,
+         "scheduler" : "maglev",
+         "sticky" : true
+      }
+   }
+}

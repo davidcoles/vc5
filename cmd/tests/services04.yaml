@@ -1,0 +1,52 @@
+scheduler: roundrobin
+
+services:
+
+  - name: services04-1
+    description: Map service port to different port on real servers (NAT)
+    virtual: 192.168.123.1
+    servers:
+      - 10.1.1.100
+      - 10.1.1.101
+      - 10.1.1.102
+      - 10.1.1.103      
+    policy:
+      http: 8080
+
+  - name: services04-2
+    description: Disable all health checks for service
+    virtual: 192.168.123.2
+    servers:
+      - 10.1.2.100
+      - 10.1.2.101
+      - 10.1.2.102
+      - 10.1.2.103      
+    policy:
+      http*:
+      
+  - name: services04-3
+    description: Specify a different scheduler
+    virtual: 192.168.123.3
+    servers:
+      - 10.1.3.100
+      - 10.1.3.101
+      - 10.1.3.102
+      - 10.1.3.103
+    scheduler: leastconn
+    policy:
+      http:
+
+  - name: services04-4
+    description: Specify a different scheduler with sticky and reset - to prevent IPVS sending sticky sessions dead servers
+    virtual: 192.168.123.3
+    servers:
+      - 10.1.4.100
+      - 10.1.4.101
+      - 10.1.4.102
+      - 10.1.4.103
+    scheduler: maglev
+    sticky: true
+    reset: true
+    policy:
+      http:
+        

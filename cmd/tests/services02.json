@@ -1,9 +1,99 @@
 {
    "bgp" : {},
    "services" : {
-      "192.168.123.45:443:tcp" : {
+      "192.168.123.1:443:tcp" : {
          "description" : "Four webservers",
          "name" : "services02-1",
+         "need" : 1,
+         "reals" : {
+            "10.1.1.100:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.101:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.102:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.103:443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.1:80:tcp" : {
+         "description" : "Four webservers",
+         "name" : "services02-1",
+         "need" : 1,
+         "reals" : {
+            "10.1.1.100:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.101:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.102:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.1.103:80" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            }
+         },
+         "reset" : false,
+         "sticky" : false
+      },
+      "192.168.123.2:443:tcp" : {
+         "description" : "Four other webservers with a different VIP",
+         "name" : "services02-2",
          "need" : 1,
          "reals" : {
             "10.1.2.100:443" : {
@@ -46,9 +136,9 @@
          "reset" : false,
          "sticky" : false
       },
-      "192.168.123.45:80:tcp" : {
-         "description" : "Four webservers",
-         "name" : "services02-1",
+      "192.168.123.2:80:tcp" : {
+         "description" : "Four other webservers with a different VIP",
+         "name" : "services02-2",
          "need" : 1,
          "reals" : {
             "10.1.2.100:80" : {
@@ -91,9 +181,9 @@
          "reset" : false,
          "sticky" : false
       },
-      "192.168.123.67:443:tcp" : {
-         "description" : "Four other webservers with a different VIP",
-         "name" : "services02-2",
+      "192.168.123.3:443:tcp" : {
+         "description" : "Two servers disabled",
+         "name" : "services02-3",
          "need" : 1,
          "reals" : {
             "10.1.3.100:443" : {
@@ -102,8 +192,8 @@
                      "type" : "https"
                   }
                ],
-               "disabled" : false,
-               "weight" : 1
+               "disabled" : true,
+               "weight" : 0
             },
             "10.1.3.101:443" : {
                "checks" : [
@@ -111,8 +201,8 @@
                      "type" : "https"
                   }
                ],
-               "disabled" : false,
-               "weight" : 1
+               "disabled" : true,
+               "weight" : 0
             },
             "10.1.3.102:443" : {
                "checks" : [
@@ -136,9 +226,9 @@
          "reset" : false,
          "sticky" : false
       },
-      "192.168.123.67:80:tcp" : {
-         "description" : "Four other webservers with a different VIP",
-         "name" : "services02-2",
+      "192.168.123.3:80:tcp" : {
+         "description" : "Two servers disabled",
+         "name" : "services02-3",
          "need" : 1,
          "reals" : {
             "10.1.3.100:80" : {
@@ -147,8 +237,8 @@
                      "type" : "http"
                   }
                ],
-               "disabled" : false,
-               "weight" : 1
+               "disabled" : true,
+               "weight" : 0
             },
             "10.1.3.101:80" : {
                "checks" : [
@@ -156,8 +246,8 @@
                      "type" : "http"
                   }
                ],
-               "disabled" : false,
-               "weight" : 1
+               "disabled" : true,
+               "weight" : 0
             },
             "10.1.3.102:80" : {
                "checks" : [
@@ -181,42 +271,42 @@
          "reset" : false,
          "sticky" : false
       },
-      "192.168.123.89:443:tcp" : {
+      "HTTP/HTTPS checks for services not running on default ports:8080:tcp" : {
          "description" : "Two servers disabled",
-         "name" : "services02-3",
+         "name" : "services02-4",
          "need" : 1,
          "reals" : {
-            "10.1.4.100:443" : {
+            "10.1.3.100:8080" : {
                "checks" : [
                   {
-                     "type" : "https"
-                  }
-               ],
-               "disabled" : true,
-               "weight" : 0
-            },
-            "10.1.4.101:443" : {
-               "checks" : [
-                  {
-                     "type" : "https"
-                  }
-               ],
-               "disabled" : true,
-               "weight" : 0
-            },
-            "10.1.4.102:443" : {
-               "checks" : [
-                  {
-                     "type" : "https"
+                     "type" : "http"
                   }
                ],
                "disabled" : false,
                "weight" : 1
             },
-            "10.1.4.103:443" : {
+            "10.1.3.101:8080" : {
                "checks" : [
                   {
-                     "type" : "https"
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.3.102:8080" : {
+               "checks" : [
+                  {
+                     "type" : "http"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.3.103:8080" : {
+               "checks" : [
+                  {
+                     "type" : "http"
                   }
                ],
                "disabled" : false,
@@ -226,42 +316,42 @@
          "reset" : false,
          "sticky" : false
       },
-      "192.168.123.89:80:tcp" : {
+      "HTTP/HTTPS checks for services not running on default ports:8443:tcp" : {
          "description" : "Two servers disabled",
-         "name" : "services02-3",
+         "name" : "services02-4",
          "need" : 1,
          "reals" : {
-            "10.1.4.100:80" : {
+            "10.1.3.100:8443" : {
                "checks" : [
                   {
-                     "type" : "http"
-                  }
-               ],
-               "disabled" : true,
-               "weight" : 0
-            },
-            "10.1.4.101:80" : {
-               "checks" : [
-                  {
-                     "type" : "http"
-                  }
-               ],
-               "disabled" : true,
-               "weight" : 0
-            },
-            "10.1.4.102:80" : {
-               "checks" : [
-                  {
-                     "type" : "http"
+                     "type" : "https"
                   }
                ],
                "disabled" : false,
                "weight" : 1
             },
-            "10.1.4.103:80" : {
+            "10.1.3.101:8443" : {
                "checks" : [
                   {
-                     "type" : "http"
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.3.102:8443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
+                  }
+               ],
+               "disabled" : false,
+               "weight" : 1
+            },
+            "10.1.3.103:8443" : {
+               "checks" : [
+                  {
+                     "type" : "https"
                   }
                ],
                "disabled" : false,

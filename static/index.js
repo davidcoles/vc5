@@ -318,7 +318,7 @@ var lastlog = 0;
 function lb() {
     
     //var url = window.location.href + 'stats.json';
-    var url = '/status.json';
+    var url = '/status.json.gz';
     var log = '/log/';    
     //var log = window.location.href + 'log/';    
 

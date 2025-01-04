@@ -19,6 +19,8 @@
 package vc5
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -304,6 +306,26 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 		w.Header().Set("Content-Type", "application/json")
 		js = append(js, 0x0a) // add a newline
 		w.Write(js)
+	})
+
+	http.HandleFunc("/status.json.gz", func(w http.ResponseWriter, r *http.Request) {
+		js, err := m.JSONStatus()
+
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		js = append(js, 0x0a) // add a newline
+
+		var b bytes.Buffer
+		gz := gzip.NewWriter(&b)
+		gz.Write(js)
+		gz.Close()
+
+		w.Write(b.Bytes())
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
