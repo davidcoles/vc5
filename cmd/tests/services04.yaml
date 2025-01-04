@@ -37,7 +37,7 @@ services:
       http:
 
   - name: services04-4
-    description: Specify a different scheduler with sticky and reset - to prevent IPVS sending sticky sessions dead servers
+    description: Specify a different scheduler with sticky and reset - to prevent IPVS sending sticky sessions to dead servers
     virtual: 192.168.123.3
     servers:
       - 10.1.4.100

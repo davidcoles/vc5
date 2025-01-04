@@ -78,7 +78,7 @@
          "sticky" : false
       },
       "192.168.123.3:80:tcp" : {
-         "description" : "Specify a different scheduler with sticky and reset - to prevent IPVS sending sticky sessions dead servers",
+         "description" : "Specify a different scheduler with sticky and reset - to prevent IPVS sending sticky sessions to dead servers",
          "name" : "services04-4",
          "need" : 1,
          "reals" : {
