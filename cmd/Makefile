@@ -2,7 +2,7 @@
 # specify the path like so:
 # CGO_CFLAGS=-I/path/to/libbpf CGO_LDFLAGS=-L/path/to/libbpf go build
 
-BPFVER ?= v1.4.6
+BPFVER ?= v1.5.0
 LIBBPF ?= $(PWD)/libbpf
 GOLANG ?= 1.21
 

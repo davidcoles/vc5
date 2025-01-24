@@ -8,16 +8,9 @@ A horizontally scalable Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
-If you think that this may be useful and have any
+If you think that this may be useful or have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
-raise a GitHub issue.
-
-## NB:
-
-In a hopefully final bout of capriciousness I have put the primary
-IPv4 address back as the mandatory first command line argument. Other
-parameters which cannot be changed after initialisation have been
-removed from the config file and are now flags.
+raise a GitHub issue (or if you're going to [FOSDEM 2025](https://fosdem.org/2025/)).
 
 ## Quickstart
 
