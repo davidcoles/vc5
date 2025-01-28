@@ -46,6 +46,8 @@ func main() {
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
 	cmd_path := flag.String("C", "", "Command channel path")
 
+	too_big := flag.Bool("toobig", false, "Enable handling of ICMP destination unreachable/fragmentation required - experimental")
+
 	// common with stayinalived
 	listen := flag.Bool("b", false, "Enable BGP listener on port 179")
 	webroot := flag.String("r", "", "Webserver root directory to override built-in documents")
@@ -157,6 +159,7 @@ func main() {
 		NAT:        true,
 		Debug:      &Debug{Log: logs.Sub("xvs")},
 		MaxFlows:   uint32(*flows),
+		Frags:      *too_big,
 	}
 
 	if err = client.Start(); err != nil {

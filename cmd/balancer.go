@@ -38,6 +38,7 @@ func (b *Balancer) Stats() (summary vc5.Summary, stats map[vc5.Instance]vc5.Stat
 	summary.Latency = info.Latency
 	summary.Dropped = info.Dropped
 	summary.Blocked = info.Blocked
+	summary.TooBig = info.TooBig
 	summary.NotQueued = info.NotQueued
 	summary.IngressOctets = info.Octets
 	summary.IngressPackets = info.Packets

@@ -35,6 +35,7 @@ func Prometheus(p string, services servicemap, summary Summary, vips map[netip.A
 	r = append(r, fmt.Sprintf(p+`_latency %d`, summary.Latency))
 	r = append(r, fmt.Sprintf(p+`_sessions %d`, summary.Current))
 	r = append(r, fmt.Sprintf(p+`_session_total %d`, summary.Flows))
+	r = append(r, fmt.Sprintf(p+`_toobig %d`, summary.TooBig))
 	r = append(r, fmt.Sprintf(p+`_rx_packets %d`, summary.IngressPackets))
 	r = append(r, fmt.Sprintf(p+`_rx_octets %d`, summary.IngressOctets))
 	r = append(r, fmt.Sprintf(p+`_tx_packets %d`, summary.EgressPackets))

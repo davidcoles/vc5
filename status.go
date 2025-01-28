@@ -87,28 +87,32 @@ type Stats struct {
 }
 
 type Summary struct {
-	Uptime             uint64 `json:"uptime"`
-	Latency            uint64 `json:"latency_ns"`
+	Uptime  uint64 `json:"uptime"`
+	Latency uint64 `json:"latency_ns"`
+	Current uint64 `json:"current"`
+
 	Dropped            uint64 `json:"dropped"`
-	Blocked            uint64 `json:"blocked"`
-	NotQueued          uint64 `json:"notqueued"`
 	DroppedPerSecond   uint64 `json:"dropped_per_second"`
+	Blocked            uint64 `json:"blocked"`
 	BlockedPerSecond   uint64 `json:"blocked_per_second"`
+	NotQueued          uint64 `json:"notqueued"`
 	NotQueuedPerSecond uint64 `json:"notqueued_per_second"`
+	TooBig             uint64 `json:"toobig"`
+	TooBigPerSecond    uint64 `json:"toobig_per_second"`
 
 	IngressOctets           uint64 `json:"ingress_octets"`
-	IngressPackets          uint64 `json:"ingress_packets"`
-	Flows                   uint64 `json:"flows"`
-	Current                 uint64 `json:"current"`
 	IngressOctetsPerSecond  uint64 `json:"ingress_octets_per_second"`
+	IngressPackets          uint64 `json:"ingress_packets"`
 	IngressPacketsPerSecond uint64 `json:"ingress_packets_per_second"`
+	Flows                   uint64 `json:"flows"`
 	FlowsPerSecond          uint64 `json:"flows_per_second"`
 	EgressOctets            uint64 `json:"egress_octets"`
-	EgressPackets           uint64 `json:"egress_packets"`
 	EgressOctetsPerSecond   uint64 `json:"egress_octets_per_second"`
+	EgressPackets           uint64 `json:"egress_packets"`
 	EgressPacketsPerSecond  uint64 `json:"egress_packets_per_second"`
-	DSR                     bool   `json:"dsr"`
-	VC5                     bool   `json:"vc5"`
+
+	DSR bool `json:"dsr"`
+	VC5 bool `json:"vc5"`
 
 	time time.Time
 }
@@ -245,6 +249,7 @@ func (s *Summary) Update(n Summary, start time.Time) {
 			s.DroppedPerSecond = (1000 * (s.Dropped - o.Dropped)) / diff
 			s.BlockedPerSecond = (1000 * (s.Blocked - o.Blocked)) / diff
 			s.NotQueuedPerSecond = (1000 * (s.NotQueued - o.NotQueued)) / diff
+			s.TooBigPerSecond = (1000 * (s.TooBig - o.TooBig)) / diff
 
 			s.IngressPacketsPerSecond = (1000 * (s.IngressPackets - o.IngressPackets)) / diff
 			s.IngressOctetsPerSecond = (1000 * (s.IngressOctets - o.IngressOctets)) / diff

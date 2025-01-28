@@ -3,7 +3,7 @@ module main
 go 1.19
 
 require (
-	github.com/davidcoles/xvs v0.1.16
+	github.com/davidcoles/xvs v0.1.18
 	vc5 v0.0.0
 )
 
@@ -15,3 +15,4 @@ require (
 replace vc5 => ../.
 
 //replace github.com/davidcoles/cue => ../../cue
+//replace github.com/davidcoles/xvs => ../../xvs
