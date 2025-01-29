@@ -6,5 +6,7 @@ github.com/davidcoles/xvs v0.1.17 h1:zdqzOZJmC9CfcFrYcsfC/ial1PQK7hxko9Itsk/1VCM
 github.com/davidcoles/xvs v0.1.17/go.mod h1:NQg6Ob9zLr49qH3I6E6zqnGp4tVBu4cT/3vXUB2XA8w=
 github.com/davidcoles/xvs v0.1.18 h1:TRtbtkK1lJXnwtr67nMnkcIVgPz8rg4lsPt4Ve4l4Xk=
 github.com/davidcoles/xvs v0.1.18/go.mod h1:NQg6Ob9zLr49qH3I6E6zqnGp4tVBu4cT/3vXUB2XA8w=
+github.com/davidcoles/xvs v0.1.19 h1:HhsbgJQGFPizgg0Bg2htv2wSCZltSk5y/6qgx5y16n4=
+github.com/davidcoles/xvs v0.1.19/go.mod h1:NQg6Ob9zLr49qH3I6E6zqnGp4tVBu4cT/3vXUB2XA8w=
 github.com/elastic/go-elasticsearch/v7 v7.17.10 h1:TCQ8i4PmIJuBunvBS6bwT2ybzVFxxUhhltAs3Gyu1yo=
 github.com/elastic/go-elasticsearch/v7 v7.17.10/go.mod h1:OJ4wdbtDNk5g503kvlHLyErCgQwwzmDtaFC4XyOxXA4=
