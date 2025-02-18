@@ -247,3 +247,43 @@ GIHikRcYWeXTYW7veewK5Ss=
 -----END PGP PUBLIC KEY BLOCK-----
 EOF
 
+
+
+Foo-over-UDP aplication server setup:
+
+/etc/networkd-dispatcher/routable.d/50-ifup-hooks:
+#!/bin/sh
+ip fou add port 9999 ipproto 4
+ip link set dev tunl0 up
+sysctl -w net.ipv4.conf.tunl0.rp_filter=0
+sysctl -w net.ipv4.conf.all.rp_filter=0
+
+/etc/modules:
+fou
+ipip
+
+
+CHEETAH: https://www.usenix.org/system/files/nsdi20-paper-barbette.pdf
+https://blog.cloudflare.com/high-availability-load-balancers-with-maglev/
+https://blog.cloudflare.com/path-mtu-discovery-in-practice/
+
+https://datatracker.ietf.org/doc/html/draft-jaeggli-v6ops-pmtud-ecmp-problem-00
+https://www.ietf.org/rfc/rfc4821.txt
+
+https://github.com/netprickle/ipipou
+https://developers.redhat.com/blog/2019/05/17/an-introduction-to-linux-virtual-interfaces-tunnels#
+https://serverfault.com/questions/1167848/building-a-gre-tunnel-with-netplan
+https://www.redhat.com/en/blog/what-geneve
+https://www.iana.org/assignments/iana-ipv6-special-registry/iana-ipv6-special-registry.xhtml
+
+https://fedepaol.github.io/blog/2023/09/06/ebpf-journey-by-examples-l4-load-balancing-with-xdp-and-katran/
+https://github.com/fedepaol/ebpfexamples/tree/main/xdpkatransample
+
+https://www.datadoghq.com/blog/xdp-intro/
+https://www.mankier.com/8/xdpdump
+
+https://fedepaol.github.io/blog/2023/09/11/xdp-ate-my-packets-and-how-i-debugged-it/
+https://lore.kernel.org/xdp-newbies/eeb4f9da-d896-0806-80a6-c8ca3f7a285b@gmail.com/T/
+
+https://medium.com/swlh/building-a-xdp-express-data-path-based-peering-router-20db4995da66
+https://patchwork.ozlabs.org/project/netdev/patch/20180425183449.25134-9-dsahern@gmail.com/

@@ -46,7 +46,9 @@ func main() {
 	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
 	cmd_path := flag.String("C", "", "Command channel path")
 
-	too_big := flag.Bool("toobig", false, "Enable handling of ICMP destination unreachable/fragmentation required - experimental")
+	//too_big := flag.Bool("toobig", false, "Enable handling of ICMP destination unreachable/fragmentation required - experimental")
+	flag.Bool("toobig", false, "Enable handling of ICMP destination unreachable/fragmentation required - experimental, deprecated")
+	nounreach := flag.Bool("nounreach", false, "Disable handling of ICMP destination unreachable/fragmentation")
 
 	// common with stayinalived
 	listen := flag.Bool("b", false, "Enable BGP listener on port 179")
@@ -159,7 +161,8 @@ func main() {
 		NAT:        true,
 		Debug:      &Debug{Log: logs.Sub("xvs")},
 		MaxFlows:   uint32(*flows),
-		Frags:      *too_big,
+		//Frags:      *too_big,
+		NoUnreach: *nounreach,
 	}
 
 	if err = client.Start(); err != nil {

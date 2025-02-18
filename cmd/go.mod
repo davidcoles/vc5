@@ -3,7 +3,7 @@ module main
 go 1.19
 
 require (
-	github.com/davidcoles/xvs v0.1.19
+	github.com/davidcoles/xvs v0.1.20
 	vc5 v0.0.0
 )
 
