@@ -32,7 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davidcoles/cue/bgp"
+	"github.com/davidcoles/bgp"
 )
 
 const (

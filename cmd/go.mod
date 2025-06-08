@@ -10,9 +10,18 @@ require (
 	vc5 v0.0.0
 )
 
-require github.com/elastic/go-elasticsearch/v7 v7.17.10 // indirect
+require (
+	github.com/davidcoles/bgp v0.0.4 // indirect
+	github.com/elastic/go-elasticsearch/v7 v7.17.10 // indirect
+)
+
+//require (
+//	github.com/davidcoles/bgp v0.0.3 // indirect
+//	github.com/elastic/go-elasticsearch/v7 v7.17.10 // indirect
+//)
 
 replace vc5 => ../.
 
 //replace github.com/davidcoles/cue => ../../cue
 //replace github.com/davidcoles/xvs => ../../xvs
+//replace github.com/davidcoles/bgp => ../../bgp

@@ -31,8 +31,8 @@ import (
 	"strconv"
 	//"time"
 
+	"github.com/davidcoles/bgp"
 	"github.com/davidcoles/cue"
-	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/cue/mon"
 )
 

@@ -1,3 +1,5 @@
+github.com/davidcoles/bgp v0.0.4 h1:K63kH+vnDnFFrhKqftekNELB1C4lOxxmmXFzlJKI5VA=
+github.com/davidcoles/bgp v0.0.4/go.mod h1:d9tqNdWCrF0N8LWfOEqrA/GSeMj/XycB60WBZ4uDvEo=
 github.com/davidcoles/cue v0.1.4 h1:KrH2hhOLwVKxbEkQL0a6zjXhwZSCzyt0vkRkq0fO7ZM=
 github.com/davidcoles/cue v0.1.4/go.mod h1:26FTBytVHJ1XQWOGC+Cfnx4Q9xV8k1xr6K5uZ7s/EBw=
 github.com/davidcoles/xvs v0.2.2 h1:1fDd22WwD1KEhbtGKN7bV1+zRqqaipfizHH1KDD2DnA=

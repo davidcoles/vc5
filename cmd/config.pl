@@ -523,8 +523,10 @@ sub params {
     $p{'hold_time'} = $o->{'hold_time'}+0 if defined $o->{'hold_time'};
     $p{'local_pref'} = $o->{'local_pref'}+0 if defined $o->{'local_pref'};
     $p{'med'} = $o->{'med'}+0 if defined $o->{'med'};
-    $p{'multiprotocol'} = $TRUE;
-    $p{'next_hop_6'} = "fd6e:eec8:76ac:ac1d:100::7";
+    if (defined $o->{'next_hop_6'}) {
+	$p{'multiprotocol'} = $TRUE;
+	$p{'next_hop_6'} = $o->{'next_hop_6'};
+    }
     return \%p;
 }
 

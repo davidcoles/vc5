@@ -242,18 +242,17 @@ func main() {
 	// The manager handles the main event loop, healthchecks, requests
 	// for the console/metrics, sets up BGP sessions, etc.
 	manager := vc5.Manager{
-		Balancer: balancer,
-		Logs:     logs,
-		Learn:    *learn,                  // Number of seconds to wait before advertising any VIPs
-		NAT:      nat(client),             // We use a NAT method and a custom probe function
-		Prober:   prober(client, monitor), // to run checks from the inside network namespace
-		//Prober:      prober(client, *socket), // to run checks from the inside network namespace
-		RouterID:    routerID,     // BGP router ID to use to speak to peers
-		WebRoot:     *webroot,     // Serve static files from this directory
-		WebListener: webListener,  // Listen for incoming web connections if not nil
-		BGPLoopback: uint16(*asn), // If non-zero then loopback BGP is enabled
-		Interval:    2,            // Delay in seconds between updating statistics
-		HardFail:    *hardfail,    // Exit if apply (not load) of config fails, when set
+		Balancer:    balancer,
+		Logs:        logs,
+		Learn:       *learn,                  // Number of seconds to wait before advertising any VIPs
+		NAT:         nat(client),             // We use a NAT method and a custom probe function
+		Prober:      prober(client, monitor), // to run checks from the inside network namespace
+		RouterID:    routerID,                // BGP router ID to use to speak to peers
+		WebRoot:     *webroot,                // Serve static files from this directory
+		WebListener: webListener,             // Listen for incoming web connections if not nil
+		BGPLoopback: uint16(*asn),            // If non-zero then loopback BGP is enabled
+		Interval:    2,                       // Delay in seconds between updating statistics
+		HardFail:    *hardfail,               // Exit if apply (not load) of config fails, when set
 	}
 
 	if err := manager.Manage(ctx, config); err != nil {
