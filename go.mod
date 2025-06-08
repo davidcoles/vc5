@@ -8,3 +8,4 @@ require (
 )
 
 //replace github.com/davidcoles/cue => ../cue
+//replace github.com/davidcoles/bgp => ../bgp

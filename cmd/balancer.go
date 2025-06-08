@@ -20,31 +20,35 @@ package main
 
 import (
 	"errors"
+	"net"
 
+	"github.com/davidcoles/xvs"
 	"vc5"
 )
 
 // Implement the vc5.Balancer interface; used to retrieve stats and configure the data-plane
 
 type Balancer struct {
-	Client *Client
+	Client Client
 	Logger vc5.Logger
+	tunnel xvs.TunnelType
 }
 
-//func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
+// func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
 func (b *Balancer) Stats() (summary vc5.Summary, stats map[vc5.Instance]vc5.Stats) {
 
-	info := b.Client.Info()
+	info, _ := b.Client.Info()
 	summary.Latency = info.Latency
-	summary.Dropped = info.Dropped
-	summary.Blocked = info.Blocked
-	summary.TooBig = info.TooBig
-	summary.NotQueued = info.NotQueued
-	summary.IngressOctets = info.Octets
-	summary.IngressPackets = info.Packets
-	summary.EgressOctets = 0  // Not available in DSR
-	summary.EgressPackets = 0 // Not available in DSR
-	summary.Flows = info.Flows
+	//summary.Dropped = info.Dropped
+	//summary.Blocked = info.Blocked
+	//summary.TooBig = info.TooBig
+	//summary.NotQueued = info.NotQueued
+	summary.IngressOctets = info.Stats.Octets
+	summary.IngressPackets = info.Stats.Packets
+	//summary.EgressOctets = 0  // Not available in DSR
+	//summary.EgressPackets = 0 // Not available in DSR
+	summary.Flows = info.Stats.Flows
+	summary.Current = info.Stats.Current
 	summary.DSR = true
 	summary.VC5 = true
 
@@ -73,7 +77,7 @@ func (b *Balancer) Stats() (summary vc5.Summary, stats map[vc5.Instance]vc5.Stat
 				EgressPackets:  0, // Not available in DSR
 				Flows:          d.Stats.Flows,
 				Current:        d.Stats.Current,
-				MAC:            d.MAC.String(),
+				MAC:            net.HardwareAddr(d.MAC[:]).String(),
 			}
 		}
 	}
@@ -111,15 +115,22 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 
 	// for each desired service create the necessary xvs configuration (service description and list of backends) and apply:
 	for _, s := range services {
-		service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol), Sticky: s.Sticky}
+		//service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol), Sticky: s.Sticky}
+		service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
+
+		if s.Sticky {
+			service.Flags |= xvs.Sticky
+		}
 
 		var dsts []Destination
 
 		for _, d := range s.Destinations {
 			if d.Port == s.Port {
 				dsts = append(dsts, Destination{
-					Address: d.Address,
-					Weight:  d.HealthyWeight(),
+					Address:    d.Address,
+					Disable:    d.HealthyWeight() == 0,
+					TunnelType: b.tunnel,
+					TunnelPort: 666,
 				})
 			}
 		}

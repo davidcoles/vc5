@@ -129,7 +129,7 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 		routerID = [4]byte{127, 0, 0, 1} // no sensible BGP daemon would ever use this, surely!
 	}
 
-	m.pool = bgp.NewPool(routerID, m.config.Bgp(m.BGPLoopback, false), nil, m.Logs.Sub("bgp"))
+	m.pool = bgp.NewPool(routerID, m.config.Bgp(m.BGPLoopback, true), nil, m.Logs.Sub("bgp"))
 
 	if m.pool == nil {
 		return fmt.Errorf("BGP pool fail")

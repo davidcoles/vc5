@@ -83,10 +83,19 @@ type services map[Service]ServiceDefinition
 // Load balancer configuration
 type Config struct {
 	Services services                  `json:"services,omitempty"`
-	VLANs    map[uint16]Prefix         `json:"vlans,omitempty"` // VLAN ID to subnet mappings
-	BGP      map[string]bgp.Parameters `json:"bgp,omitempty"`   // BGP peers
+	VLANs    map[uint16]netip.Prefix   `json:"vlans,omitempty"`  // VLAN ID to subnet mappings
+	VLANs6   map[uint16]netip.Prefix   `json:"vlans6,omitempty"` // VLAN ID to subnet mappings
+	BGP      map[string]bgp.Parameters `json:"bgp,omitempty"`    // BGP peers
 	//Learn    time.Duration             `json:"learn,omitempty"`
 	Logging Logging_ `json:"logging,omitempty"`
+}
+
+func (c *Config) Prefixes() map[uint16]netip.Prefix {
+	return c.VLANs
+}
+
+func (c *Config) Prefixes6() map[uint16]netip.Prefix {
+	return c.VLANs6
 }
 
 func (c *Config) LoggingConfig() Logging {
@@ -101,6 +110,7 @@ func (c *Config) Bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 	return c.BGP
 }
 
+/*
 func (c *Config) Vlans() map[uint16]net.IPNet {
 	ret := map[uint16]net.IPNet{}
 
@@ -109,7 +119,8 @@ func (c *Config) Vlans() map[uint16]net.IPNet {
 	}
 
 	return ret
-}
+    }
+*/
 
 func (c *Config) Priorities() map[netip.Addr]priority {
 
@@ -158,25 +169,29 @@ func Load(file string) (*Config, error) {
 		return nil, err
 	}
 
-	if len(config.VLANs) != 0 {
-		for _, s := range config.Services {
-			for d, _ := range s.Destinations {
+	// we now do layer 3 tunnels, so backends don't need to be a local VLAN
+	/*
+		if len(config.VLANs) != 0 {
+			for _, s := range config.Services {
+				for d, _ := range s.Destinations {
 
-				var ok bool
 
-				for _, p := range config.VLANs {
-					if p.Contains(d.Address) {
-						ok = true
+					var ok bool
+
+					for _, p := range config.VLANs {
+						if p.Contains(d.Address) {
+							ok = true
+						}
 					}
-				}
 
-				if !ok {
-					return nil, fmt.Errorf("Destination server %s is not in a declared VLAN", d.Address)
-				}
+					if !ok {
+						return nil, fmt.Errorf("Destination server %s is not in a declared VLAN", d.Address)
+					}
 
+				}
 			}
 		}
-	}
+	*/
 
 	return &config, nil
 }
@@ -210,15 +225,16 @@ func (p *Prefix) UnmarshalJSON(data []byte) error {
 
 	cidr := string(data[1 : l-1])
 
-	ip, ipnet, err := net.ParseCIDR(cidr)
+	//ip, ipnet, err := net.ParseCIDR(cidr)
+	_, ipnet, err := net.ParseCIDR(cidr)
 
 	if err != nil {
 		return err
 	}
 
-	if ip.String() != ipnet.IP.String() {
-		return errors.New("CIDR address contains host portion: " + cidr)
-	}
+	//if ip.String() != ipnet.IP.String() {
+	//return errors.New("CIDR address contains host portion: " + cidr)
+	//}
 
 	*p = Prefix(*ipnet)
 
@@ -352,7 +368,8 @@ func (t *Service) UnmarshalText(data []byte) error {
 
 	text := string(data)
 
-	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+):(\d+):(tcp|udp)$`)
+	//re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+):(\d+):(tcp|udp)$`)
+	re := regexp.MustCompile(`^([0-9-a-f:\.]+):(\d+):(tcp|udp)$`)
 
 	m := re.FindStringSubmatch(text)
 
@@ -366,9 +383,9 @@ func (t *Service) UnmarshalText(data []byte) error {
 		return err
 	}
 
-	if !ip.Is4() {
-		return errors.New("Badly formed ip:port:protocol - IP " + text)
-	}
+	//if !ip.Is4() {
+	//	return errors.New("Badly formed ip:port:protocol - IP " + text)
+	//}
 
 	t.Address = ip
 
