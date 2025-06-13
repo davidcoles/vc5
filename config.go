@@ -86,8 +86,7 @@ type Config struct {
 	VLANs    map[uint16]netip.Prefix   `json:"vlans,omitempty"`  // VLAN ID to subnet mappings
 	VLANs6   map[uint16]netip.Prefix   `json:"vlans6,omitempty"` // VLAN ID to subnet mappings
 	BGP      map[string]bgp.Parameters `json:"bgp,omitempty"`    // BGP peers
-	//Learn    time.Duration             `json:"learn,omitempty"`
-	Logging Logging_ `json:"logging,omitempty"`
+	Logging  Logging_                  `json:"logging,omitempty"`
 }
 
 func (c *Config) Prefixes() map[uint16]netip.Prefix {
@@ -109,18 +108,6 @@ func (c *Config) Bgp(asn uint16, mp bool) map[string]bgp.Parameters {
 
 	return c.BGP
 }
-
-/*
-func (c *Config) Vlans() map[uint16]net.IPNet {
-	ret := map[uint16]net.IPNet{}
-
-	for k, v := range c.VLANs {
-		ret[k] = net.IPNet(v)
-	}
-
-	return ret
-    }
-*/
 
 func (c *Config) Priorities() map[netip.Addr]priority {
 
@@ -168,30 +155,6 @@ func Load(file string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// we now do layer 3 tunnels, so backends don't need to be a local VLAN
-	/*
-		if len(config.VLANs) != 0 {
-			for _, s := range config.Services {
-				for d, _ := range s.Destinations {
-
-
-					var ok bool
-
-					for _, p := range config.VLANs {
-						if p.Contains(d.Address) {
-							ok = true
-						}
-					}
-
-					if !ok {
-						return nil, fmt.Errorf("Destination server %s is not in a declared VLAN", d.Address)
-					}
-
-				}
-			}
-		}
-	*/
 
 	return &config, nil
 }
@@ -383,10 +346,6 @@ func (t *Service) UnmarshalText(data []byte) error {
 		return err
 	}
 
-	//if !ip.Is4() {
-	//	return errors.New("Badly formed ip:port:protocol - IP " + text)
-	//}
-
 	t.Address = ip
 
 	port, err := strconv.Atoi(m[2])
@@ -427,7 +386,8 @@ func (i Destination) MarshalText() ([]byte, error) {
 
 func (i *Destination) UnmarshalText(data []byte) error {
 
-	re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
+	//re := regexp.MustCompile(`^(\d+\.\d+\.\d+\.\d+)(|:(\d+))$`)
+	re := regexp.MustCompile(`^([0-9-a-f:\.]+?)(|:(\d+))$`)
 
 	m := re.FindStringSubmatch(string(data))
 
@@ -439,10 +399,6 @@ func (i *Destination) UnmarshalText(data []byte) error {
 
 	if err != nil {
 		return err
-	}
-
-	if !ip.Is4() {
-		return errors.New("Badly formed ip:port - IP: " + m[1])
 	}
 
 	i.Address = ip
@@ -463,91 +419,3 @@ func (i *Destination) UnmarshalText(data []byte) error {
 
 	return nil
 }
-
-/*
-func (i *Destination) MarshalJSON() ([]byte, error) {
-	text, err := i.MarshalText()
-
-	if err != nil {
-		return nil, err
-	}
-
-	return []byte(`"` + string(text) + `"`), nil
-}
-
-func (i *Destination) UnmarshalJSON(data []byte) error {
-
-	l := len(data)
-
-	if l < 3 || data[0] != '"' || data[l-1] != '"' {
-		return errors.New("Badly formed ip:port")
-	}
-
-	return i.UnmarshalText(data[1 : l-1])
-}
-*/
-
-/**********************************************************************/
-
-/*
-func (t *Tuple) string() string {
-	var p string
-
-	switch t.Protocol {
-	case TCP:
-		p = "tcp"
-	case UDP:
-		p = "udp"
-	default:
-		p = fmt.Sprint(t.Protocol)
-	}
-
-	return fmt.Sprintf("%s:%d:%s", t.Address, t.Port, p)
-}
-
-func (i *Tuple) Compare(j *Tuple) (r int) {
-	if r = i.Address.Compare(j.Address); r != 0 {
-		return r
-	}
-
-	if i.Port < j.Port {
-		return -1
-	}
-
-	if i.Port > j.Port {
-		return 1
-	}
-
-	if i.Protocol < j.Protocol {
-		return -1
-	}
-
-	if i.Protocol > j.Protocol {
-		return 1
-	}
-
-	return 0
-}
-*/
-
-// These may not be needed
-//func (t *Tuple) MarshalJSON() ([]byte, error) {
-//	text, err := t.MarshalText()
-//
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	return []byte(`"` + string(text) + `"`), nil
-//}
-
-//func (t *Tuple) UnmarshalJSON(data []byte) error {
-//
-//	l := len(data)
-//
-//	if l < 3 || data[0] != '"' || data[l-1] != '"' {
-//		return errors.New("Badly formed ip:port")
-//	}
-//
-//	return t.UnmarshalText(data[1 : l-1])
-//}

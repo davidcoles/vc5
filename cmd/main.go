@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -63,6 +64,8 @@ func main() {
 	tunnelType := flag.String("tunnel", "none", "Tunnel type for backend servers: none|ipip|gre|fou|gue") // temporary for dev
 	timeout := flag.Uint("timeout", 2, "Timeout program after this many minutes - fail safe")             // temporary for dev
 
+	test := flag.Bool("test", false, "test mode")
+
 	// Best not to mess with these
 	//socket := flag.String("S", "/var/run/vc5ns", "Socket for communication with proxy in network namespace")
 	//proxy := flag.String("P", "", "Run as healthcheck proxy server (internal use only)")
@@ -86,6 +89,7 @@ func main() {
 
 	switch *tunnelType {
 	case "none":
+		tunnel = xvs.NONE
 	case "ipip":
 		tunnel = xvs.IPIP
 	case "gre":
@@ -187,7 +191,7 @@ func main() {
 		}
 	*/
 
-	opts := xvs.Options{VLANs4: config.Prefixes(), VLANs6: config.Prefixes6(), Native: *native, Flows: uint32(*flows), Test: false}
+	opts := xvs.Options{VLANs4: config.Prefixes(), VLANs6: config.Prefixes6(), Native: *native, Flows: uint32(*flows), Test: *test}
 	//opts := xvs.Options{Native: *native}
 	client, err := xvs.NewWithOptions(opts, nics...)
 
@@ -233,7 +237,7 @@ func main() {
 
 	// Add some custom HTTP endpoints to the default mux to handle
 	// requests specific to this type of load balancer client
-	httpEndpoints(client, logs)
+	httpEndpoints(client, balancer, logs)
 
 	// context to use for shutting down services when we're about to exit
 	ctx, shutdown := context.WithCancel(context.Background())
@@ -295,7 +299,7 @@ func main() {
 	}
 }
 
-func httpEndpoints(client Client, logs vc5.Logger) {
+func httpEndpoints(client Client, balancer *Balancer, logs vc5.Logger) {
 
 	/*
 		http.HandleFunc("/prefixes.json", func(w http.ResponseWriter, r *http.Request) {
@@ -313,6 +317,19 @@ func httpEndpoints(client Client, logs vc5.Logger) {
 			w.Write(js)
 		})
 	*/
+
+	http.HandleFunc("/xxmetrics", func(w http.ResponseWriter, r *http.Request) {
+		names, metrics := balancer.Metrics()
+		w.Header().Set("Content-Type", "text/plain")
+
+		for _, n := range names {
+			w.Write([]byte(fmt.Sprintf("# TYPE xvs_%s counter\n", n)))
+		}
+
+		for _, m := range metrics {
+			w.Write([]byte(fmt.Sprintln("xvs_" + m)))
+		}
+	})
 
 	http.HandleFunc("/lb.json", func(w http.ResponseWriter, r *http.Request) {
 		var ret []interface{}

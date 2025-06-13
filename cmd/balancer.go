@@ -20,6 +20,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"net"
 
 	"github.com/davidcoles/xvs"
@@ -139,4 +140,86 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 	}
 
 	return nil
+}
+
+// func (b *Balancer) metrics() (_names, values []string) {
+func (b *Balancer) Metrics() (n []string, metrics []string) {
+
+	client := b.Client
+
+	names := map[string]bool{}
+
+	info, _ := client.Info()
+	//fmt.Println("Info", info)
+
+	//w.Write([]byte(fmt.Sprintf("# TYPE xvs_global_latency gauge\n")))
+	names["global_latency"] = true
+	metrics = append(metrics, fmt.Sprintf("global_latency %d", info.Latency))
+
+	for k, v := range info.Metrics {
+		name := "global_" + k
+		inst := ""
+		line := fmt.Sprintf("%s%s %d", name, inst, v)
+		names[name] = true
+		metrics = append(metrics, line)
+	}
+
+	services, _ := client.Services()
+
+	for _, service := range services {
+
+		s, _ := client.Service(service.Service)
+
+		serv := s.Service
+		proto := ""
+		switch serv.Protocol {
+		case xvs.TCP:
+			proto = "tcp"
+		case xvs.UDP:
+			proto = "udp"
+		default:
+			proto = fmt.Sprint(proto)
+		}
+		snam := fmt.Sprintf("%s:%d:%s", serv.Address, serv.Port, proto)
+
+		for k, v := range s.Metrics {
+			inst := fmt.Sprintf(`{address="%s",port="%d",protocol="%s",service="%s"}`, serv.Address, serv.Port, proto, snam)
+			name := "service_" + k
+			line := fmt.Sprintf("%s%s %d", name, inst, v)
+			names[name] = true
+			metrics = append(metrics, line)
+		}
+
+		destinations, _ := client.Destinations(serv)
+
+		for _, d := range destinations {
+			dest := d.Destination
+
+			for k, v := range d.Metrics {
+				inst := fmt.Sprintf(`{address="%s",port="%d",protocol="%s",destination="%s",service="%s"}`, serv.Address, serv.Port, proto, dest.Address, snam)
+				name := "destination_" + k
+				line := fmt.Sprintf("%s%s %d", name, inst, v)
+				names[name] = true
+				metrics = append(metrics, line)
+			}
+		}
+	}
+
+	vips, _ := client.VIPs()
+
+	for _, vip := range vips {
+		for k, v := range vip.Metrics {
+			inst := fmt.Sprintf(`{address="%s"}`, vip.Address)
+			name := "virtual_" + k
+			line := fmt.Sprintf("%s%s %d", name, inst, v)
+			names[name] = true
+			metrics = append(metrics, line)
+		}
+	}
+
+	for k, _ := range names {
+		n = append(n, k)
+	}
+
+	return
 }

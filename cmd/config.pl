@@ -142,7 +142,7 @@ sub services {
 
 	my %servers;
 	foreach(@servers) {
-	    die "bad server: $_\n" unless /^(\d+\.\d+\.\d+\.\d+)(\*|)$/;
+	    die "bad server: $_\n" unless /^(\d+\.\d+\.\d+\.\d+|[0-9a-f:]+)(\*|)$/;
 	    $servers{$1} = {_dsbl => $2 eq '' ? 0 : 1};
 	}
 	

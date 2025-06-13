@@ -273,6 +273,7 @@ type Balancer interface {
 	Stats() (Summary, map[Instance]Stats)
 	//Summary() Summary
 	Configure([]Manifest) error
+	Metrics() ([]string, []string)
 }
 
 func calculateRate(s Stats, o Stats) Stats {
