@@ -76,6 +76,8 @@ type ServiceDefinition struct {
 	Scheduler string `json:"scheduler"`
 	Persist   uint32 `json:"persist"`         // used in IPVS version
 	Reset     bool   `json:"reset,omitempty"` // used in IPVS version
+
+	TunnelType bool
 }
 
 type services map[Service]ServiceDefinition

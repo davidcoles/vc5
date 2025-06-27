@@ -24,6 +24,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -78,13 +79,6 @@ func main() {
 
 	args := flag.Args()
 
-	//if *proxy != "" {
-	//	// we're going to be the server running in the network namespace ...
-	//	signal.Ignore(syscall.SIGUSR2, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	//	//netns(*proxy, netip.MustParseAddr(args[0]), *closeidle)
-	//	return
-	//}
-
 	tunnel := xvs.NONE
 
 	switch *tunnelType {
@@ -114,6 +108,13 @@ func main() {
 
 	if *hostid == "" {
 		*hostid = addr
+	}
+
+	//logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.Default()
+
+	if !*test {
+		logger = nil
 	}
 
 	logs := vc5.NewLogger(*hostid, config.LoggingConfig())
@@ -176,23 +177,15 @@ func main() {
 
 	// Initialise the load balancing library which will deal with the
 	// data-plane - this is what actually switches incoming packets
-	/*
-		client := &Client{
-			Interfaces: nics,
-			Address:    address,
-			Native:     *native,
-			VLANs:      config.Vlans(),
-			InitDelay:  uint8(*delay),
-			NAT:        true,
-			Debug:      &Debug{Log: logs.Sub("xvs")},
-			MaxFlows:   uint32(*flows),
-			//Frags:      *too_big,
-			NoUnreach: *nounreach,
-		}
-	*/
 
-	opts := xvs.Options{VLANs4: config.Prefixes(), VLANs6: config.Prefixes6(), Native: *native, Flows: uint32(*flows), Test: *test}
-	//opts := xvs.Options{Native: *native}
+	opts := xvs.Options{
+		VLANs4: config.Prefixes(),
+		VLANs6: config.Prefixes6(),
+		Native: *native,
+		Flows:  uint32(*flows),
+		Logger: logger,
+	}
+
 	client, err := xvs.NewWithOptions(opts, nics...)
 
 	if err != nil {

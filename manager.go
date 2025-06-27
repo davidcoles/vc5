@@ -330,19 +330,17 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 
-		names_, metrics_ := m.Balancer.Metrics()
-		//w.Header().Set("Content-Type", "text/plain")
+		types, metrics := m.Balancer.Metrics()
 
-		metrics := m.Prometheus("vc5")
 		w.Header().Set("Content-Type", "text/plain")
 
-		for _, n := range names_ {
-			w.Write([]byte(fmt.Sprintf("# TYPE xvs_%s counter\n", n)))
+		for _, n := range types {
+			w.Write([]byte(fmt.Sprintf("# TYPE xvs_%s\n", n)))
 		}
 
-		w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
+		w.Write([]byte(strings.Join(m.Prometheus("vc5"), "\n") + "\n"))
 
-		for _, m := range metrics_ {
+		for _, m := range metrics {
 			w.Write([]byte(fmt.Sprintln("xvs_" + m)))
 		}
 

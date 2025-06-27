@@ -6,7 +6,7 @@ toolchain go1.23.1
 
 require (
 	github.com/davidcoles/cue v0.1.4
-	github.com/davidcoles/xvs v0.2.3
+	github.com/davidcoles/xvs v0.2.4
 	vc5 v0.0.0
 )
 
@@ -14,11 +14,6 @@ require (
 	github.com/davidcoles/bgp v0.0.4 // indirect
 	github.com/elastic/go-elasticsearch/v7 v7.17.10 // indirect
 )
-
-//require (
-//	github.com/davidcoles/bgp v0.0.3 // indirect
-//	github.com/elastic/go-elasticsearch/v7 v7.17.10 // indirect
-//)
 
 replace vc5 => ../.
 

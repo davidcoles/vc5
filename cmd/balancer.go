@@ -131,6 +131,7 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 					Address:    d.Address,
 					Disable:    d.HealthyWeight() == 0,
 					TunnelType: b.tunnel,
+					//TunnelType: s.Service().TunnelType,
 					TunnelPort: 666,
 				})
 			}
@@ -142,7 +143,6 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 	return nil
 }
 
-// func (b *Balancer) metrics() (_names, values []string) {
 func (b *Balancer) Metrics() (n []string, metrics []string) {
 
 	client := b.Client
@@ -150,9 +150,7 @@ func (b *Balancer) Metrics() (n []string, metrics []string) {
 	names := map[string]bool{}
 
 	info, _ := client.Info()
-	//fmt.Println("Info", info)
 
-	//w.Write([]byte(fmt.Sprintf("# TYPE xvs_global_latency gauge\n")))
 	names["global_latency"] = true
 	metrics = append(metrics, fmt.Sprintf("global_latency %d", info.Latency))
 
@@ -160,7 +158,7 @@ func (b *Balancer) Metrics() (n []string, metrics []string) {
 		name := "global_" + k
 		inst := ""
 		line := fmt.Sprintf("%s%s %d", name, inst, v)
-		names[name] = true
+		names[name] = k == "current"
 		metrics = append(metrics, line)
 	}
 
@@ -186,7 +184,7 @@ func (b *Balancer) Metrics() (n []string, metrics []string) {
 			inst := fmt.Sprintf(`{address="%s",port="%d",protocol="%s",service="%s"}`, serv.Address, serv.Port, proto, snam)
 			name := "service_" + k
 			line := fmt.Sprintf("%s%s %d", name, inst, v)
-			names[name] = true
+			names[name] = k == "current"
 			metrics = append(metrics, line)
 		}
 
@@ -199,7 +197,7 @@ func (b *Balancer) Metrics() (n []string, metrics []string) {
 				inst := fmt.Sprintf(`{address="%s",port="%d",protocol="%s",destination="%s",service="%s"}`, serv.Address, serv.Port, proto, dest.Address, snam)
 				name := "destination_" + k
 				line := fmt.Sprintf("%s%s %d", name, inst, v)
-				names[name] = true
+				names[name] = k == "current"
 				metrics = append(metrics, line)
 			}
 		}
@@ -212,13 +210,17 @@ func (b *Balancer) Metrics() (n []string, metrics []string) {
 			inst := fmt.Sprintf(`{address="%s"}`, vip.Address)
 			name := "virtual_" + k
 			line := fmt.Sprintf("%s%s %d", name, inst, v)
-			names[name] = true
+			names[name] = k == "current"
 			metrics = append(metrics, line)
 		}
 	}
 
-	for k, _ := range names {
-		n = append(n, k)
+	for k, t := range names {
+		if t {
+			n = append(n, k+" gauge")
+		} else {
+			n = append(n, k+" counter")
+		}
 	}
 
 	return
