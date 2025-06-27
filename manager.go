@@ -34,8 +34,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davidcoles/bgp"
 	"github.com/davidcoles/cue"
-	"github.com/davidcoles/cue/bgp"
 	"github.com/davidcoles/cue/mon"
 )
 
@@ -129,7 +129,7 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 		routerID = [4]byte{127, 0, 0, 1} // no sensible BGP daemon would ever use this, surely!
 	}
 
-	m.pool = bgp.NewPool(routerID, m.config.Bgp(m.BGPLoopback, false), nil, m.Logs.Sub("bgp"))
+	m.pool = bgp.NewPool(routerID, m.config.Bgp(m.BGPLoopback, true), nil, m.Logs.Sub("bgp"))
 
 	if m.pool == nil {
 		return fmt.Errorf("BGP pool fail")
@@ -329,9 +329,21 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 	})
 
 	http.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
-		metrics := m.Prometheus("vc5")
+
+		types, metrics := m.Balancer.Metrics()
+
 		w.Header().Set("Content-Type", "text/plain")
-		w.Write([]byte(strings.Join(metrics, "\n") + "\n"))
+
+		for _, n := range types {
+			w.Write([]byte(fmt.Sprintf("# TYPE xvs_%s\n", n)))
+		}
+
+		w.Write([]byte(strings.Join(m.Prometheus("vc5"), "\n") + "\n"))
+
+		for _, m := range metrics {
+			w.Write([]byte(fmt.Sprintln("xvs_" + m)))
+		}
+
 	})
 
 	http.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {

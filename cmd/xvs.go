@@ -19,23 +19,24 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"context"
-	"encoding/json"
+	//"bufio"
+	//"bytes"
+	//"context"
+	//"encoding/json"
 	"fmt"
-	"io"
-	"io/ioutil"
+	//"io"
+	//"io/ioutil"
 	"log"
 	"net"
-	"net/http"
+	//"net/http"
 	"net/netip"
-	"os"
+	//"os"
 	"os/exec"
-	"regexp"
+	//"regexp"
 	"sync/atomic"
 	"time"
 
+	"github.com/davidcoles/cue/mon"
 	"github.com/davidcoles/xvs"
 	"vc5"
 )
@@ -49,6 +50,7 @@ type Service = xvs.Service
 type Destination = xvs.Destination
 type Protocol = xvs.Protocol
 
+/*
 type query struct {
 	Address netip.Addr `json:"address"` // address to probe - this will be the NAT address corresponding to the VIP/RIP tuple
 	VIP     netip.Addr `json:"vip"`     // VIP that this probe relates to - can be used to fill a blank hostname in URLs
@@ -197,6 +199,7 @@ func netns(socket string, addr netip.Addr, closeidle bool) {
 
 	log.Fatal(server.Serve(s))
 }
+*/
 
 func ethtool(nics []string) {
 	for _, i := range nics {
@@ -261,7 +264,7 @@ func (d *Debug) Backend(vip netip.Addr, port uint16, protocol uint8, backends []
 
 const maxDatagramSize = 1500
 
-func multicast_send(c *Client, address string) {
+func multicast_send(c Client, address string) {
 
 	addr, err := net.ResolveUDPAddr("udp", address)
 
@@ -305,7 +308,7 @@ func multicast_send(c *Client, address string) {
 	}
 }
 
-func multicast_recv(c *Client, address string) {
+func multicast_recv(c Client, address string) {
 	udp, err := net.ResolveUDPAddr("udp", address)
 
 	if err != nil {
@@ -333,7 +336,8 @@ func multicast_recv(c *Client, address string) {
 	}
 }
 
-func readCommands(sock net.Listener, client *Client, log vc5.Logger) {
+/*
+func readCommands(sock net.Listener, client Client, log vc5.Logger) {
 	if sock == nil {
 		return
 	}
@@ -390,7 +394,9 @@ func readCommands(sock net.Listener, client *Client, log vc5.Logger) {
 		}
 	}
 }
+*/
 
+/*
 // return a function which will translate a vip/rip pair to a nat address - used by the manager to log destination.nat.ip
 func nat(client *Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
 	return func(vip, rip netip.Addr) (netip.Addr, bool) { return client.NATAddress(vip, rip) }
@@ -409,5 +415,27 @@ func prober(client *Client, path string) func(netip.Addr, netip.Addr, vc5.Check)
 
 	return func(vip, addr netip.Addr, check vc5.Check) (ok bool, diagnostic string) {
 		return probe(socket, addr, check, vip)
+	}
+}
+*/
+
+// return a function which will translate a vip/rip pair to a nat address - used by the manager to log destination.nat.ip
+func nat(client Client) func(vip, rip netip.Addr) (netip.Addr, bool) {
+	return func(vip, rip netip.Addr) (netip.Addr, bool) { return client.NAT(vip, rip), true }
+}
+
+// return a function which will relay probe requests to the network namespace healtchcheck proxy (which run against the nat address)
+func prober(client Client, monitor *mon.Mon) func(netip.Addr, netip.Addr, vc5.Check) (ok bool, diagnostic string) {
+
+	return func(vip, addr netip.Addr, check vc5.Check) (ok bool, diagnostic string) {
+		if check.Host == "" {
+			if vip.Is6() {
+				check.Host = "[" + vip.String() + "]"
+			} else {
+				check.Host = vip.String()
+			}
+
+		}
+		return monitor.Probe(addr, check)
 	}
 }

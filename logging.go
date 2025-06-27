@@ -32,7 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/davidcoles/cue/bgp"
+	"github.com/davidcoles/bgp"
 )
 
 const (
@@ -621,8 +621,10 @@ type sub struct {
 	facility string
 }
 
-func (l *sub) State(f, a string, e map[string]any)          { l.parent.state(l.facility+"."+f, a, e) }
-func (l *sub) Event(n uint8, f, a string, e map[string]any) { l.parent.event(n, l.facility+"."+f, a, e) }
+func (l *sub) State(f, a string, e map[string]any) { l.parent.state(l.facility+"."+f, a, e) }
+func (l *sub) Event(n uint8, f, a string, e map[string]any) {
+	l.parent.event(n, l.facility+"."+f, a, e)
+}
 func (l *sub) Alert(n uint8, f, a string, e map[string]any, t ...string) {
 	l.parent.alert(n, l.facility+"."+f, a, e, t...)
 }
