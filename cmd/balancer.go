@@ -33,6 +33,7 @@ type Balancer struct {
 	Client Client
 	Logger vc5.Logger
 	tunnel xvs.TunnelType
+	port   uint16
 }
 
 // func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
@@ -131,8 +132,7 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 					Address:    d.Address,
 					Disable:    d.HealthyWeight() == 0,
 					TunnelType: b.tunnel,
-					//TunnelType: s.Service().TunnelType,
-					TunnelPort: 666,
+					TunnelPort: b.port,
 				})
 			}
 		}

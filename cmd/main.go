@@ -62,8 +62,9 @@ func main() {
 	closeidle := flag.Bool("c", false, "Close idle HTTP connections")
 	hostid := flag.String("I", "", "Host ID for logging")
 
-	tunnelType := flag.String("tunnel", "none", "Tunnel type for backend servers: none|ipip|gre|fou|gue") // temporary for dev
-	timeout := flag.Uint("timeout", 2, "Timeout program after this many minutes - fail safe")             // temporary for dev
+	tunnelType := flag.String("tunnel-type", "none", "Tunnel type for backend servers: none|ipip|gre|fou|gue") // temporary for dev
+	tunnelPort := flag.Uint("tunnel-port", 9999, "Tunnel port to use for FOU/GUE")                             // temporary for dev
+	timeout := flag.Uint("timeout", 2, "Timeout program after this many minutes - fail safe")                  // temporary for dev
 
 	test := flag.Bool("test", false, "test mode")
 
@@ -221,6 +222,7 @@ func main() {
 		Client: client,
 		Logger: logs.Sub("balancer"),
 		tunnel: tunnel,
+		port:   uint16(*tunnelPort),
 	}
 
 	// Run services to perform healthchecks in network namespace, handle

@@ -10,7 +10,20 @@ layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
 
 If you think that this may be useful or have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
-raise a GitHub issue (or if you're going to [FOSDEM 2025](https://fosdem.org/2025/)).
+raise a GitHub issue.
+
+**Now supports IPv6 and distribution at layer 3 (AKA
+tunnelling)!**. The XVS library has been updated to introduce these
+features, which also does away with the need to run health checks from
+a network namespace, which considerably simplifies the code. This will
+end the requirement that all backends share a VLAN with the load
+balancer.
+
+Code restrictions currently mean that enabling tunnelling on a
+per-service basis is not possible. Using the `-tunnel` option allows a
+layer 3 tunnelling to be globally activated using a single scheme
+(IP-in-IP, GRE, FOU or GUE). Going forward, the code will be updated
+to allow for tunnelling to be configured at the service level.
 
 ## Quickstart
 
