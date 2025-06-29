@@ -5,11 +5,13 @@
 </picture>
 
 **This README is currently being updated to reflect recent changes -
-  some information may not reflect the current codebase.**
+  some information may not reflect the current codebase. This
+  iteration of code is not yet battle ready - use a v0.2 release for
+  production**
 
 A horizontally scalable Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
-layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
+layer 4 load balancer (L4LB) for Linux using [XDP/eBPF](https://www.datadoghq.com/blog/xdp-intro/).
 
 If you think that this may be useful or have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
@@ -64,7 +66,8 @@ tunneling protocol addressed to the real server IP and forwarded via a
 router (unless the server and laod balancer share a VLAN). If, when
 encapsulated, a packet exceeds the network maximum trasmission size
 then an ICMP message is sent to the source with advice as to the
-appropriate MTU to use.
+appropriate MTU to use. Backend servers only need to decapsulate
+packets - bidirectional tunneling with load balancers is not required.
 
 One server with a 10Gbit/s network interface should be capable of
 supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
@@ -82,32 +85,6 @@ performance a network card driver with XDP native mode support is
 required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
 dpaa2, qede). A full list is availble at [The XDP Project's driver
 support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
-
-A good summary of the concepts in use are discussed in [Patrick
-Shuff's "Building a Billion User Load Balancer"
-talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
-Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
-
-A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
-
-Experimental elasticsearch support for logging (direct to your
-cluster, no need to scrape system logs) is now included. Every probe
-to backend servers is logged, so if one goes down you can see
-precisely what error was returned, as well all sorts of other
-conditions. This will require a lot of refinement and more sensible
-naming of log parameters, etc. (if you've got any insights please get
-in touch), but it should lead to being able to get some good insights
-into what is going on with the system - my very inept first attempt
-creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
-
-A sample utility to render traffic from /20 prefixes going through the
-load-balancer is available at https://github.com/davidcoles/hilbert:
-![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
-
-A good use for the traffic stats (/prefixes.json endpoint) would be to
-track which prefixes are usually active and to generate a table of
-which /20s to early drop traffic from in the case of a DoS/DDoS
-(particularly spoofed source addresses).
 
 ## Quickstart
 
@@ -220,6 +197,35 @@ updating 802.1Q VLAN ID and using XDP_TX (vlans entry as before).
 * ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
 * ✅ IPv6 support and ability to mix IPv4 and IPv6 backends with either type of VIP.
 * ✅ Layer 3 traffic distribution with IP-in-IP, GRE, FOU and GUE support.
+
+
+## Background/more info
+
+A good summary of the concepts in use are discussed in [Patrick
+Shuff's "Building a Billion User Load Balancer"
+talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
+Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
+
+A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
+
+Experimental elasticsearch support for logging (direct to your
+cluster, no need to scrape system logs) is now included. Every probe
+to backend servers is logged, so if one goes down you can see
+precisely what error was returned, as well all sorts of other
+conditions. This will require a lot of refinement and more sensible
+naming of log parameters, etc. (if you've got any insights please get
+in touch), but it should lead to being able to get some good insights
+into what is going on with the system - my very inept first attempt
+creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
+
+A sample utility to render traffic from /20 prefixes going through the
+load-balancer is available at https://github.com/davidcoles/hilbert:
+![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
+
+A good use for the traffic stats (/prefixes.json endpoint) would be to
+track which prefixes are usually active and to generate a table of
+which /20s to early drop traffic from in the case of a DoS/DDoS
+(particularly spoofed source addresses).
 
 ## Performance
 
