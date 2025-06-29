@@ -82,9 +82,26 @@ trunking is supported (see [examples/](examples/) directory).
 
 No kernel modules or complex setups are required, although for best
 performance a network card driver with XDP native mode support is
-required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
+recommended (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
 dpaa2, qede). A full list is availble at [The XDP Project's driver
 support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
+
+## Goals/status
+
+* ✅ Simple deployment with a single binary
+* ✅ Stable backend selection with the Maglev hashing algorithm
+* ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
+* ✅ Minimally invasive; does not require any modification of iptables rules on balancer
+* ✅ No modification of backend servers beyond adding the VIP to a loopback device/tunnel termination with L3 distribution
+* ✅ Health checks are run against the VIP on backend servers, not their real addresses
+* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS health checks built in
+* ✅ In-kernel packet switching with eBPF/XDP; native mode drivers avoid sk_buff allocation
+* ✅ Multiple VLAN support
+* ✅ Multiple NIC support for lower bandwidth/development applications
+* ✅ Tagged/bonded network devices to support high-availibility/high-bandwidth
+* ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
+* ✅ IPv6 support and ability to mix IPv4 and IPv6 backends with either type of VIP.
+* ✅ Layer 3 traffic distribution with IP-in-IP, GRE, FOU and GUE support.
 
 ## Quickstart
 
@@ -180,23 +197,6 @@ updating 802.1Q VLAN ID and using XDP_TX (vlans entry as before).
 
 `./vc5 -u -a 10.1.10.100 config.json eth0 eth1 eth2`
 
-
-## Goals/status
-
-* ✅ Simple deployment with a single binary
-* ✅ Stable backend selection with Maglev hashing algorithm
-* ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
-* ✅ Minimally invasive; does not require any modification of iptables rules on balancer
-* ✅ No modification of backend servers beyond adding the VIP to a loopback device/tunnel termination
-* ✅ Health checks are run against the VIP on backend servers, not their real addresses
-* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS health checks built in
-* ✅ In-kernel code execution with eBPF/XDP; native mode drivers avoid sk_buff allocation
-* ✅ Multiple VLAN support
-* ✅ Multiple NIC support for lower bandwidth/development applications
-* ✅ Works with tagged/bonded network devices to support high-availibility/high-bandwidth
-* ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
-* ✅ IPv6 support and ability to mix IPv4 and IPv6 backends with either type of VIP.
-* ✅ Layer 3 traffic distribution with IP-in-IP, GRE, FOU and GUE support.
 
 
 ## Background/more info
