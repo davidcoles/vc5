@@ -16,11 +16,10 @@ questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
 **Now supports IPv6 and distribution at layer 3 (AKA
-tunnelling)!**. The XVS library has been updated to introduce these
-features, which also does away with the need to run health checks from
-a network namespace, considerably simplifying the code. This will
-end the requirement that all backends share a VLAN with the load
-balancer.
+tunnelling)!**. The XVS library has been updated to include these
+features, and also does away with the need to run health checks from
+a network namespace, considerably simplifying the code. This will end
+the requirement that all backends share a VLAN with the load balancer.
 
 Code restrictions currently mean that enabling tunnelling on a
 per-service basis is not supported. Using the `-tunnel` option allows a
@@ -37,27 +36,23 @@ balancer.
 ## About
 
 VC5 is a network load balancer designed to work as replacement for
-legacy hardware appliances. It allows a service with a virtual IP
-address (VIP) to be distributed to a set of backend ("real")
-servers. Real servers might run the service themselves or act as
-proxies for another layer of servers (eg. HAProxy serving as a Layer 7
-HTTP router/SSL offload). The only requirement being that the VIP
-needs to be configured on a loopback device on each real server, eg.:
-`ip addr add 192.168.101.1/32 dev lo`
-
-As this is a layer 4 DSR load balancer, there is no provision for making
-distribution decisions based on application level information (HTTP
-headers, etc). Using VC5 as a first stage in front of a pool of layer
-7 load balancers should be considered if this functionality is needed.
+legacy hardware appliances. It allows services with virtual IP
+addresses (VIPs) to be distributed to sets of backend ("real")
+servers. Real servers might run the services themselves or act as
+proxies for another layer of servers (eg. HAProxy serving as a layer 7
+HTTP router/SSL offload when application layer decisions need to
+made). The only requirement being that VIPs need to be configured on a
+loopback device on each real server, eg.: `ip addr add
+192.168.101.1/32 dev lo`
 
 Services and real servers are specified in a configuration file, along
 with health check definitions. When the backend servers pass checks
-and enough are available to provide a service then virtual IP
+and enough are available to provide a service, then virtual IP
 addresses are advertised to routers via BGP.
 
 Distributing traffic at both layer 2 and layer 3 is now
 supported. Layer 2 distribution requires that real servers share a
-VLAN with the laod balancer; upon receiving a packet to be
+VLAN with the load balancer; upon receiving a packet to be
 distributed, the load balancer updates the ethernet hardware addresses
 in the packet to use the real server's MAC address as the destination
 and its own MAC address as the source, and forwards the packet via the
@@ -215,14 +210,16 @@ updating 802.1Q VLAN ID and using XDP_TX (vlans entry as before).
 * ✅ Stable backend selection with Maglev hashing algorithm
 * ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
 * ✅ Minimally invasive; does not require any modification of iptables rules on balancer
-* ✅ No modification of backend servers beyond adding the VIP to a loopback device
+* ✅ No modification of backend servers beyond adding the VIP to a loopback device/tunnel termination
 * ✅ Health checks are run against the VIP on backend servers, not their real addresses
 * ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS health checks built in
 * ✅ In-kernel code execution with eBPF/XDP; native mode drivers avoid sk_buff allocation
 * ✅ Multiple VLAN support
 * ✅ Multiple NIC support for lower bandwidth/development applications
-* ✅ Works with bonded network devices to support high-availibility/high-bandwidth
+* ✅ Works with tagged/bonded network devices to support high-availibility/high-bandwidth
 * ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
+* ✅ IPv6 support and ability to mix IPv4 and IPv6 backends with either type of VIP.
+* ✅ Layer 3 traffic distribution with IP-in-IP, GRE, FOU and GUE support.
 
 ## Performance
 
