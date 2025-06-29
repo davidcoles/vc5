@@ -4,6 +4,9 @@
   <img src="doc/vc5.drawio.png" width="25%">
 </picture>
 
+**This README is currently being updated to reflect recent changes -
+  some information may not reflect the current codebase.**
+
 A horizontally scalable Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
 layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
@@ -20,15 +23,96 @@ end the requirement that all backends share a VLAN with the load
 balancer.
 
 Code restrictions currently mean that enabling tunnelling on a
-per-service basis is not possible. Using the `-tunnel` option allows a
-layer 3 tunnelling to be globally activated using a single scheme
+per-service basis is not supported. Using the `-tunnel` option allows a
+layer 3 tunnelling to be globally enabled using a single scheme
 (IP-in-IP, GRE, FOU or GUE). Going forward, the code will be updated
 to allow for tunnelling to be configured at the service level.
 
 Layer 2 load balancing will continue to be supported - the primary
 reason for starting the project was because of the lack of layer 2
 support by [Facebook's
-Katran](https://github.com/facebookincubator/katran) load balancer.
+Katran](https://github.com/facebookincubator/katran) load
+balancer.
+
+## About
+
+VC5 is a network load balancer designed to work as replacement for
+legacy hardware appliances. It allows a service with a virtual IP
+address (VIP) to be distributed to a set of backend ("real")
+servers. Real servers might run the service themselves or act as
+proxies for another layer of servers (eg. HAProxy serving as a Layer 7
+HTTP router/SSL offload). The only requirement being that the VIP
+needs to be configured on a loopback device on each real server, eg.:
+`ip addr add 192.168.101.1/32 dev lo`
+
+As this is a layer 4 DSR load balancer, there is no provision for making
+distribution decisions based on application level information (HTTP
+headers, etc). Using VC5 as a first stage in front of a pool of layer
+7 load balancers should be considered if this functionality is needed.
+
+Services and real servers are specified in a configuration file, along
+with health check definitions. When the backend servers pass checks
+and enough are available to provide a service then virtual IP
+addresses are advertised to routers via BGP.
+
+Distributing traffic at both layer 2 and layer 3 is now
+supported. Layer 2 distribution requires that real servers share a
+VLAN with the laod balancer; upon receiving a packet to be
+distributed, the load balancer updates the ethernet hardware addresses
+in the packet to use the real server's MAC address as the destination
+and its own MAC address as the source, and forwards the packet via the
+appropriate interface, updating the 802.1Q VLAN ID if packets are VLAN
+tagged.
+
+Layer 3 distribution requires packets to be encapsulated in a
+tunneling protocol addressed to the real server IP and forwarded via a
+router (unless the server and laod balancer share a VLAN). If, when
+encapsulated, a packet exceeds the network maximum trasmission size
+then an ICMP message is sent to the source with advice as to the
+appropriate MTU to use.
+
+One server with a 10Gbit/s network interface should be capable of
+supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
+to the asymmetric nature of most internet traffic. For smaller
+services a modest virtual machine or two will likely handle a service
+generating a number of gigabit/s of egress traffic.
+
+If one instance is not sufficient then more servers may be added to
+horizontally scale capacity (and provide redundancy) using your
+router's ECMP feature. 802.3ad bonded interfaces and 802.1Q VLAN
+trunking is supported (see [examples/](examples/) directory).
+
+No kernel modules or complex setups are required, although for best
+performance a network card driver with XDP native mode support is
+required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
+dpaa2, qede). A full list is availble at [The XDP Project's driver
+support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
+
+A good summary of the concepts in use are discussed in [Patrick
+Shuff's "Building a Billion User Load Balancer"
+talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
+Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
+
+A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
+
+Experimental elasticsearch support for logging (direct to your
+cluster, no need to scrape system logs) is now included. Every probe
+to backend servers is logged, so if one goes down you can see
+precisely what error was returned, as well all sorts of other
+conditions. This will require a lot of refinement and more sensible
+naming of log parameters, etc. (if you've got any insights please get
+in touch), but it should lead to being able to get some good insights
+into what is going on with the system - my very inept first attempt
+creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
+
+A sample utility to render traffic from /20 prefixes going through the
+load-balancer is available at https://github.com/davidcoles/hilbert:
+![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
+
+A good use for the traffic stats (/prefixes.json endpoint) would be to
+track which prefixes are usually active and to generate a table of
+which /20s to early drop traffic from in the case of a DoS/DDoS
+(particularly spoofed source addresses).
 
 ## Quickstart
 
@@ -157,80 +241,6 @@ streams at 2Gbps/3.8Mpps ingress traffic and 46.5Gbps egress. The
 server was more than 90% idle. Unfortunately I did not have the
 resources available to create more clients/servers.
 
-## About
-
-VC5 is a network load balancer designed to work as replacement for
-legacy hardware appliances. It allows a service with a Virtual IP
-address (VIP) to be distributed over a set of real servers. Real
-servers might run the service themselves or act as proxies for another
-layer of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
-offload). The only requirement being that the VIP needs to be
-configured on a loopback device on real server, eg.: `ip addr add
-192.168.101.1/32 dev lo`
-
-Currently only layer 2 load balancing is performed. This means that
-the load balancer instance needs to have an interface configured for
-each subnet where backend servers are present. This can be achieved
-with seperate untagged physical NICs, or a trunked/tagged NIC or bond
-device with VLAN subinterfaces. For performance reasons, the tagged
-VLAN model is preferable.
-
-One server with a 10Gbit/s network interface should be capable of
-supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
-to the asymmetric nature of most internet traffic. For smaller
-services a modest virtual machine or two will likely handle a service
-generating a number of Gbit/s of egress traffic.
-
-If one instance is not sufficient then more servers may be added to
-horizontally scale capacity (and provide redundancy) using your
-router's ECMP feature. 802.3ad bonded interfaces and 802.1Q VLAN
-trunking is supported (see [examples/](examples/) directory).
-
-No kernel modules or complex setups are required, although for best
-performance a network card driver with XDP native mode support is
-required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
-dpaa2, qede). A full list is availble at [The XDP Project's driver
-support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
-
-A good summary of the concepts in use are discussed in [Patrick
-Shuff's "Building a Billion User Load Balancer"
-talk](https://www.youtube.com/watch?v=bxhYNfFeVF4&t=1060s) and [Nitika
-Shirokov's Katran talk](https://www.youtube.com/watch?v=da9Qw7v5qLM)
-
-A basic web console and Prometheus metrics server is included: ![Console screenshot](doc/console.jpg)
-
-Experimental elasticsearch support for logging (direct to your
-cluster, no need to scrape system logs) is now included. Every probe
-to backend servers is logged, so if one goes down you can see
-precisely what error was returned, as well all sorts of other
-conditions. This will require a lot of refinement and more sensible
-naming of log parameters, etc. (if you've got any insights please get
-in touch), but it should lead to being able to get some good insights
-into what is going on with the system - my very inept first attempt
-creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
-
-A sample utility to render traffic from /20 prefixes going through the
-load-balancer is available at https://github.com/davidcoles/hilbert:
-![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
-
-A good use for the traffic stats (/prefixes.json endpoint) would be to
-track which prefixes are usually active and to generate a table of
-which /20s to early drop traffic from in the case of a DoS/DDoS
-(particularly spoofed source addresses).
-
-## Changes from old version
-
-The code for eBPF/XDP has been split out into the
-[xvs](https://github.com/davidcoles/xvs) repository - the object file
-is now committed to this repository and so does not need to be built
-as a seperate step.
-
-The code for managing services, carrying out health checks and
-speaking to BGP peers has been split out to the
-[cue](https://github.com/davidcoles/cue) repository, which allows it
-to be reused by other projects which use a different load balancing
-implementation
-(eg., [LVS/IPVS](https://en.wikipedia.org/wiki/IP_Virtual_Server)).
 
 ## Operation
 
