@@ -108,8 +108,7 @@ support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drive
 For best results you should disable/uninstall irqbalance.
 
 You will need to select a primary IP to pass to the balancer. This is
-used for the BGP router ID and, when only using a single subnet, as
-the source address for healthcheck probe packets.
+used for the BGP router ID.
 
 A simple example on a server with a single, untagged ethernet interface:
 
@@ -119,7 +118,7 @@ A simple example on a server with a single, untagged ethernet interface:
 * `cd vc5/cmd`
 * `cp config.sample.yaml config.yaml` (edit config.yaml to match your requirements)
 * `make` (pulls down the [libbpf](https://github.com/libbpf/libbpf) library, builds the binary and JSON config file)
-* `./vc5 -a 10.1.10.100 config.json eth0` (amend to use your server's IP address and ethernet interface)
+* `./vc5 10.1.10.100 config.json eth0` (amend to use your server's IP address and ethernet interface)
 * A web console will be on your load balancer server's port 80 by default
 * Add your VIP to the loopback device on your backend servers (eg.: `ip addr add 192.168.101.1/32 dev lo`)
 * Configure your network/client to send traffic for your VIP to the load balancer, either via BGP (see config file) or static routing
@@ -141,7 +140,6 @@ A more complex example with an LACP bonded ethernet device consisting
 of two (10Gbps Intel X520 on my test server) interfaces, with native
 XDP driver mode enabled and tagged VLANs:
 
-
 `config.yaml` vlans entry: 
 
 ```
@@ -149,15 +147,14 @@ vlans:
   10: 10.1.10.0/24
   20: 10.1.20.0/24
   30: 10.1.30.0/24
-  40: 10.1.40.0/24
 ```
 
 Command line:
 
-`./vc5 -n -a 10.1.10.100 config.json enp130s0f0 enp130s0f1`
+`./vc5 -n 10.1.10.100 config.json enp130s0f0 enp130s0f1`
 
 The binary will detect your VLAN interfaces by looking for devices
-with IP addreses which are contained in the VLAN mapping in the
+with IP addreses which are contained in the VLAN prefixes in the
 configuration file. If you use separate untagged physical interfaces
 then this should now work transparently without any extra
 configuration, just list all of the interfaces on the command line so
@@ -191,12 +188,9 @@ file.
 
 If this is not possible (for example creating trunked interfaces on
 vSphere is not simple), then you can assign each subnet to a different
-interface and use untagged mode (-u). This will use XDP's XDP_REDIRECT
-return code to send traffic out of the right interface, rather than
-updating 802.1Q VLAN ID and using XDP_TX (vlans entry as before).
+untagged interface:
 
-`./vc5 -u -a 10.1.10.100 config.json eth0 eth1 eth2`
-
+`./vc5 10.1.10.100 config.json eth0 eth1 eth2`
 
 
 ## Background/more info
@@ -218,14 +212,6 @@ in touch), but it should lead to being able to get some good insights
 into what is going on with the system - my very inept first attempt
 creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
 
-A sample utility to render traffic from /20 prefixes going through the
-load-balancer is available at https://github.com/davidcoles/hilbert:
-![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
-
-A good use for the traffic stats (/prefixes.json endpoint) would be to
-track which prefixes are usually active and to generate a table of
-which /20s to early drop traffic from in the case of a DoS/DDoS
-(particularly spoofed source addresses).
 
 ## Performance
 
