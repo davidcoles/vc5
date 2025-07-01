@@ -4,21 +4,111 @@
   <img src="doc/vc5.drawio.png" width="25%">
 </picture>
 
+**This README is currently being updated to reflect recent changes -
+  some information may not reflect the current codebase. This
+  iteration of code is not yet battle ready - use a v0.2 release for
+  production**
+
 A horizontally scalable Direct Server Return
 ([DSR](https://www.loadbalancer.org/blog/direct-server-return-is-simply-awesome-and-heres-why/))
-layer 4 load balancer (L4LB) for Linux using XDP/eBPF.
+layer 4 load balancer (L4LB) for Linux using [XDP/eBPF](https://www.datadoghq.com/blog/xdp-intro/).
 
 If you think that this may be useful or have any
 questions/suggestions, feel free to contact me at vc5lb@proton.me or
-raise a GitHub issue (or if you're going to [FOSDEM 2025](https://fosdem.org/2025/)).
+raise a GitHub issue.
+
+**Now supports IPv6 and distribution at layer 3 (AKA
+tunnelling)!**. The XVS library has been updated to include these
+features, and also does away with the need to run health checks from
+a network namespace, considerably simplifying the code. This will end
+the requirement that all backends share a VLAN with the load balancer.
+
+Code restrictions currently mean that enabling tunnelling on a
+per-service basis is not supported. Using the `-tunnel` option allows a
+layer 3 tunnelling to be globally enabled using a single scheme
+(IP-in-IP, GRE, FOU or GUE). Going forward, the code will be updated
+to allow for tunnelling to be configured at the service level.
+
+Layer 2 load balancing will continue to be supported - the primary
+reason for starting the project was because of the lack of layer 2
+support by [Facebook's
+Katran](https://github.com/facebookincubator/katran) load
+balancer.
+
+## About
+
+VC5 is a network load balancer designed to work as replacement for
+legacy hardware appliances. It allows services with virtual IP
+addresses (VIPs) to be distributed to sets of backend ("real")
+servers. Real servers might run the services themselves or act as
+proxies for another layer of servers (eg. HAProxy serving as a layer 7
+HTTP router/SSL offload when application layer decisions need to
+made). The only requirement being that VIPs need to be configured on a
+loopback device on each real server, eg.: `ip addr add
+192.168.101.1/32 dev lo`
+
+Services and real servers are specified in a configuration file, along
+with health check definitions. When the backend servers pass checks
+and enough are available to provide a service, then virtual IP
+addresses are advertised to routers via BGP.
+
+Distributing traffic at both layer 2 and layer 3 is now
+supported. Layer 2 distribution requires that real servers share a
+VLAN with the load balancer; upon receiving a packet to be
+distributed, the load balancer updates the ethernet hardware addresses
+in the packet to use the real server's MAC address as the destination
+and its own MAC address as the source, and forwards the packet via the
+appropriate interface, updating the 802.1Q VLAN ID if packets are VLAN
+tagged.
+
+Layer 3 distribution requires packets to be encapsulated in a
+tunneling protocol addressed to the real server IP and forwarded via a
+router (unless the server and laod balancer share a VLAN). If, when
+encapsulated, a packet exceeds the network maximum trasmission size
+then an ICMP message is sent to the source with advice as to the
+appropriate MTU to use. Backend servers only need to decapsulate
+packets - bidirectional tunneling with load balancers is not required.
+
+One server with a 10Gbit/s network interface should be capable of
+supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
+to the asymmetric nature of most internet traffic. For smaller
+services a modest virtual machine or two will likely handle a service
+generating a number of gigabit/s of egress traffic.
+
+If one instance is not sufficient then more servers may be added to
+horizontally scale capacity (and provide redundancy) using your
+router's ECMP feature. 802.3ad bonded interfaces and 802.1Q VLAN
+trunking is supported (see [examples/](examples/) directory).
+
+No kernel modules or complex setups are required, although for best
+performance a network card driver with XDP native mode support is
+recommended (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
+dpaa2, qede). A full list is availble at [The XDP Project's driver
+support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
+
+## Goals/status
+
+* ✅ Simple deployment with a single binary
+* ✅ Stable backend selection with the Maglev hashing algorithm
+* ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
+* ✅ Minimally invasive; does not require any modification of iptables rules on balancer
+* ✅ No modification of backend servers beyond adding the VIP to a loopback device/tunnel termination with L3 distribution
+* ✅ Health checks are run against the VIP on backend servers, not their real addresses
+* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS health checks built in
+* ✅ In-kernel packet switching with eBPF/XDP; native mode drivers avoid sk_buff allocation
+* ✅ Multiple VLAN support
+* ✅ Multiple NIC support for lower bandwidth/development applications
+* ✅ Tagged/bonded network devices to support high-availibility/high-bandwidth
+* ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
+* ✅ IPv6 support and ability to mix IPv4 and IPv6 backends with either type of VIP.
+* ✅ Layer 3 traffic distribution with IP-in-IP, GRE, FOU and GUE support.
 
 ## Quickstart
 
 For best results you should disable/uninstall irqbalance.
 
 You will need to select a primary IP to pass to the balancer. This is
-used for the BGP router ID and, when only using a single subnet, as
-the source address for healthcheck probe packets.
+used for the BGP router ID.
 
 A simple example on a server with a single, untagged ethernet interface:
 
@@ -28,7 +118,7 @@ A simple example on a server with a single, untagged ethernet interface:
 * `cd vc5/cmd`
 * `cp config.sample.yaml config.yaml` (edit config.yaml to match your requirements)
 * `make` (pulls down the [libbpf](https://github.com/libbpf/libbpf) library, builds the binary and JSON config file)
-* `./vc5 -a 10.1.10.100 config.json eth0` (amend to use your server's IP address and ethernet interface)
+* `./vc5 10.1.10.100 config.json eth0` (amend to use your server's IP address and ethernet interface)
 * A web console will be on your load balancer server's port 80 by default
 * Add your VIP to the loopback device on your backend servers (eg.: `ip addr add 192.168.101.1/32 dev lo`)
 * Configure your network/client to send traffic for your VIP to the load balancer, either via BGP (see config file) or static routing
@@ -50,7 +140,6 @@ A more complex example with an LACP bonded ethernet device consisting
 of two (10Gbps Intel X520 on my test server) interfaces, with native
 XDP driver mode enabled and tagged VLANs:
 
-
 `config.yaml` vlans entry: 
 
 ```
@@ -58,15 +147,14 @@ vlans:
   10: 10.1.10.0/24
   20: 10.1.20.0/24
   30: 10.1.30.0/24
-  40: 10.1.40.0/24
 ```
 
 Command line:
 
-`./vc5 -n -a 10.1.10.100 config.json enp130s0f0 enp130s0f1`
+`./vc5 -n 10.1.10.100 config.json enp130s0f0 enp130s0f1`
 
 The binary will detect your VLAN interfaces by looking for devices
-with IP addreses which are contained in the VLAN mapping in the
+with IP addreses which are contained in the VLAN prefixes in the
 configuration file. If you use separate untagged physical interfaces
 then this should now work transparently without any extra
 configuration, just list all of the interfaces on the command line so
@@ -100,79 +188,12 @@ file.
 
 If this is not possible (for example creating trunked interfaces on
 vSphere is not simple), then you can assign each subnet to a different
-interface and use untagged mode (-u). This will use XDP's XDP_REDIRECT
-return code to send traffic out of the right interface, rather than
-updating 802.1Q VLAN ID and using XDP_TX (vlans entry as before).
+untagged interface:
 
-`./vc5 -u -a 10.1.10.100 config.json eth0 eth1 eth2`
+`./vc5 10.1.10.100 config.json eth0 eth1 eth2`
 
 
-## Goals/status
-
-* ✅ Simple deployment with a single binary
-* ✅ Stable backend selection with Maglev hashing algorithm
-* ✅ Route health injection handled automatically; no need to run other software such as ExaBGP
-* ✅ Minimally invasive; does not require any modification of iptables rules on balancer
-* ✅ No modification of backend servers beyond adding the VIP to a loopback device
-* ✅ Health checks are run against the VIP on backend servers, not their real addresses
-* ✅ HTTP/HTTPS, half-open SYN probe and UDP/TCP DNS health checks built in
-* ✅ In-kernel code execution with eBPF/XDP; native mode drivers avoid sk_buff allocation
-* ✅ Multiple VLAN support
-* ✅ Multiple NIC support for lower bandwidth/development applications
-* ✅ Works with bonded network devices to support high-availibility/high-bandwidth
-* ✅ Observability via a web console, Elasticsearch logging (in development) and Prometheus metrics
-
-## Performance
-
-This has mostly been tested using Icecast backend servers with clients
-pulling a mix of low and high bitrate streams (48kbps - 192kbps).
-
-It seems that a VMWare guest (4 core, 8GB) using the XDP generic
-driver will support 100K concurrent clients, 380Mbps/700Kpps through
-the load balancer and 8Gbps of traffic from the backends directly to
-the clients.
-
-On a single (non-virtualised) Intel Xeon Gold 6314U CPU (2.30GHz 32
-physical cores, with hyperthreading enabled for 64 logical cores) and
-an Intel 10G 4P X710-T4L-t ethernet card, I was able to run 700K
-streams at 2Gbps/3.8Mpps ingress traffic and 46.5Gbps egress. The
-server was more than 90% idle. Unfortunately I did not have the
-resources available to create more clients/servers.
-
-## About
-
-VC5 is a network load balancer designed to work as replacement for
-legacy hardware appliances. It allows a service with a Virtual IP
-address (VIP) to be distributed over a set of real servers. Real
-servers might run the service themselves or act as proxies for another
-layer of servers (eg. HAProxy serving as a Layer 7 HTTP router/SSL
-offload). The only requirement being that the VIP needs to be
-configured on a loopback device on real server, eg.: `ip addr add
-192.168.101.1/32 dev lo`
-
-Currently only layer 2 load balancing is performed. This means that
-the load balancer instance needs to have an interface configured for
-each subnet where backend servers are present. This can be achieved
-with seperate untagged physical NICs, or a trunked/tagged NIC or bond
-device with VLAN subinterfaces. For performance reasons, the tagged
-VLAN model is preferable.
-
-One server with a 10Gbit/s network interface should be capable of
-supporting an HTTP service in excess of 100Gbit/s egress bandwidth due
-to the asymmetric nature of most internet traffic. For smaller
-services a modest virtual machine or two will likely handle a service
-generating a number of Gbit/s of egress traffic.
-
-If one instance is not sufficient then more servers may be added to
-horizontally scale capacity (and provide redundancy) using your
-router's ECMP feature. 802.3ad bonded interfaces and 802.1Q VLAN
-trunking is supported (see [examples/](examples/) directory).
-
-No kernel modules or complex setups are required, although for best
-performance a network card driver with XDP native mode support is
-required (eg.: mlx4, mlx5, i40e, ixgbe, ixgbevf, nfp, bnxt, thunder,
-dpaa2, qede). A full list is availble at [The XDP Project's driver
-support page](https://github.com/xdp-project/xdp-project/blob/master/areas/drivers/README.org).
+## Background/more info
 
 A good summary of the concepts in use are discussed in [Patrick
 Shuff's "Building a Billion User Load Balancer"
@@ -191,28 +212,24 @@ in touch), but it should lead to being able to get some good insights
 into what is going on with the system - my very inept first attempt
 creating a Kibana dashboard as an example: ![Kibana screenshot](doc/kibana.jpg)
 
-A sample utility to render traffic from /20 prefixes going through the
-load-balancer is available at https://github.com/davidcoles/hilbert:
-![https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png](https://raw.githubusercontent.com/davidcoles/hilbert/master/hilbert.png)
 
-A good use for the traffic stats (/prefixes.json endpoint) would be to
-track which prefixes are usually active and to generate a table of
-which /20s to early drop traffic from in the case of a DoS/DDoS
-(particularly spoofed source addresses).
+## Performance
 
-## Changes from old version
+This has mostly been tested using Icecast backend servers with clients
+pulling a mix of low and high bitrate streams (48kbps - 192kbps).
 
-The code for eBPF/XDP has been split out into the
-[xvs](https://github.com/davidcoles/xvs) repository - the object file
-is now committed to this repository and so does not need to be built
-as a seperate step.
+It seems that a VMWare guest (4 core, 8GB) using the XDP generic
+driver will support 100K concurrent clients, 380Mbps/700Kpps through
+the load balancer and 8Gbps of traffic from the backends directly to
+the clients.
 
-The code for managing services, carrying out health checks and
-speaking to BGP peers has been split out to the
-[cue](https://github.com/davidcoles/cue) repository, which allows it
-to be reused by other projects which use a different load balancing
-implementation
-(eg., [LVS/IPVS](https://en.wikipedia.org/wiki/IP_Virtual_Server)).
+On a single (non-virtualised) Intel Xeon Gold 6314U CPU (2.30GHz 32
+physical cores, with hyperthreading enabled for 64 logical cores) and
+an Intel 10G 4P X710-T4L-t ethernet card, I was able to run 700K
+streams at 2Gbps/3.8Mpps ingress traffic and 46.5Gbps egress. The
+server was more than 90% idle. Unfortunately I did not have the
+resources available to create more clients/servers.
+
 
 ## Operation
 
