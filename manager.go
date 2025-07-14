@@ -197,7 +197,13 @@ func (m *Manager) Manage(ctx context.Context, cfg *Config) error {
 				services = m.Director.Status()
 				var manifests []Manifest
 				for _, s := range services {
-					manifests = append(manifests, Manifest(s))
+					key := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
+					service, ok := m.config.Services[key]
+
+					if ok {
+						//manifests = append(manifests, Manifest(s))
+						manifests = append(manifests, toManifest(s, service))
+					}
 				}
 				err := m.Balancer.Configure(manifests)
 				m.mutex.Unlock()

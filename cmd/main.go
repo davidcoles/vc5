@@ -46,12 +46,8 @@ func main() {
 	native := flag.Bool("n", false, "Use native mode XDP; better performance on network cards that support it")
 	multicast := flag.String("m", "", "Multicast address used to share flow state between instances")
 	flows := flag.Uint("F", 0, "Set maximum number of flows (per-core)")
-	//delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
+	delay := flag.Uint("D", 0, "Delay between initialisaton of interfaces (to prevent bond from flapping)")
 	//cmd_path := flag.String("C", "", "Command channel path")
-
-	//too_big := flag.Bool("toobig", false, "Enable handling of ICMP destination unreachable/fragmentation required - experimental")
-	//flag.Bool("toobig", false, "Enable handling of ICMP destination unreachable/fragmentation required - experimental, deprecated")
-	//nounreach := flag.Bool("nounreach", false, "Disable handling of ICMP destination unreachable/fragmentation")
 
 	// common with stayinalived
 	listen := flag.Bool("b", false, "Enable BGP listener on port 179")
@@ -62,15 +58,10 @@ func main() {
 	closeidle := flag.Bool("c", false, "Close idle HTTP connections")
 	hostid := flag.String("I", "", "Host ID for logging")
 
-	tunnelType := flag.String("tunnel-type", "none", "Tunnel type for backend servers: none|ipip|gre|fou|gue") // temporary for dev
-	tunnelPort := flag.Uint("tunnel-port", 9999, "Tunnel port to use for FOU/GUE")                             // temporary for dev
-	timeout := flag.Uint("timeout", 2, "Timeout program after this many minutes - fail safe")                  // temporary for dev
+	flag.Bool("toobig", false, "dummy")
 
-	test := flag.Bool("test", false, "test mode")
-
-	// Best not to mess with these
-	//socket := flag.String("S", "/var/run/vc5ns", "Socket for communication with proxy in network namespace")
-	//proxy := flag.String("P", "", "Run as healthcheck proxy server (internal use only)")
+	timeout := flag.Uint("timeout", 0, "Timeout program after this many minutes - fail safe for testing")
+	test := flag.Bool("test", false, "test mode - debug logging")
 
 	// Changing number of flows will only work on newer kernels
 	// Not supported: 5.4.0-171-generic
@@ -80,22 +71,24 @@ func main() {
 
 	args := flag.Args()
 
-	tunnel := xvs.NONE
+	/*
+		tunnel := xvs.NONE
 
-	switch *tunnelType {
-	case "none":
-		tunnel = xvs.NONE
-	case "ipip":
-		tunnel = xvs.IPIP
-	case "gre":
-		tunnel = xvs.GRE
-	case "fou":
-		tunnel = xvs.FOU
-	case "gue":
-		tunnel = xvs.GUE
-	default:
-		log.Fatal("Unsupported tunnel type: ", *tunnelType)
-	}
+		switch *tunnelType {
+		case "none":
+			tunnel = xvs.NONE
+		case "ipip":
+			tunnel = xvs.IPIP
+		case "gre":
+			tunnel = xvs.GRE
+		case "fou":
+			tunnel = xvs.FOU
+		case "gue":
+			tunnel = xvs.GUE
+		default:
+			log.Fatal("Unsupported tunnel type: ", *tunnelType)
+		}
+	*/
 
 	addr := args[0]
 	file := args[1]
@@ -184,6 +177,7 @@ func main() {
 		VLANs6: config.Prefixes6(),
 		Native: *native,
 		Flows:  uint32(*flows),
+		Delay:  uint8(*delay),
 		Logger: logger,
 	}
 
@@ -221,8 +215,8 @@ func main() {
 	balancer := &Balancer{
 		Client: client,
 		Logger: logs.Sub("balancer"),
-		tunnel: tunnel,
-		port:   uint16(*tunnelPort),
+		//tunnel: tunnel,
+		//port:   uint16(*tunnelPort),
 	}
 
 	// Run services to perform healthchecks in network namespace, handle

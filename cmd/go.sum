@@ -4,5 +4,7 @@ github.com/davidcoles/cue v0.1.4 h1:KrH2hhOLwVKxbEkQL0a6zjXhwZSCzyt0vkRkq0fO7ZM=
 github.com/davidcoles/cue v0.1.4/go.mod h1:26FTBytVHJ1XQWOGC+Cfnx4Q9xV8k1xr6K5uZ7s/EBw=
 github.com/davidcoles/xvs v0.2.4 h1:/qw8CYAgEiX/yoBl1ZJaiVZea/fv69CgAHyG4lkcLbA=
 github.com/davidcoles/xvs v0.2.4/go.mod h1:2STY7TYApTHchT4yuvJ4IbDeppL343sUocxxsd5bDSc=
+github.com/davidcoles/xvs v0.2.5 h1:OzfKimEDHYlkfbkoda7sn81YyzxeB2XJKH4gnkZxOr0=
+github.com/davidcoles/xvs v0.2.5/go.mod h1:2STY7TYApTHchT4yuvJ4IbDeppL343sUocxxsd5bDSc=
 github.com/elastic/go-elasticsearch/v7 v7.17.10 h1:TCQ8i4PmIJuBunvBS6bwT2ybzVFxxUhhltAs3Gyu1yo=
 github.com/elastic/go-elasticsearch/v7 v7.17.10/go.mod h1:OJ4wdbtDNk5g503kvlHLyErCgQwwzmDtaFC4XyOxXA4=

@@ -32,8 +32,8 @@ import (
 type Balancer struct {
 	Client Client
 	Logger vc5.Logger
-	tunnel xvs.TunnelType
-	port   uint16
+	//tunnel xvs.TunnelType
+	//port   uint16
 }
 
 // func (b *Balancer) Stats() map[vc5.Instance]vc5.Stats {
@@ -117,22 +117,35 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 
 	// for each desired service create the necessary xvs configuration (service description and list of backends) and apply:
 	for _, s := range services {
-		//service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol), Sticky: s.Sticky}
-		service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
 
-		if s.Sticky {
-			service.Flags |= xvs.Sticky
-		}
+		service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol), Sticky: s.Sticky}
+
+		//if s.Sticky {
+		//	service.Flags |= xvs.Sticky
+		//}
 
 		var dsts []Destination
+
+		var tunnelType xvs.TunnelType = xvs.NONE
+
+		switch s.TunnelType {
+		case "gre":
+			tunnelType = xvs.GRE
+		case "ipip":
+			tunnelType = xvs.IPIP
+		case "fou":
+			tunnelType = xvs.FOU
+		case "gue":
+			tunnelType = xvs.GUE
+		}
 
 		for _, d := range s.Destinations {
 			if d.Port == s.Port {
 				dsts = append(dsts, Destination{
 					Address:    d.Address,
 					Disable:    d.HealthyWeight() == 0,
-					TunnelType: b.tunnel,
-					TunnelPort: b.port,
+					TunnelType: tunnelType,
+					TunnelPort: s.TunnelPort,
 				})
 			}
 		}

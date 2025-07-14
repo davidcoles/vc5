@@ -265,13 +265,54 @@ type Instance struct {
 	Destination Destination
 }
 
-type Manifest cue.Service             // so we don't have to explicitly pull cue into the balancer - not keen on the name though
-func (s Manifest) Service() Service   { return s.Instance().Service }
-func (s Manifest) Instance() Instance { return instance(cue.Service(s), cue.Destination{}) }
+type _Manifest cue.Service
+
+type Manifest struct {
+	Address      netip.Addr
+	Port         uint16
+	Protocol     Protocol
+	Destinations []cue.Destination
+
+	Sticky    bool
+	Scheduler string
+	Persist   uint32
+	Reset     bool
+	//Required     uint8
+	//available    uint8
+	//Up           bool
+	//When         time.Time
+	TunnelType string
+	TunnelPort uint16
+}
+
+func toManifest(s cue.Service, d ServiceDefinition) (m Manifest) {
+	m.Address = s.Address
+	m.Port = s.Port
+	m.Protocol = Protocol(s.Protocol)
+	m.Destinations = s.Destinations
+
+	m.Sticky = s.Sticky
+	m.Scheduler = d.Scheduler
+	m.Persist = d.Persist
+	m.Reset = d.Reset
+	//m.Required = s.Required
+	//m.Up = s.Up
+	//m.When = s.When
+
+	m.TunnelType = d.TunnelType
+	m.TunnelPort = d.TunnelPort
+	return
+}
+
+func (s _Manifest) Service() Service   { return s.Instance().Service }
+func (s _Manifest) Instance() Instance { return instance(cue.Service(s), cue.Destination{}) }
+
+func (s Manifest) Service() Service {
+	return Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol)}
+}
 
 type Balancer interface {
 	Stats() (Summary, map[Instance]Stats)
-	//Summary() Summary
 	Configure([]Manifest) error
 	Metrics() ([]string, []string)
 }
@@ -305,9 +346,9 @@ func serviceStatus(config *Config, balancer Balancer, director *cue.Director, ol
 	//summary := balancer.Summary()
 
 	for _, svc := range director.Status() {
-		cnf, _ := config.Services[Manifest(svc).Service()]
+		cnf, _ := config.Services[_Manifest(svc).Service()]
 		//key := serviceInstance(svc)
-		key := Manifest(svc).Instance()
+		key := _Manifest(svc).Instance()
 		lbs := map[Destination]Stats{}
 
 		for k, v := range allstats {

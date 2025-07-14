@@ -104,6 +104,7 @@ sub services {
 	$defaults{_desc} = key($s, 'description', undef);
 	$defaults{_prio} = key($s, 'priority',    undef);
 	$defaults{_ttyp} = key($s, 'tunnel-type', undef);
+	$defaults{_tpor} = key($s, 'tunnel-port', 0)+0;
 	$defaults{_need} = key($s, 'need',        1)+0;
 	$defaults{_stic} = key($s, 'sticky',      JSON::false);
 	$defaults{_rest} = key($s, 'reset',       JSON::false);
@@ -166,11 +167,17 @@ sub services {
 		$svc->{'description'} = $p->{_desc} if defined $p->{_desc};
 		$svc->{'priority'}    = $p->{_prio} if defined $p->{_prio};
 		$svc->{'tunnel-type'} = $p->{_ttyp} if defined $p->{_ttyp};
+		$svc->{'tunnel-port'} = $p->{_tpor} if defined $p->{_tpor} && $p->{_tpor} != 0;
 		$svc->{'scheduler'}   = $p->{_schd} if defined $p->{_schd};
 		$svc->{'persist'}     = $p->{_pers}+0 if defined $p->{_pers};
 		$svc->{'sticky'}      = jsonbool($p->{_stic}) if defined $p->{_stic};
 		$svc->{'reset'}       = jsonbool($p->{_rest}) if defined $p->{_rest};
 
+		if (defined $svc->{'tunnel-type'} && $svc->{'tunnel-type'} !~ /^(none|ipip|gre|fou|gue)$/) {
+		    my $ttype = $svc->{'tunnel-type'};
+		    die "unsupported tunnel type '$ttype'\n";
+		}
+		
 		my %rips;
 
 		my $checks = checklist(@{$p->{_chks}});
@@ -371,6 +378,7 @@ sub service() {
 	_need => key($policy, 'need',        $defaults->{_need}),
 	_name => key($policy, 'name',        $defaults->{_name}),
 	_ttyp => key($policy, 'tunnel-type', $defaults->{_ttyp}),
+	_tpor => key($policy, 'tunnel-port', $defaults->{_tpor}),
 	_desc => key($policy, 'description', $defaults->{_desc}),
 	_prio => key($policy, 'priority',    $defaults->{_prio}),
 	_bind => key($policy, 'bind',        $port)+0,
