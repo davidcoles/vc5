@@ -37,6 +37,11 @@ import (
 	"vc5"
 )
 
+type leveler struct {
+}
+
+func (l *leveler) Level() slog.Level { return slog.LevelDebug }
+
 func main() {
 
 	const FACILITY = "vc5"
@@ -104,8 +109,9 @@ func main() {
 		*hostid = addr
 	}
 
-	//logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	logger := slog.Default()
+	//logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: &leveler{}}))
+	//logger := slog.Default()
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: &leveler{}}))
 
 	if !*test {
 		logger = nil
@@ -173,12 +179,13 @@ func main() {
 	// data-plane - this is what actually switches incoming packets
 
 	opts := xvs.Options{
-		VLANs4: config.Prefixes(),
-		VLANs6: config.Prefixes6(),
-		Native: *native,
-		Flows:  uint32(*flows),
-		Delay:  uint8(*delay),
-		Logger: logger,
+		IPv4VLANs:          config.Prefixes(),
+		IPv6VLANs:          config.Prefixes6(),
+		DriverMode:         *native,
+		FlowsPerCPU:        uint32(*flows),
+		InterfaceInitDelay: uint8(*delay),
+		Logger:             logger,
+		Bonding:            false,
 	}
 
 	client, err := xvs.NewWithOptions(opts, nics...)
@@ -270,7 +277,7 @@ func main() {
 			conf, err := vc5.Load(file)
 			if err == nil {
 				config = conf
-				c := xvs.Config{VLANs4: config.Prefixes(), VLANs6: config.Prefixes6()}
+				c := xvs.Config{IPv4VLANs: config.Prefixes(), IPv6VLANs: config.Prefixes6()}
 				err := client.SetConfig(c)
 				log.Println(err)
 				manager.Configure(conf)

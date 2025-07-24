@@ -41,16 +41,24 @@ func (b *Balancer) Stats() (summary vc5.Summary, stats map[vc5.Instance]vc5.Stat
 
 	info, _ := b.Client.Info()
 	summary.Latency = info.Latency
-	//summary.Dropped = info.Dropped
-	//summary.Blocked = info.Blocked
-	//summary.TooBig = info.TooBig
-	//summary.NotQueued = info.NotQueued
-	summary.IngressOctets = info.Stats.Octets
-	summary.IngressPackets = info.Stats.Packets
-	//summary.EgressOctets = 0  // Not available in DSR
-	//summary.EgressPackets = 0 // Not available in DSR
-	summary.Flows = info.Stats.Flows
-	summary.Current = info.Stats.Current
+	/*
+		//summary.Dropped = info.Dropped
+		//summary.Blocked = info.Blocked
+		//summary.TooBig = info.TooBig
+		//summary.NotQueued = info.NotQueued
+		summary.IngressOctets = info.Stats.Octets
+		summary.IngressPackets = info.Stats.Packets
+		//summary.EgressOctets = 0  // Not available in DSR
+		//summary.EgressPackets = 0 // Not available in DSR
+		summary.Flows = info.Stats.Flows
+		summary.Current = info.Stats.Current
+	*/
+
+	summary.IngressOctets = info.Stats.IncomingBytes
+	summary.IngressPackets = info.Stats.IncomingPackets
+	summary.Flows = info.Stats.Connections
+	//summary.Current = info.Stats.Current
+
 	summary.DSR = true
 	summary.VC5 = true
 
@@ -73,13 +81,22 @@ func (b *Balancer) Stats() (summary vc5.Summary, stats map[vc5.Instance]vc5.Stat
 			}
 
 			stats[instance] = vc5.Stats{
-				IngressOctets:  d.Stats.Octets,
-				IngressPackets: d.Stats.Packets,
-				EgressOctets:   0, // Not available in DSR
-				EgressPackets:  0, // Not available in DSR
-				Flows:          d.Stats.Flows,
-				Current:        d.Stats.Current,
+				/*
+					IngressOctets:  d.Stats.Octets,
+					IngressPackets: d.Stats.Packets,
+					EgressOctets:   0, // Not available in DSR
+					EgressPackets:  0, // Not available in DSR
+					Flows:          d.Stats.Flows,
+					Current:        d.Stats.Current,
+				*/
+
+				//EgressOctets:   0, // Not available in DSR
+				//EgressPackets:  0, // Not available in DSR
+				IngressOctets:  d.Stats.IncomingBytes,
+				IngressPackets: d.Stats.IncomingPackets,
+				Flows:          d.Stats.Connections,
 				MAC:            net.HardwareAddr(d.MAC[:]).String(),
+				Current:        d.ActiveConnections,
 			}
 		}
 	}

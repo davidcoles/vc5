@@ -75,7 +75,7 @@ type Stats struct {
 	EgressOctets   uint64 `json:"egress_octets"`
 	EgressPackets  uint64 `json:"egress_packets"`
 	Flows          uint64 `json:"flows"`
-	Current        uint64 `json:"current"`
+	Current        uint32 `json:"current"`
 
 	IngressOctetsPerSecond  uint64 `json:"ingress_octets_per_second"`
 	IngressPacketsPerSecond uint64 `json:"ingress_packets_per_second"`
@@ -89,7 +89,7 @@ type Stats struct {
 type Summary struct {
 	Uptime  uint64 `json:"uptime"`
 	Latency uint64 `json:"latency_ns"`
-	Current uint64 `json:"current"`
+	Current uint32 `json:"current"`
 
 	Dropped            uint64 `json:"dropped"`
 	DroppedPerSecond   uint64 `json:"dropped_per_second"`
@@ -338,7 +338,7 @@ func calculateRate(s Stats, o Stats) Stats {
 
 func serviceStatus(config *Config, balancer Balancer, director *cue.Director, old map[Instance]Stats) (Summary, servicemap, map[Instance]Stats) {
 
-	var current uint64
+	var current uint32
 
 	stats := map[Instance]Stats{}
 	status := map[netip.Addr][]serv{}
