@@ -77,8 +77,9 @@ type ServiceDefinition struct {
 	Persist   uint32 `json:"persist"`         // used in IPVS version
 	Reset     bool   `json:"reset,omitempty"` // used in IPVS version
 
-	TunnelType string `json:"tunnel-type,omitempty"`
-	TunnelPort uint16 `json:"tunnel-port,omitempty"`
+	TunnelType            string `json:"tunnel-type,omitempty"`
+	TunnelPort            uint16 `json:"tunnel-port,omitempty"`
+	TunnelEncapNoChecksum bool   `json:"tunnel-no-checksum,omitempty"`
 }
 
 type services map[Service]ServiceDefinition

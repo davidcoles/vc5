@@ -27,6 +27,13 @@ import (
 	"vc5"
 )
 
+type Client = xvs.Client
+type ServiceExtended = xvs.ServiceExtended
+type DestinationExtended = xvs.DestinationExtended
+type Service = xvs.Service
+type Destination = xvs.Destination
+type Protocol = xvs.Protocol
+
 // Implement the vc5.Balancer interface; used to retrieve stats and configure the data-plane
 
 type Balancer struct {
@@ -137,10 +144,6 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 
 		service := Service{Address: s.Address, Port: s.Port, Protocol: Protocol(s.Protocol), Sticky: s.Sticky}
 
-		//if s.Sticky {
-		//	service.Flags |= xvs.Sticky
-		//}
-
 		var dsts []Destination
 
 		var tunnelType xvs.TunnelType = xvs.NONE
@@ -159,10 +162,11 @@ func (b *Balancer) Configure(manifests []vc5.Manifest) error {
 		for _, d := range s.Destinations {
 			if d.Port == s.Port {
 				dsts = append(dsts, Destination{
-					Address:    d.Address,
-					Disable:    d.HealthyWeight() == 0,
-					TunnelType: tunnelType,
-					TunnelPort: s.TunnelPort,
+					Address:               d.Address,
+					Disable:               d.HealthyWeight() == 0,
+					TunnelType:            tunnelType,
+					TunnelPort:            s.TunnelPort,
+					TunnelEncapNoChecksum: s.TunnelEncapNoChecksum,
 				})
 			}
 		}

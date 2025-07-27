@@ -6,7 +6,7 @@ toolchain go1.23.1
 
 require (
 	github.com/davidcoles/cue v0.1.4
-	github.com/davidcoles/xvs v0.2.6
+	github.com/davidcoles/xvs v0.2.8
 	vc5 v0.0.0
 )
 

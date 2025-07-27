@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -37,8 +38,8 @@ import (
 	"vc5"
 )
 
-type leveler struct {
-}
+type KV = map[string]any
+type leveler struct{}
 
 func (l *leveler) Level() slog.Level { return slog.LevelDebug }
 
@@ -75,25 +76,6 @@ func main() {
 	flag.Parse()
 
 	args := flag.Args()
-
-	/*
-		tunnel := xvs.NONE
-
-		switch *tunnelType {
-		case "none":
-			tunnel = xvs.NONE
-		case "ipip":
-			tunnel = xvs.IPIP
-		case "gre":
-			tunnel = xvs.GRE
-		case "fou":
-			tunnel = xvs.FOU
-		case "gue":
-			tunnel = xvs.GUE
-		default:
-			log.Fatal("Unsupported tunnel type: ", *tunnelType)
-		}
-	*/
 
 	addr := args[0]
 	file := args[1]
@@ -394,5 +376,14 @@ func services(binary string, closeidle bool, client Client, multicast string, lo
 	if multicast != "" {
 		go multicast_send(client, multicast)
 		go multicast_recv(client, multicast)
+	}
+}
+
+func ethtool(nics []string) {
+	for _, i := range nics {
+		exec.Command("ethtool", "-K", i, "rx", "off").Output()
+		exec.Command("ethtool", "-K", i, "tx", "off").Output()
+		exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
+		exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
 	}
 }

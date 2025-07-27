@@ -281,8 +281,9 @@ type Manifest struct {
 	//available    uint8
 	//Up           bool
 	//When         time.Time
-	TunnelType string
-	TunnelPort uint16
+	TunnelType            string
+	TunnelPort            uint16
+	TunnelEncapNoChecksum bool
 }
 
 func toManifest(s cue.Service, d ServiceDefinition) (m Manifest) {
@@ -301,6 +302,7 @@ func toManifest(s cue.Service, d ServiceDefinition) (m Manifest) {
 
 	m.TunnelType = d.TunnelType
 	m.TunnelPort = d.TunnelPort
+	m.TunnelEncapNoChecksum = d.TunnelEncapNoChecksum
 	return
 }
 
