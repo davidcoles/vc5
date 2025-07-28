@@ -1,12 +1,10 @@
 module main
 
-go 1.21
-
-toolchain go1.23.1
+go 1.19
 
 require (
 	github.com/davidcoles/cue v0.1.4
-	github.com/davidcoles/xvs v0.2.8
+	github.com/davidcoles/xvs v0.2.9
 	vc5 v0.0.0
 )
 

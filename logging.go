@@ -149,6 +149,16 @@ type sink struct {
 	elastic atomic.Uint64
 }
 
+func (s *sink) Debug(msg string, list ...any) {
+	m := map[string]any{"msg": msg}
+	for n := 0; n+1 < len(list); n += 2 {
+		if key, ok := list[n].(string); ok {
+			m[key] = list[n+1]
+		}
+	}
+	s.Event(DEBUG, "balancer", "debug", m)
+}
+
 func (s *sink) Sub(f string) *sub                                         { return &sub{parent: s, facility: f} }
 func (s *sink) sub(f string) *sub                                         { return &sub{parent: s, facility: f} }
 func (s *sink) Event(n uint8, f, a string, e map[string]any)              { s.event(n, f, a, e) }

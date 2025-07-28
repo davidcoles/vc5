@@ -24,7 +24,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -40,8 +39,6 @@ import (
 
 type KV = map[string]any
 type leveler struct{}
-
-func (l *leveler) Level() slog.Level { return slog.LevelDebug }
 
 func main() {
 
@@ -89,14 +86,6 @@ func main() {
 
 	if *hostid == "" {
 		*hostid = addr
-	}
-
-	//logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: &leveler{}}))
-	//logger := slog.Default()
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: &leveler{}}))
-
-	if !*test {
-		logger = nil
 	}
 
 	logs := vc5.NewLogger(*hostid, config.LoggingConfig())
@@ -166,8 +155,11 @@ func main() {
 		DriverMode:         *native,
 		FlowsPerCPU:        uint32(*flows),
 		InterfaceInitDelay: uint8(*delay),
-		Logger:             logger,
 		Bonding:            false,
+	}
+
+	if *test {
+		opts.Logger = logs
 	}
 
 	client, err := xvs.NewWithOptions(opts, nics...)
