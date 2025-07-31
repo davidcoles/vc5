@@ -150,6 +150,9 @@ type sink struct {
 }
 
 func (s *sink) Debug(msg string, list ...any) {
+	//if msg == "nat" {
+	//	fmt.Println(list)
+	//}
 	m := map[string]any{"msg": msg}
 	for n := 0; n+1 < len(list); n += 2 {
 		if key, ok := list[n].(string); ok {

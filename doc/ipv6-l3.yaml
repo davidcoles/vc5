@@ -1,0 +1,50 @@
+---
+# advertise VIPs to the local router
+bgp:
+  as_number: 65001
+  next_hop_6: fd6e:eec8:76ac:ac1d:100::10
+  peers:
+    - 10.1.10.254
+
+# describe the network topology, in this case listing the local router
+# as the gateway for routing encapsulated packets
+vlans:  
+  1: 10.1.10.254/24
+
+vlans6:
+  1: fd6e:eec8:76ac:ac1d:100::254/64
+
+services:
+
+  # a set of remote servers using IP-in-IP as the encapsualtion type
+  - name: foo
+    virtual:
+      - 192.168.101.1
+    tunnel-type: ipip
+    servers:
+      - 10.10.10.100
+      - 10.20.20.100
+      - 10.30.30.100
+      - 10.40.40.100
+    host: foo.example.net
+    path: /loadbalancer.htm
+    policy:
+      http: 
+
+  # One IPv4 and one IPv6 VIP, both served by IPv4 and IPv6
+  # backends. As they are on the same VLAN as the load balancer no
+  # encapsulation is required, but in this case I have chosen to use
+  # GRE tunneling anyway just for the lulz.
+  - name: bar
+    virtual:
+      - 192.168.101.2
+      - fd6e:eec8:76ac:1337::2
+    tunnel-type: gre
+    servers:
+      - 10.1.10.20
+      - fd6e:eec8:76ac:ac1d:100::20
+    host: bar.example.net
+    path: /alive
+    policy:
+      http:
+    

@@ -18,7 +18,7 @@ questions/suggestions, feel free to contact me at vc5lb@proton.me or
 raise a GitHub issue.
 
 **Now supports IPv6 and distribution at layer 3 (AKA
-tunnelling)!**. The XVS library has been updated to include these
+tunnelling)**! The XVS library has been updated to include these
 features, and also does away with the need to run health checks from
 a network namespace, considerably simplifying the code. This will end
 the requirement that all backends share a VLAN with the load balancer.
@@ -34,6 +34,10 @@ reason for starting the project was because of the lack of layer 2
 support by [Facebook's
 Katran](https://github.com/facebookincubator/katran) load
 balancer.
+
+A [sample IPv6/L3 configuration file](docs/ipv6-l3.yaml) is included -
+better documentation to follow.
+
 
 ## About
 
