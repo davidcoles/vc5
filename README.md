@@ -35,7 +35,7 @@ support by [Facebook's
 Katran](https://github.com/facebookincubator/katran) load
 balancer.
 
-A [sample IPv6/L3 configuration file](docs/ipv6-l3.yaml) is included -
+A [sample IPv6/L3 configuration file](doc/ipv6-l3.yaml) is included -
 better documentation to follow.
 
 
