@@ -30,6 +30,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -41,6 +43,8 @@ type KV = map[string]any
 type leveler struct{}
 
 func main() {
+
+	var uid, gid int
 
 	const FACILITY = "vc5"
 
@@ -60,6 +64,7 @@ func main() {
 	hardfail := flag.Bool("H", false, "Hard fail on balancer configuration error")
 	closeidle := flag.Bool("c", false, "Close idle HTTP connections")
 	hostid := flag.String("I", "", "Host ID for logging")
+	user := flag.String("user", "", "Username to switch to (drop root privileges)")
 
 	flag.Bool("toobig", false, "dummy")
 
@@ -77,6 +82,10 @@ func main() {
 	addr := args[0]
 	file := args[1]
 	nics := args[2:]
+
+	if *user != "" {
+		uid, gid = lookupUser(*user)
+	}
 
 	config, err := vc5.Load(file)
 
@@ -182,6 +191,10 @@ func main() {
 			time.Sleep(time.Minute * time.Duration(*timeout))
 			log.Fatal("timeout")
 		}()
+	}
+
+	if uid != 0 || gid != 0 {
+		dropPrivileges(uid, gid)
 	}
 
 	// Short delay to let interfaces quiesce after loading XDP
@@ -378,4 +391,43 @@ func ethtool(nics []string) {
 		exec.Command("ethtool", "-K", i, "rxvlan", "off").Output()
 		exec.Command("ethtool", "-K", i, "txvlan", "off").Output()
 	}
+}
+
+func dropPrivileges(uid, gid int) {
+
+	if gid != 0 {
+
+		if err := syscall.Setgroups([]int{}); err != nil {
+			log.Fatal(err)
+		}
+
+		if err := syscall.Setgid(gid); err != nil {
+			log.Fatal(err)
+		}
+
+	}
+
+	if err := syscall.Setuid(uid); err != nil {
+		log.Fatal(err)
+	}
+
+}
+
+func lookupUser(username string) (uid, gid int) {
+
+	user, err := user.Lookup(username)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if gid, err = strconv.Atoi(user.Gid); err != nil {
+		log.Fatal(err)
+	}
+
+	if uid, err = strconv.Atoi(user.Uid); err != nil {
+		log.Fatal(err)
+	}
+
+	return
 }
