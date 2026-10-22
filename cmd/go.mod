@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/davidcoles/cue v0.1.4
-	github.com/davidcoles/xvs v0.2.11
+	github.com/davidcoles/xvs v0.2.13
 	vc5 v0.0.0
 )
 
